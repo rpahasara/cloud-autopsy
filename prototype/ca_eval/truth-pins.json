@@ -1,0 +1,9 @@
+{
+  "pin_version": "0.1",
+  "pinned_at": "ca-scenario-001: 2026-11-01 before engine implementation; cx-*: 2026-11-01 before the PR #13 engine changes (see docs/spikes/CA-SPIKE-001.md)",
+  "truth": {
+    "ca-scenario-001": {"path": "truth/ca-scenario-001/ground-truth.json", "sha256": "d84051c6bfbc619d46efd4819ec1c31b13ce71e8883b69f656a0b600deffebe6"},
+    "cx-deploy-cause": {"path": "truth/cx-deploy-cause/ground-truth.json", "sha256": "3d781fbe639c88e75a6f461e8d1626d078eca20745e38a7ebba7960819079dd8"},
+    "cx-benign": {"path": "truth/cx-benign/ground-truth.json", "sha256": "b571fbaf98c698374c05296c461aa7d00b5c4270cc076859cf05ca73c24bc50c"}
+  }
+}

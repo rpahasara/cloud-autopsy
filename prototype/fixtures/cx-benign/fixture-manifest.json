@@ -1,0 +1,10 @@
+{
+  "fixture_id": "cx-benign",
+  "fixture_version": "0.1.0-spike",
+  "digest_algorithm": "sha256",
+  "files": {
+    "observations.json": "a1157fda9335cb3b09f1218a9c5f6e9d4a6a4b6915b17a42503cdf179cafc1d3",
+    "source-plan.json": "34d4e75d41da0fb618b699c8401a37315b313afba0973d58103f6f8167d42934",
+    "variants/A.json": "19163c200aca3ac05375d6316d7d5c6aa6c0d1ab8ed06851c9140b98555c7482"
+  }
+}

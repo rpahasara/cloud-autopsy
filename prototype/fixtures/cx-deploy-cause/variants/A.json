@@ -1,0 +1,8 @@
+{
+  "variant": "A",
+  "description": "Single variant",
+  "synthesis": {
+    "mode": "disabled"
+  },
+  "ops": []
+}

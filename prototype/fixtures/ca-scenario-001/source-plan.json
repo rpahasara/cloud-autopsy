@@ -1,0 +1,82 @@
+{
+  "plan_id": "ca-synthetic-plan-v1",
+  "plan_version": "0.1.0-spike",
+  "namespace": "ca-demo",
+  "incident_window": {
+    "start": "2026-10-15T08:00:00Z",
+    "end": "2026-10-15T08:20:00Z"
+  },
+  "expected_acquisitions": [
+    {
+      "query_id": "k8s.configmap-checkpoints",
+      "source_id": "k8s-api",
+      "evidence_class": "K8S-CONFIG",
+      "mandatory_for": [
+        "config_value_change"
+      ]
+    },
+    {
+      "query_id": "k8s.deployments",
+      "source_id": "k8s-api",
+      "evidence_class": "K8S-DEPLOY",
+      "mandatory_for": [
+        "deployment_rollout"
+      ]
+    },
+    {
+      "query_id": "k8s.replicasets",
+      "source_id": "k8s-api",
+      "evidence_class": "K8S-DEPLOY",
+      "mandatory_for": [
+        "deployment_rollout"
+      ]
+    },
+    {
+      "query_id": "k8s.pods",
+      "source_id": "k8s-api",
+      "evidence_class": "K8S-POD",
+      "mandatory_for": [
+        "config_value_change",
+        "deployment_rollout"
+      ]
+    },
+    {
+      "query_id": "loki.checkout-api",
+      "source_id": "loki",
+      "evidence_class": "LOG",
+      "mandatory_for": [
+        "config_value_change",
+        "deployment_rollout"
+      ]
+    },
+    {
+      "query_id": "prom.checkout-api",
+      "source_id": "prometheus",
+      "evidence_class": "METRIC",
+      "mandatory_for": []
+    },
+    {
+      "query_id": "prom.alerts",
+      "source_id": "prometheus",
+      "evidence_class": "ALERT",
+      "mandatory_for": []
+    }
+  ],
+  "symptom": {
+    "alert_rule": "CheckoutHighErrorRate",
+    "error_ratio_series": "checkout_api:error_ratio",
+    "error_ratio_threshold": "0.05"
+  },
+  "candidate_scope": {
+    "workload": {
+      "kind": "Deployment",
+      "namespace": "ca-demo",
+      "name": "checkout-api"
+    }
+  },
+  "limits": {
+    "max_input_bytes": 262144000,
+    "max_observations": 100000,
+    "max_string_chars": 8192
+  }
+}

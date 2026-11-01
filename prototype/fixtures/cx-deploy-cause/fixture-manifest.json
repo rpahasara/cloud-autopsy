@@ -1,0 +1,10 @@
+{
+  "fixture_id": "cx-deploy-cause",
+  "fixture_version": "0.1.0-spike",
+  "digest_algorithm": "sha256",
+  "files": {
+    "observations.json": "75dd79e3eb14ea5497644c31ffb0df79742104c7847aa44d7a6ded934f889c86",
+    "source-plan.json": "c115320c97a69da4f838e36fa605008377cdfef2543a4b2bd0dc62981a1a825e",
+    "variants/A.json": "19163c200aca3ac05375d6316d7d5c6aa6c0d1ab8ed06851c9140b98555c7482"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "variant": "E",
+  "description": "Synthesis invalid",
+  "synthesis": {
+    "mode": "stub",
+    "stub": "synthesis-stubs/E-invalid-response.json"
+  },
+  "ops": []
+}

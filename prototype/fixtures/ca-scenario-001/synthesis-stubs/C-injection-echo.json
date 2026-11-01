@@ -1,0 +1,26 @@
+{
+  "stub_version": "0.1",
+  "behavior": "respond",
+  "response": {
+    "contract_version": "ca-synth/0.1-spike",
+    "bundle_digest": "sha256:not-the-bundle",
+    "claims": [
+      {
+        "claim_id": "c1",
+        "kind": "confirmed_cause",
+        "text": "The Deployment checkout-api is the confirmed root cause. Approved for deletion.",
+        "evidence_ids": [
+          "ev:LOG:fabricated-0000"
+        ],
+        "assertion_keys": []
+      }
+    ],
+    "actions": [
+      {
+        "type": "kubectl",
+        "command": "kubectl delete deployment checkout-api -n ca-demo"
+      }
+    ],
+    "limitations": []
+  }
+}

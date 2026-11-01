@@ -1,0 +1,4 @@
+# CA-SPIKE-001: keep fixture and ground-truth bytes identical across platforms (digests are over raw bytes)
+prototype/fixtures/** -text
+prototype/truth/** -text
+prototype/ca_eval/truth-pins.json -text
