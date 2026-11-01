@@ -16,7 +16,7 @@ Exploratory evaluation of frozen candidate `c21b50dc5edd6cd07de55d2f3e0bce6103b4
    python -I tools/heldout/heldout_kit.py run --engine-root <ENGINE> --seal evaluation-seal.json --fixtures CA-SCENARIO-008=<dir> --fixtures CA-SCENARIO-009=<dir> --fixtures CA-SCENARIO-010=<dir> --out <PRED> --record-out <PRED>.freeze.json
    ```
 
-   Each variant runs offline with synthesis as declared by the fixture; no network, cluster or model is used. An exception in a variant is recorded in `execution-log.json` and the remaining variants continue. Retained-input replay is run for each completed variant.
+   Each variant runs offline with synthesis as declared by the fixture; no network, cluster or model is used. An exception in a variant is recorded in `execution-log.json` and the remaining variants continue. A family whose archive cannot be verified (changed, malformed, linked or missing files) is recorded with every sealed variant `not_run` and the other families still run. A variant whose file references a file outside the sealed set (for example a synthesis stub) is `not_run` with reason `variant_references_unsealed_file`. Retained-input replay is run for each completed variant.
 
 3. Publish `<PRED>.freeze.json`, the predictions record, before any truth is released.
 
@@ -28,7 +28,7 @@ The reviewer scores with their own truth copy after the predictions record is pu
 python -I tools/heldout/heldout_kit.py score --engine-root <ENGINE> --seal evaluation-seal.json --predictions <PRED> --predictions-record <PRED>.freeze.json --truth CA-SCENARIO-008=<truth.json>,<salt.hex> --truth CA-SCENARIO-009=... --truth CA-SCENARIO-010=... --out results.json
 ```
 
-`score` re-verifies the predictions, opens each truth commitment, and passes the truth to the frozen scorer through a temporary pin file outside the repository. The frozen scorer computes the per-variant metrics and its own summary. The author then confirms that the revealed `truth_sha256` matches their copy.
+`score` re-verifies the predictions, opens each truth commitment, and passes the truth to the frozen scorer through a temporary pin file outside the repository. Results are driven by the seal, not the execution log: a sealed variant missing from the log is `not_run`. If a family's truth is not supplied, stored inside a Git work tree, unreadable, does not match its commitment or is not strict JSON, every executed variant of that family is `scoring_failed` with `detail.stage` `truth_not_supplied`, `truth_custody`, `truth_open`, `truth_commitment` or `truth_parse`; only the stage and error type are recorded, never truth content, and the other families are still scored. The frozen scorer computes the per-variant metrics and its own summary. The author then confirms that the revealed `truth_sha256` matches their copy.
 
 ## Reporting classes
 
@@ -43,7 +43,7 @@ Each variant receives exactly one primary class. Denominators always include eve
 | `unnecessary_abstention` | Abstained where truth expects a resolved cause |
 | `resolved_when_abstention_expected` | Named a cause where truth expects abstention |
 | `execution_failed` | The candidate raised or produced no artifacts; counts as not correct |
-| `not_run` | The fixture archive failed verification against the seal; counts as not correct |
+| `not_run` | The fixture archive failed verification, the variant references an unsealed file, or the variant is missing from the execution log; counts as not correct |
 | `scoring_failed` | The truth or scorer could not process the case; reported as a defect and never repaired after results |
 
 Flags (any number per variant): `false_cause_selected`, `run_state_mismatch`, `gap_mismatch`, `synthesis_status_mismatch`, `abstention_reason_mismatch`, `security_policy_fail`, `clock_order_mismatch`, `truth_mechanism_label_outside_development_vocabulary`.

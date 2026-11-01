@@ -19,6 +19,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import secrets
 import subprocess
 import sys
@@ -27,7 +28,7 @@ import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 
-KIT_VERSION = "ca-heldout-kit/0.1"
+KIT_VERSION = "ca-heldout-kit/0.2"
 COMMIT_SCHEME = "sha256(b'ca-heldout-truth-commit/0.1\\x00' + salt32 + truth_bytes)"
 COMMIT_PREFIX = b"ca-heldout-truth-commit/0.1\x00"
 PLACEHOLDER = b"<<FILL"
@@ -37,6 +38,15 @@ ROLES = ("fixtures", "metadata", "predictions")
 # Outcome labels used by the pinned development truth files. A held-out truth label outside this
 # set can still be scored, but no run of the frozen candidate can be credited with it.
 DEVELOPMENT_MECHANISM_LABELS = ("config_value_change", "deployment_rollout")
+# Scenario, fixture and variant IDs become path components: allow a conservative alphabet only.
+SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
+CANDIDATE_RE = re.compile(r"[0-9a-f]{40}")
+# Public eval-metadata.json schema: every field required, nothing else allowed (no answers).
+METADATA_FIELDS = {"metadata_version": str, "scenario_id": str, "fixture_id": str, "coverage_category": str,
+                   "split": str, "candidate_commit": str, "variants": list, "source_allowlist": list,
+                   "author": dict, "reviewer": dict, "prepublication_review": dict, "notes": str}
+PERSON_FIELDS = ("name", "affiliation", "attestation")
+REVIEW_FIELDS = ("name", "attestation")
 
 
 class KitError(Exception):
@@ -204,14 +214,96 @@ def commit_truth(truth_file, salt_out):
             "created_utc": _now()}
 
 
-def open_truth(truth_file, salt_file, commitment):
-    data = Path(truth_file).read_bytes()
+def _read_salt(salt_file):
     salt = bytes.fromhex(Path(salt_file).read_text(encoding="ascii").strip())
     if len(salt) != 32:
         raise KitError("salt must be 32 bytes")
-    if _sha256(COMMIT_PREFIX + salt + data) != commitment:
+    return salt
+
+
+def _matches_commitment(data, salt, commitment):
+    return _sha256(COMMIT_PREFIX + salt + data) == commitment
+
+
+def open_truth(truth_file, salt_file, commitment):
+    data = Path(truth_file).read_bytes()
+    if not _matches_commitment(data, _read_salt(salt_file), commitment):
         raise KitError("ground truth or salt does not match the sealed commitment")
     return data
+
+
+def safe_id(value, what):
+    if not isinstance(value, str) or not SAFE_ID.fullmatch(value):
+        raise KitError(f"unsafe {what} {value!r}: must match {SAFE_ID.pattern}")
+    return value
+
+
+def _variant_ids(variants, where):
+    if type(variants) is not list or not variants:
+        raise KitError(f"{where}: variants must be a non-empty list")
+    for v in variants:
+        safe_id(v, f"{where} variant ID")
+    if len(set(variants)) != len(variants):
+        raise KitError(f"{where}: duplicate variant IDs")
+    return variants
+
+
+def _fields(doc, names, where):
+    if type(doc) is not dict:
+        raise KitError(f"{where}: must be an object")
+    extra, missing = sorted(set(doc) - set(names)), sorted(set(names) - set(doc))
+    if extra:
+        raise KitError(f"{where}: unexpected field(s) {extra}")
+    if missing:
+        raise KitError(f"{where}: missing field(s) {missing}")
+
+
+def check_metadata(doc, scenario_id, candidate):
+    """Validate public eval-metadata.json against its explicit schema (no answer fields)."""
+    _fields(doc, METADATA_FIELDS, "eval-metadata")
+    for name, kind in METADATA_FIELDS.items():
+        if type(doc[name]) is not kind:
+            raise KitError(f"eval-metadata: {name} must be a {kind.__name__}")
+    if doc["metadata_version"] != "ca-heldout-meta/0.1" or doc["split"] != "held_out":
+        raise KitError("eval-metadata: metadata_version must be ca-heldout-meta/0.1 and split held_out")
+    if doc["scenario_id"] != scenario_id or doc["candidate_commit"] != candidate:
+        raise KitError("eval-metadata: scenario_id/candidate_commit disagree with the seal")
+    safe_id(doc["fixture_id"], "fixture_id")
+    _variant_ids(doc["variants"], "eval-metadata")
+    if not all(isinstance(s, str) for s in doc["source_allowlist"]):
+        raise KitError("eval-metadata: source_allowlist must list strings")
+    for role, names in (("author", PERSON_FIELDS), ("reviewer", PERSON_FIELDS),
+                        ("prepublication_review", REVIEW_FIELDS)):
+        _fields(doc[role], names, f"eval-metadata {role}")
+        if not all(isinstance(doc[role][n], str) and doc[role][n] for n in names):
+            raise KitError(f"eval-metadata {role}: every field must be a non-empty string")
+    return doc
+
+
+def validate_seal(doc):
+    """Check every seal field that later becomes a path, before any filesystem use."""
+    if not isinstance(doc.get("candidate_commit"), str) or not CANDIDATE_RE.fullmatch(doc["candidate_commit"]):
+        raise KitError("seal: candidate_commit must be a full lowercase commit SHA")
+    families = doc.get("families")
+    if type(families) is not list or not families:
+        raise KitError("seal: families must be a non-empty list")
+    seen = set()
+    for fam in families:
+        sid = safe_id(fam.get("scenario_id"), "scenario_id")
+        if sid in seen:
+            raise KitError(f"seal: duplicate scenario_id {sid}")
+        seen.add(sid)
+        safe_id(fam.get("fixture_id"), "fixture_id")
+        sealed = {f["path"] for f in fam["fixtures_record"]["files"]}
+        for v in _variant_ids(fam.get("variants"), sid):
+            if f"variants/{v}.json" not in sealed:
+                raise KitError(f"{sid}: variant {v} has no sealed fixture file variants/{v}.json")
+    return doc
+
+
+def _inside(child, parent):
+    child, parent = Path(child).resolve(), Path(parent).resolve()
+    return child == parent or parent in child.parents
 
 
 def seal(seal_dir, candidate, author, reviewer):
@@ -234,16 +326,19 @@ def seal(seal_dir, candidate, author, reviewer):
         problems = verify(metadata, family / "metadata")
         if problems:
             raise KitError(f"{family}: metadata does not match its freeze record: {problems}")
-        if meta_doc.get("scenario_id") != family.name or meta_doc.get("candidate_commit") != candidate:
-            raise KitError(f"{family}: eval-metadata scenario_id/candidate_commit disagree with the seal")
+        if [f["path"] for f in metadata["files"]] != ["eval-metadata.json"]:
+            raise KitError(f"{family}: public metadata directory must contain only eval-metadata.json")
+        check_metadata(meta_doc, safe_id(family.name, "scenario_id"), candidate)
         families.append({"scenario_id": family.name, "fixture_id": meta_doc["fixture_id"],
                          "variants": meta_doc["variants"], "fixtures_record": fixtures,
                          "metadata_record": metadata, "truth_commitment": commitment["truth_commitment"],
-                         "commit_scheme": commitment["scheme"]})
+                         "commit_scheme": commitment["scheme"],
+                         "prepublication_review": meta_doc["prepublication_review"]})
     if not families:
         raise KitError(f"{seal_dir}: no family directories")
-    body = {"seal_version": "ca-heldout-seal/0.1", "kit_version": KIT_VERSION, "candidate_commit": candidate,
+    body = {"seal_version": "ca-heldout-seal/0.2", "kit_version": KIT_VERSION, "candidate_commit": candidate,
             "author": author, "reviewer": reviewer, "families": families}
+    validate_seal(body)
     return dict(body, seal_sha256=_sha256(_canonical(body)), sealed_utc=_now())
 
 
@@ -252,7 +347,7 @@ def load_seal(path):
     body = {k: v for k, v in doc.items() if k not in ("seal_sha256", "sealed_utc")}
     if _sha256(_canonical(body)) != doc.get("seal_sha256"):
         raise KitError("evaluation-seal.json does not match its own digest")
-    return doc
+    return validate_seal(doc)
 
 
 def check_engine_checkout(engine_root, candidate):
@@ -285,11 +380,32 @@ def _error(exc):
             "traceback_tail": traceback.format_exc().splitlines()[-3:]}
 
 
-def run(engine_root, seal_doc, fixture_dirs, out_dir, git_check=True):
+def _sealed_reference_problem(fixture_dir, variant, sealed_paths):
+    """Return a not_run reason when a sealed variant file references a file outside the sealed set."""
+    try:
+        doc = strict_json((Path(fixture_dir) / "variants" / f"{variant}.json").read_bytes(), variant)
+        stub = (doc.get("synthesis") or {}).get("stub") if type(doc) is dict else None
+    except (KitError, OSError, AttributeError):
+        return "variant_file_unreadable"
+    if stub is not None and stub not in sealed_paths:
+        return "variant_references_unsealed_file"
+    return None
+
+
+def run(engine_root, seal_doc, fixture_dirs, out_dir, git_check=True, record_out=None):
     """Execute every sealed family/variant; record failures instead of stopping; freeze predictions."""
+    validate_seal(seal_doc)
+    out_dir = Path(out_dir)
+    if record_out is not None:
+        if Path(record_out).exists():
+            raise KitError(f"{record_out}: already exists; the kit never overwrites records")
+        if _inside(record_out, out_dir):
+            raise KitError("the predictions record must not be inside the predictions directory")
+    for label, root in [("engine checkout", engine_root)] + [(f"fixtures {k}", v) for k, v in fixture_dirs.items()]:
+        if _inside(out_dir, root):
+            raise KitError(f"the predictions directory must not be inside the {label}")
     if git_check:
         check_engine_checkout(engine_root, seal_doc["candidate_commit"])
-    out_dir = Path(out_dir)
     if out_dir.exists() and any(out_dir.iterdir()):
         raise KitError(f"{out_dir}: must be new or empty (the kit never deletes)")
     engine = _import_engine(engine_root)
@@ -301,16 +417,26 @@ def run(engine_root, seal_doc, fixture_dirs, out_dir, git_check=True):
         entry = {"scenario_id": fam["scenario_id"], "fixture_id": fam["fixture_id"], "variants": []}
         log["families"].append(entry)
         fixture_dir = fixture_dirs.get(fam["scenario_id"])
-        problems = ["fixture_directory_not_supplied"] if fixture_dir is None else verify(fam["fixtures_record"],
-                                                                                        fixture_dir)
+        try:
+            problems = (["fixture_directory_not_supplied"] if fixture_dir is None
+                        else verify(fam["fixtures_record"], fixture_dir))
+        except (KitError, OSError) as exc:  # damaged archive: record not_run, keep going
+            problems = [f"verification_error:{type(exc).__name__}:{str(exc)[:300]}"]
         if problems:
             entry["fixture_integrity"] = {"status": "failed", "problems": problems}
             entry["variants"] = [{"variant": v, "execution": "not_run", "reason": "fixture_integrity_failed"}
                                  for v in fam["variants"]]
             continue
         entry["fixture_integrity"] = {"status": "verified"}
+        sealed_paths = {f["path"] for f in fam["fixtures_record"]["files"]}
         for variant in fam["variants"]:
             run_dir = out_dir / fam["scenario_id"] / variant
+            if not _inside(run_dir, out_dir):
+                raise KitError(f"output path for {variant} escapes the predictions directory")
+            reason = _sealed_reference_problem(fixture_dir, variant, sealed_paths)
+            if reason:
+                entry["variants"].append({"variant": variant, "execution": "not_run", "reason": reason})
+                continue
             result = {"variant": variant}
             try:
                 scenario = engine["load_scenario"](Path(fixture_dir), variant)
@@ -327,9 +453,12 @@ def run(engine_root, seal_doc, fixture_dirs, out_dir, git_check=True):
                     result["replay_error"] = _error(exc)
             entry["variants"].append(result)
     log["finished_utc"] = _now()
-    (out_dir / "execution-log.json").parent.mkdir(parents=True, exist_ok=True)
-    (out_dir / "execution-log.json").write_bytes((json.dumps(log, indent=1, sort_keys=True) + "\n").encode())
-    return log, freeze_predictions(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    _write_json(out_dir / "execution-log.json", log)
+    record = freeze_predictions(out_dir)
+    if record_out is not None:
+        _write_json(record_out, record)
+    return log, record
 
 
 def freeze_predictions(out_dir):
@@ -372,8 +501,46 @@ def classify(report, truth, variant_truth):
     return {"primary": primary, "flags": flags}
 
 
-def score(engine_root, seal_doc, predictions_dir, predictions_record, truth_sources, git_check=True):
-    """Verify frozen predictions, then open each truth and score with the frozen scorer."""
+def _not_completed_row(v):
+    return {"variant": v["variant"], "execution": v["execution"],
+            "classification": {"primary": "execution_failed" if v["execution"] == "failed" else "not_run",
+                               "flags": []},
+            "detail": {k: v[k] for k in ("error_type", "error", "reason") if k in v}}
+
+
+def _open_family_truth(fam, truth_sources):
+    """Return (truth bytes, truth file, failure). Failures carry a stage and type only, never content."""
+    stage = "truth_not_supplied"
+    try:
+        truth_file, salt_file = truth_sources[fam["scenario_id"]]
+        stage = "truth_custody"
+        require_outside_git(truth_file, "ground truth")
+        require_outside_git(salt_file, "the truth salt")
+        stage = "truth_open"
+        data, salt = Path(truth_file).read_bytes(), _read_salt(salt_file)
+        stage = "truth_commitment"
+        if not _matches_commitment(data, salt, fam["truth_commitment"]):
+            raise KitError("commitment mismatch")
+        stage = "truth_parse"
+        strict_json(data, "ground truth")
+        return data, truth_file, None
+    except Exception as exc:
+        return None, None, {"stage": stage, "error_type": type(exc).__name__}
+
+
+def score(engine_root, seal_doc, predictions_dir, predictions_record, truth_sources, git_check=True,
+          results_out=None):
+    """Verify frozen predictions, then open each truth and score with the frozen scorer.
+
+    Every sealed variant gets a row: a missing log entry is ``not_run`` and a truth custody, open,
+    commitment or parse failure makes that family's executed variants ``scoring_failed``.
+    """
+    validate_seal(seal_doc)
+    if results_out is not None:
+        if Path(results_out).exists():
+            raise KitError(f"{results_out}: already exists; the kit never overwrites records")
+        if _inside(results_out, predictions_dir):
+            raise KitError("the results file must not be inside the predictions directory")
     if git_check:
         check_engine_checkout(engine_root, seal_doc["candidate_commit"])
     problems = verify(predictions_record, predictions_dir)
@@ -383,31 +550,39 @@ def score(engine_root, seal_doc, predictions_dir, predictions_record, truth_sour
     log = strict_json((Path(predictions_dir) / "execution-log.json").read_bytes(), "execution-log.json")
     if log["seal_sha256"] != seal_doc["seal_sha256"]:
         raise KitError("predictions were produced under a different seal")
-    results = {"results_version": "ca-heldout-results/0.1", "kit_version": KIT_VERSION,
+    logged = {f.get("scenario_id"): f for f in log.get("families", [])}
+    results = {"results_version": "ca-heldout-results/0.2", "kit_version": KIT_VERSION,
                "candidate_commit": seal_doc["candidate_commit"], "seal_sha256": seal_doc["seal_sha256"],
                "predictions_aggregate_sha256": predictions_record["aggregate_sha256"],
                "engine_version": log["engine_version"], "scorer_version": engine["scorer_version"],
                "git_check": "passed" if git_check else "skipped", "scored_utc": _now(),
                "status": "exploratory; not approval of any SSDLC gate", "families": []}
     with tempfile.TemporaryDirectory() as tmp:
-        for fam, fam_log in zip(seal_doc["families"], log["families"]):
+        for fam in seal_doc["families"]:
+            fam_log = logged.get(fam["scenario_id"], {})
+            log_rows = {v.get("variant"): v for v in fam_log.get("variants", [])}
+            rows = [log_rows.get(v, {"variant": v, "execution": "not_run", "reason": "missing_from_execution_log"})
+                    for v in fam["variants"]]
             entry = {"scenario_id": fam["scenario_id"], "fixture_id": fam["fixture_id"],
-                     "fixture_integrity": fam_log["fixture_integrity"]["status"], "variants": []}
+                     "fixture_integrity": fam_log.get("fixture_integrity", {}).get("status", "missing_from_log"),
+                     "variants": []}
             results["families"].append(entry)
-            truth_file, salt_file = truth_sources[fam["scenario_id"]]
-            data = open_truth(truth_file, salt_file, fam["truth_commitment"])
-            entry["truth_sha256"] = _sha256(data)
-            truth_doc = strict_json(data, "ground truth")
-            pins = Path(tmp) / f"{fam['scenario_id']}-pins.json"
-            pins.write_text(json.dumps({"truth": {fam["fixture_id"]: {"path": str(Path(truth_file).resolve()),
-                                                                     "sha256": entry["truth_sha256"]}}}))
+            data, truth_file, failure = _open_family_truth(fam, truth_sources)
+            if failure is None:
+                entry["truth_sha256"] = _sha256(data)
+                pins = Path(tmp) / f"{fam['scenario_id']}-pins.json"
+                pins.write_text(json.dumps({"truth": {fam["fixture_id"]: {
+                    "path": str(Path(truth_file).resolve()), "sha256": entry["truth_sha256"]}}}))
+            else:
+                entry["truth_failure"] = failure
             scored = []
-            for v in fam_log["variants"]:
-                row = {"variant": v["variant"], "execution": v["execution"]}
+            for v in rows:
                 if v["execution"] != "completed":
-                    row.update(classification={"primary": "execution_failed" if v["execution"] == "failed"
-                                               else "not_run", "flags": []},
-                               detail={k: v[k] for k in ("error_type", "error", "reason") if k in v})
+                    entry["variants"].append(_not_completed_row(v))
+                    continue
+                row = {"variant": v["variant"], "execution": v["execution"]}
+                if failure is not None:
+                    row.update(classification={"primary": "scoring_failed", "flags": []}, detail=failure)
                 else:
                     try:
                         truth, digest = engine["load_truth"](Path(engine_root) / "prototype", fam["fixture_id"],
@@ -418,7 +593,8 @@ def score(engine_root, seal_doc, predictions_dir, predictions_record, truth_sour
                                    classification=classify(report, truth, truth["variants"][v["variant"]]))
                         scored.append(report)
                     except Exception as exc:  # truth or scorer defect: report, never silently fix
-                        row.update(classification={"primary": "scoring_failed", "flags": []}, detail=_error(exc))
+                        row.update(classification={"primary": "scoring_failed", "flags": []},
+                                   detail=dict(_error(exc), stage="scoring"))
                 entry["variants"].append(row)
             entry["scorer_summary_of_scored_variants"] = engine["summarize"](scored) if scored else None
     tally = {}
@@ -427,14 +603,18 @@ def score(engine_root, seal_doc, predictions_dir, predictions_record, truth_sour
             tally[row["classification"]["primary"]] = tally.get(row["classification"]["primary"], 0) + 1
     results["classification_counts"] = dict(sorted(tally.items()))
     results["variants_total"] = sum(tally.values())
+    if results_out is not None:
+        _write_json(results_out, results)
     return results
 
 
 def _write_json(path, doc):
     path = Path(path)
-    if path.exists():
-        raise KitError(f"{path}: already exists; the kit never overwrites records")
-    path.write_bytes((json.dumps(doc, indent=1, sort_keys=True) + "\n").encode("utf-8"))
+    try:
+        with open(path, "xb") as fh:  # exclusive create: never overwrite a record
+            fh.write((json.dumps(doc, indent=1, sort_keys=True) + "\n").encode("utf-8"))
+    except FileExistsError:
+        raise KitError(f"{path}: already exists; the kit never overwrites records") from None
 
 
 def _pairs(values, label):
@@ -499,15 +679,20 @@ def main(argv=None):
             _write_json(a.out, doc)
             print(f"sealed {len(doc['families'])} families: {doc['seal_sha256']}")
         elif a.cmd == "run":
-            log, record = run(a.engine_root, load_seal(a.seal), _pairs(a.fixtures, "--fixtures"), a.out)
-            _write_json(a.record_out, record)
+            log, record = run(a.engine_root, load_seal(a.seal), _pairs(a.fixtures, "--fixtures"), a.out,
+                              record_out=a.record_out)
             failed = sum(v["execution"] != "completed" for f in log["families"] for v in f["variants"])
             print(f"predictions frozen: {record['aggregate_sha256']} ({failed} variant(s) not completed)")
         elif a.cmd == "score":
-            truth = {k: tuple(v.split(",", 1)) for k, v in _pairs(a.truth, "--truth").items()}
+            truth = {}
+            for k, v in _pairs(a.truth, "--truth").items():
+                truth_file, sep, salt_file = v.partition(",")
+                if not sep:
+                    raise KitError(f"--truth {k}: expected TRUTH_FILE,SALT_FILE")
+                truth[k] = (truth_file, salt_file)
             results = score(a.engine_root, load_seal(a.seal), a.predictions,
-                            strict_json(Path(a.predictions_record).read_bytes(), a.predictions_record), truth)
-            _write_json(a.out, results)
+                            strict_json(Path(a.predictions_record).read_bytes(), a.predictions_record), truth,
+                            results_out=a.out)
             print(f"scored {results['variants_total']} variants: {results['classification_counts']}")
     except KitError as exc:
         print(f"error: {exc}", file=sys.stderr)

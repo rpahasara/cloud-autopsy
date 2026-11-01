@@ -21,5 +21,9 @@
     "affiliation": "<<FILL: affiliation>>",
     "attestation": "<<FILL: I reviewed fixtures and truth for consistency and hold a separate truth copy>>"
   },
+  "prepublication_review": {
+    "name": "<<FILL: person (not the author) who checked this public file for answers or hints>>",
+    "attestation": "<<FILL: I reviewed every field of this public metadata, including notes, and it discloses no expected answers or hints>>"
+  },
   "notes": "<<FILL: public notes only; never expected answers>>"
 }

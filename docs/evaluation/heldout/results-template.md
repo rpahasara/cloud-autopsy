@@ -8,7 +8,7 @@ Copy this template for each scored run. Fill every field from `results.json` and
 |---|---|
 | Candidate commit | `c21b50dc5edd6cd07de55d2f3e0bce6103b4d952` |
 | Engine / scorer versions | `<<FILL>>` / `<<FILL>>` |
-| Kit commit and version | `<<FILL>>` / `ca-heldout-kit/0.1` |
+| Kit commit and version | `<<FILL>>` / `ca-heldout-kit/0.2` |
 | Seal digest and publication reference | `<<FILL>>` |
 | Predictions aggregate and publication reference | `<<FILL>>` |
 | Truth SHA-256 per family (revealed at scoring) | `<<FILL>>` |

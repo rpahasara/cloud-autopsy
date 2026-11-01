@@ -116,14 +116,21 @@ class EndToEndToolingTests(KitTestCase):
         super().setUp()
         self.fixtures = self.tmp / "fixtures" / "DEV-SMOKE"
         shutil.copytree(DEV_FIXTURE, self.fixtures)
+        # A sealed variant the candidate cannot execute (no synthesis block): must be recorded, not dropped.
+        (self.fixtures / "variants" / "Z.json").write_text(json.dumps({"variant": "Z", "description": "x", "ops": []}))
+        kit.write_manifest(self.fixtures, "ca-scenario-001", "0.1.0-spike")
         self.truth = self.tmp / "private" / "ground-truth.json"
         self.truth.parent.mkdir()
         shutil.copyfile(DEV_TRUTH, self.truth)
         pub = self.tmp / "pub" / "DEV-SMOKE"
         (pub / "metadata").mkdir(parents=True)
+        person = {"name": "n", "affiliation": "a", "attestation": "t"}
         (pub / "metadata" / "eval-metadata.json").write_text(json.dumps({
-            "scenario_id": "DEV-SMOKE", "fixture_id": "ca-scenario-001", "candidate_commit": CANDIDATE,
-            "variants": ["A", "B", "C", "D", "E", "Z"]}))
+            "metadata_version": "ca-heldout-meta/0.1", "scenario_id": "DEV-SMOKE", "fixture_id": "ca-scenario-001",
+            "coverage_category": "tooling self-test", "split": "held_out", "candidate_commit": CANDIDATE,
+            "variants": ["A", "B", "C", "D", "E", "Z"], "source_allowlist": ["k8s-api", "loki", "prometheus"],
+            "author": person, "reviewer": person, "prepublication_review": {"name": "n", "attestation": "t"},
+            "notes": ""}))
         (pub / "fixtures.freeze.json").write_text(json.dumps(kit.freeze(self.fixtures, "fixtures", "DEV-SMOKE")))
         (pub / "metadata.freeze.json").write_text(json.dumps(kit.freeze(pub / "metadata", "metadata", "DEV-SMOKE")))
         (pub / "truth.commitment.json").write_text(json.dumps(kit.commit_truth(self.truth, self.truth.parent / "salt")))
@@ -133,7 +140,7 @@ class EndToEndToolingTests(KitTestCase):
         out = self.tmp / "pred"
         log, record = kit.run(REPO, self.seal, {"DEV-SMOKE": self.fixtures}, out, git_check=False)
         status = {v["variant"]: v["execution"] for v in log["families"][0]["variants"]}
-        self.assertEqual(status["Z"], "failed")  # unknown variant: recorded, not dropped
+        self.assertEqual(status["Z"], "failed")  # unexecutable sealed variant: recorded, not dropped
         self.assertTrue(all(status[v] == "completed" for v in "ABCDE"))
         results = kit.score(REPO, self.seal, out, record,
                             {"DEV-SMOKE": (self.truth, self.truth.parent / "salt")}, git_check=False)
