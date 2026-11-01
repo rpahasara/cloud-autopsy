@@ -1,0 +1,41 @@
+name: Security or risk finding
+description: Track a non-sensitive security, threat-model, or risk-register item.
+title: "[Security] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: "Do not include credentials, customer data, or sensitive exploit details. Use a private security advisory where appropriate."
+  - type: textarea
+    id: threat
+    attributes:
+      label: Threat or risk statement
+    validations:
+      required: true
+  - type: dropdown
+    id: stride
+    attributes:
+      label: STRIDE category
+      options:
+        - Spoofing
+        - Tampering
+        - Repudiation
+        - Information disclosure
+        - Denial of service
+        - Elevation of privilege
+        - Not yet classified
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence / reproduction (sanitized)
+    validations:
+      required: true
+  - type: textarea
+    id: treatment
+    attributes:
+      label: Proposed treatment and validation
+    validations:
+      required: true
+

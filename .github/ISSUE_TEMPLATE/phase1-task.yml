@@ -1,0 +1,44 @@
+name: Phase 1 traceable task
+description: Propose or track Phase 1 planning, evaluation, or prototype work.
+title: "[CA-XXX] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: "All Phase 1 artifacts remain draft unless an authorized approval record is linked."
+  - type: input
+    id: trace
+    attributes:
+      label: Requirement / scenario / ADR / risk trace
+      placeholder: "CA-FR-001, CA-SCENARIO-001, CA-RISK-002"
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Intended outcome
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance evidence
+      description: State measurable, reproducible evidence; avoid approval claims.
+    validations:
+      required: true
+  - type: textarea
+    id: security
+    attributes:
+      label: Security and data considerations
+    validations:
+      required: true
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Phase 1 constraints
+      options:
+        - label: No production application code is introduced by this task unless separately authorized.
+          required: true
+        - label: No fabricated signoff or certification claim is included.
+          required: true
+
