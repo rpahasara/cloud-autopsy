@@ -1,0 +1,42 @@
+flowchart TB
+  subgraph Z0[TB0 human and version-control boundary]
+    H[Authenticated investigator]
+    CFG[Reviewed scenario and policy versions]
+    TRUTH[Independent ground truth]
+  end
+  subgraph Z1[TB1 untrusted source boundary]
+    SRC[Kubernetes API and telemetry]
+  end
+  subgraph Z2[TB2 local acquisition boundary]
+    COL[Collector identity]
+    NOR[Ingress validator and minimizer]
+  end
+  subgraph Z3[TB3 trusted evaluation boundary]
+    CTRL[API and coordinator]
+    STORE[(Evidence and run store)]
+    ENG[Engine and claim validator]
+    SCORE[Independent scoring module]
+    LIFE[Lifecycle identity]
+  end
+  subgraph Z4[TB4 untrusted model boundary]
+    ADP[No-tool synthesis sandbox]
+  end
+  subgraph Z5[TB5 external provider boundary - disabled]
+    EXT[Separately approved provider]
+  end
+  H -->|F1 scoped request| CTRL
+  CFG -->|F2 versioned allowlists| CTRL
+  SRC -->|F3 TLS reads - hostile content| COL
+  COL -->|F4 bounded acquisition envelope| NOR
+  NOR -->|F5 validated insert| STORE
+  CTRL -->|F6 freeze manifest| STORE
+  STORE -->|F7 frozen evidence only| ENG
+  ENG -->|F8 minimized data contract| ADP
+  ADP -. F9 approved broker only .-> EXT
+  ADP -->|F10 untrusted claims| ENG
+  ENG -->|F11 immutable results| STORE
+  TRUTH -->|F12 isolated truth| SCORE
+  STORE -->|F13 sealed results| SCORE
+  SCORE -->|F14 versioned scores| STORE
+  LIFE -->|F15 lifecycle overlay and purge| STORE
+  STORE -->|F16 filtered export| CTRL

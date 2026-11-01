@@ -40,3 +40,7 @@ All quality metrics and performance/capacity budgets are provisional until bench
 ## Governance
 
 All artifacts are drafts until a named authorized reviewer records approval. Issue closure, pull-request merge, or repository transfer does not constitute product, security, legal, or architecture signoff.
+
+## Phase 1C architecture proposal
+
+[System architecture and security design](docs/architecture/phase1c/README.md) adds reviewable diagrams, data models, collector/RBAC, deterministic engine, AI boundary, API contracts, threat coverage and a proposed sign-off checklist. It is a separate draft stacked on PR #11, not an approved baseline or implementation.

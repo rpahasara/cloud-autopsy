@@ -1,0 +1,22 @@
+sequenceDiagram
+  participant I as Investigator
+  participant A as API and coordinator
+  participant C as Collector
+  participant S as Source API
+  participant D as Evidence store
+  participant E as Engine
+  I->>A: F1 scenario ID, window, idempotency key
+  A->>A: Authenticate, authorize, validate versions and limits
+  A->>C: F2 fixed source/query plan
+  C->>S: F3 scoped list then watch or bounded query
+  S-->>C: observations or error
+  C->>D: F4-F5 bounded records and acquisition status
+  alt timeout, 410, truncation or denied source
+    C->>D: explicit coverage gap and last durable cursor
+  end
+  A->>D: F6 atomically seal evidence membership and digest
+  A->>E: immutable manifest reference
+  E->>D: F7 verify integrity and availability snapshot
+  E->>D: F11 deterministic bundle, gaps and hypotheses
+  D-->>A: F16 complete or partial result
+  A-->>I: result with limitations, no approval claim

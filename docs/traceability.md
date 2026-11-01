@@ -31,3 +31,7 @@ Maps SRS `0.3.0-draft`. All issues remain open; all requirements remain Draft. T
 - [ ] Benchmarked and approved quality metrics and performance/capacity budgets.
 - [ ] Full 8–12-scenario corpus and reviewed held-out results.
 - [ ] Explicit requirements baseline approval and separately authorized implementation plan.
+
+## Phase 1C architecture proposal
+
+[Architecture traceability](architecture/phase1c/traceability.md) gives detailed design evidence for issues #1 through #10 and all 36 stable requirements. The separate architecture draft is stacked on PR #11; no issue is closed or requirement/decision approved.

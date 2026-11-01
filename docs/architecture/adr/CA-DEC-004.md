@@ -37,3 +37,9 @@ Planned verification and reverse links: [requirement matrix](../../requirement-m
 ## Approval record
 
 No named approver, approval date or acceptance record exists. This proposal does not authorize implementation, external provider access, risk acceptance or release.
+
+## Phase 1C design refinement — 2026-11-01
+
+Specify separate no-tool model sandbox, data-only contracts, deterministic fact templates, route broker and rechecked approval context. External routes and provider credentials remain disabled/unselected.
+
+Detailed proposal: [Phase 1C ai](../phase1c/ai.md); [architecture package](../phase1c/README.md). These refinements are Proposed and add no approval or implementation authority. Review them when the existing triggers fire and before any future baseline sign-off.

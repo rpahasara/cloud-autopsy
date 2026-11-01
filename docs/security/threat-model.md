@@ -18,3 +18,7 @@ Stable threat IDs are never reused. Treatments and tests are proposed; no securi
 ## Residual questions
 
 Credential storage/rotation, independent risk acceptance, retention approval, external network policy and stronger signing/tamper evidence remain unresolved. Review on any changed source, model, permission, schema, expiry policy or trust boundary.
+
+## Phase 1C boundary coverage
+
+[Flow-by-flow STRIDE coverage](../architecture/phase1c/security.md) refines these six stable threats across TB0–TB5 and F1–F16 with specific controls, residual risks and required security-test artifacts. No threat is marked mitigated by documentation alone.

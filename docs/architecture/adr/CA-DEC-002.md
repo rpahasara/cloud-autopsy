@@ -37,3 +37,9 @@ Planned verification and reverse links: [requirement matrix](../../requirement-m
 ## Approval record
 
 No named approver, approval date or acceptance record exists. This proposal does not authorize implementation, external provider access, risk acceptance or release.
+
+## Phase 1C design refinement — 2026-11-01
+
+Specify relational identities, same-run composite foreign keys, payload/metadata separation, canonical-byte digests, immutable manifests and bounded snapshot sealing. Logical schema is review material, not a migration.
+
+Detailed proposal: [Phase 1C data-model](../phase1c/data-model.md); [architecture package](../phase1c/README.md). These refinements are Proposed and add no approval or implementation authority. Review them when the existing triggers fire and before any future baseline sign-off.

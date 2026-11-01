@@ -732,3 +732,7 @@ The [complete 36-row matrix](requirement-matrix.md) is authoritative for require
 | [CA-DEC-008](architecture/adr/CA-DEC-008.md) | Accountability and approval authorities | Proposed; no approval recorded |
 
 Product-owner approval is required for all eight proposals, with separate architecture, security and gate review as applicable. Named approval authorities remain unassigned. Proposed ownership is not approval.
+
+## 14. Phase 1C proposed architecture
+
+The [architecture package](architecture/phase1c/README.md) and [36-row design traceability](architecture/phase1c/traceability.md) refine the same stable requirements using the historical 0.2.0 draft and current 0.3.0 remediation. This reference does not alter requirement meaning or approve either baseline. All architecture decisions remain Proposed.

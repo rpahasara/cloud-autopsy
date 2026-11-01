@@ -56,3 +56,7 @@ Includes direct SRS risk links and risk links inherited from mapped STRIDE threa
 | CA-RISK-009 | Outside requirement conformance: product charter scope and differentiation review | Product / requirements authority review at Phase 1 gate |
 | CA-RISK-010 | CA-FR-007, CA-FR-008, CA-FR-010, CA-FR-012, CA-FR-014, CA-NFR-002, CA-NFR-006, CA-SEC-002, CA-SEC-003, CA-SEC-004, CA-SEC-007, CA-SEC-008, CA-SEC-010, CA-SEC-012 | CA-TEST-FR-007, CA-TEST-FR-008, CA-TEST-FR-010, CA-TEST-FR-012, CA-TEST-FR-014, CA-TEST-NFR-002, CA-TEST-NFR-006, CA-TEST-SEC-002, CA-TEST-SEC-003, CA-TEST-SEC-004, CA-TEST-SEC-007, CA-TEST-SEC-008, CA-TEST-SEC-010, CA-TEST-SEC-012 |
 | CA-RISK-011 | CA-FR-013, CA-NFR-003, CA-NFR-008, CA-NFR-009, CA-SEC-009, CA-SEC-010 | CA-TEST-FR-013, CA-TEST-NFR-003, CA-TEST-NFR-008, CA-TEST-NFR-009, CA-TEST-SEC-009, CA-TEST-SEC-010 |
+
+## Phase 1C residual-risk assessment
+
+[Architecture security coverage](../architecture/phase1c/security.md) details residual semantic, disclosure, continuity, privileged-integrity, evaluation and resource-exhaustion risks. All existing ratings/statuses remain preliminary/open; no acceptance or downgrade is recorded.

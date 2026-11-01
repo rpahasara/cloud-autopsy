@@ -14,3 +14,7 @@ CA-DEC identifiers are the canonical decision IDs used by the SRS. The previous 
 | [CA-DEC-008](CA-DEC-008.md) | Accountability and approval authorities | Proposed |
 
 Use [the template](ADR-000-template.md) for future proposals. Every record requires rationale, alternatives, security implications, decision owner, approval status and review triggers. Merge and issue closure never accept a decision.
+
+## Phase 1C refinements
+
+Each CA-DEC-001 through CA-DEC-008 now links its [detailed architecture refinement](../phase1c/README.md), preserving Proposed status, existing rationale/alternatives, owner and review triggers. No authority or provider access is approved.

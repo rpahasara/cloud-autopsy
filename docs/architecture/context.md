@@ -47,3 +47,7 @@ Each assumption requires evaluation and, if adopted as consequential, an ADR.
 ## Proposed decision records
 
 [CA-DEC-001 through CA-DEC-008](adr/README.md) now capture these hypotheses, their alternatives and review triggers. The [lifecycle contract](../evidence-lifecycle.md) defines expiry and replay. All remain proposed; external AI-provider access requires separate data-egress and security approval.
+
+## Phase 1C detailed design
+
+The [architecture package](phase1c/README.md) refines this context with [diagrams and responsibilities](phase1c/diagrams.md), data models, security boundaries and integration contracts. All components and decisions remain Proposed.
