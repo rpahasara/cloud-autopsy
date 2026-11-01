@@ -21,9 +21,10 @@ Demonstrate, with a reproducible evaluation corpus, that a deterministic evidenc
 ## Planning index
 
 - [Draft product charter](docs/product-charter.md)
-- [Initial SRS and acceptance criteria](docs/srs.md)
+- [Proposed Phase 1 SRS baseline (`0.2.0-draft`)](docs/srs.md)
 - [Traceability and Phase 1 backlog](docs/traceability.md)
 - [CA-SCENARIO-001](docs/scenarios/CA-SCENARIO-001.md)
+- [Phase 1 setup audit](docs/reviews/phase1-setup-audit.md)
 - [Architecture context](docs/architecture/context.md)
 - [ADR register and template](docs/architecture/adr/README.md)
 - [STRIDE threat model](docs/security/threat-model.md)
