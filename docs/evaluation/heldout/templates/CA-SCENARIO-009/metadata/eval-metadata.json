@@ -1,0 +1,25 @@
+{
+  "metadata_version": "ca-heldout-meta/0.1",
+  "scenario_id": "CA-SCENARIO-009",
+  "fixture_id": "ca-scenario-009",
+  "coverage_category": "Unseen missing/contradictory evidence combination",
+  "split": "held_out",
+  "candidate_commit": "c21b50dc5edd6cd07de55d2f3e0bce6103b4d952",
+  "variants": [
+    "<<FILL: every variant ID, e.g. A>>"
+  ],
+  "source_allowlist": [
+    "<<FILL: source_id values used by the fixtures>>"
+  ],
+  "author": {
+    "name": "<<FILL: name>>",
+    "affiliation": "<<FILL: affiliation>>",
+    "attestation": "<<FILL: I have not read the restricted material listed in docs/evaluation/heldout/README.md#author-restrictions, and I wrote these fixtures and truth without access to the candidate engine or scorer>>"
+  },
+  "reviewer": {
+    "name": "<<FILL: name>>",
+    "affiliation": "<<FILL: affiliation>>",
+    "attestation": "<<FILL: I reviewed fixtures and truth for consistency and hold a separate truth copy>>"
+  },
+  "notes": "<<FILL: public notes only; never expected answers>>"
+}

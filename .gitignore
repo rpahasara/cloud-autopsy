@@ -1,3 +1,7 @@
 __pycache__/
 *.pyc
 prototype/out/
+# Held-out evaluation: filled truth and salts must never enter the repository (docs/evaluation/heldout)
+docs/evaluation/heldout/**/ground-truth.json
+**/salt.hex
+*.salt

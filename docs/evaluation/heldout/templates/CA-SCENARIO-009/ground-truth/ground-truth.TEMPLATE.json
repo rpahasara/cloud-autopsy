@@ -1,0 +1,44 @@
+{
+  "truth_version": "<<FILL: truth version>>",
+  "scenario_id": "CA-SCENARIO-009",
+  "fixture_id": "ca-scenario-009",
+  "fixture_version": "<<FILL: must equal observations.json fixture_version>>",
+  "custody_note": "<<FILL: author and reviewer; held outside the repository until scoring>>",
+  "causal_change": {
+    "mechanism": "<<FILL: config_value_change | deployment_rollout | other:<short-name>; or set causal_change to null>>",
+    "entity": {
+      "kind": "<<FILL: kind>>",
+      "namespace": "<<FILL: namespace>>",
+      "name": "<<FILL: name>>"
+    },
+    "source_ref": "<<FILL: exact source_ref of the causal change event>>",
+    "failure_mechanism": "<<FILL: plain-language causal chain>>"
+  },
+  "non_causes": [
+    {
+      "mechanism": "<<FILL: cause-category label>>",
+      "entity": {
+        "kind": "<<FILL: kind>>",
+        "namespace": "<<FILL: namespace>>",
+        "name": "<<FILL: name>>"
+      },
+      "source_ref": "<<FILL: exact source_ref of the misleading change>>"
+    }
+  ],
+  "required_evidence": {
+    "base": [
+      "<<FILL: source_ref a complete investigation must include>>"
+    ],
+    "withheld_by_variant": {}
+  },
+  "variants": {
+    "A": {
+      "expected_outcome": "<<FILL: resolved | abstained>>",
+      "expected_cause": "<<FILL: causal_change when resolved, otherwise null>>",
+      "expected_run_state": "<<FILL: deterministic_complete | partial>>",
+      "expected_synthesis_status": "<<FILL: disabled | structurally_validated | rejected | unavailable>>",
+      "expected_gaps": [],
+      "false_cause_trap": "<<FILL: true | false>>"
+    }
+  }
+}

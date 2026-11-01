@@ -40,5 +40,8 @@ jobs:
           python -I tools/validate_phase1c.py
           python -I tools/validate_phase1d.py
 
+      - name: Held-out evaluation kit self-tests
+        run: python -I -m unittest discover -s tools/heldout -p "test_*.py" -v
+
       - name: Demo self-checks
         run: python -I prototype/cli.py demo
