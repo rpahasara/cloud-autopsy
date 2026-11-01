@@ -43,3 +43,14 @@ No named approver, approval date or acceptance record exists. This proposal does
 Require independent frozen truth/scorer, full-corpus versus initial-harness separation and versioned denominators. Numeric quality targets remain provisional until benchmarked and explicitly approved; documentation is not gate evidence.
 
 Detailed proposal: [Phase 1C signoff](../phase1c/signoff.md); [architecture package](../phase1c/README.md). These refinements are Proposed and add no approval or implementation authority. Review them when the existing triggers fire and before any future baseline sign-off.
+
+## Phase 1D approval request — 2026-11-01
+
+- **Product-owner disposition requested:** Confirm separate design and empirical gates, initial harness versus full corpus, independent frozen truth/scorer and explicit denominators; unresolved Critical/High findings block the current proposed gate.
+- **Provisional assumptions excluded from acceptance:** All quality metrics/targets, historical 70% versus proposed stricter values and exact corpus/aggregation choices remain provisional until benchmarked and explicitly approved before gate scoring.
+- **Specialist reviewers required:** Independent evaluation/gate and security reviewers.
+- **Accepted terms:** None; no approval recorded.
+- **Current disposition:** Proposed; awaiting named product and specialist review.
+- **Approval record fields:** reviewed commit/digest, scoped accept/revise/defer/reject disposition, excluded assumptions, named authorities/reviewers and dates, independence/conflicts, evidence links, residual-risk disposition and review triggers. All fields remain unrecorded.
+
+See the [complete approval matrix](../../reviews/phase1d/approvals.md), [consistency review](../../reviews/phase1d/consistency-review.md) and [formal completion checklist](../../reviews/phase1d/completion-checklist.md). A partial or deferred disposition is recorded separately and does not mark this entire ADR Accepted. No implementation or external access is authorized.

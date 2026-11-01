@@ -43,3 +43,14 @@ No named approver, approval date or acceptance record exists. This proposal does
 Separate short-lived payloads from minimized identity/provenance and lifecycle overlays. Freeze publication and replay availability checks must handle concurrent expiry; deletion is marked unavailable before purge and never rewrites the original manifest.
 
 Detailed proposal: [Phase 1C data-model](../phase1c/data-model.md); [architecture package](../phase1c/README.md). These refinements are Proposed and add no approval or implementation authority. Review them when the existing triggers fire and before any future baseline sign-off.
+
+## Phase 1D approval request — 2026-11-01
+
+- **Product-owner disposition requested:** Accept or revise proposed 30-day payload, 180-day minimized metadata and seven-day authorized-deletion periods, synthetic-only Git fixtures and explicit incomplete replay.
+- **Provisional assumptions excluded from acceptance:** Deletion authority, expiry/deadline accounting, controlled export/cache inventory, safe digests and future backup policy need reviewed specification; no backup system is approved.
+- **Specialist reviewers required:** Security/privacy and database/lifecycle reviewers.
+- **Accepted terms:** None; no approval recorded.
+- **Current disposition:** Proposed; awaiting named product and specialist review.
+- **Approval record fields:** reviewed commit/digest, scoped accept/revise/defer/reject disposition, excluded assumptions, named authorities/reviewers and dates, independence/conflicts, evidence links, residual-risk disposition and review triggers. All fields remain unrecorded.
+
+See the [complete approval matrix](../../reviews/phase1d/approvals.md), [consistency review](../../reviews/phase1d/consistency-review.md) and [formal completion checklist](../../reviews/phase1d/completion-checklist.md). A partial or deferred disposition is recorded separately and does not mark this entire ADR Accepted. No implementation or external access is authorized.

@@ -18,3 +18,7 @@ Use [the template](ADR-000-template.md) for future proposals. Every record requi
 ## Phase 1C refinements
 
 Each CA-DEC-001 through CA-DEC-008 now links its [detailed architecture refinement](../phase1c/README.md), preserving Proposed status, existing rationale/alternatives, owner and review triggers. No authority or provider access is approved.
+
+## Phase 1D approval preparation
+
+Each of the eight Proposed ADRs separates a scoped product-owner approval request from provisional assumptions and names specialist reviewer roles. [Approval matrix and record requirements](../../reviews/phase1d/approvals.md). Accepted decisions: none.

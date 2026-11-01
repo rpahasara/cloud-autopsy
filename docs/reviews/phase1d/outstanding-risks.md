@@ -1,0 +1,20 @@
+# Phase 1D outstanding risks and readiness blockers
+
+Date 2026-11-01. Status: all rows Open; no risk accepted, resolved or downgraded. Ratings are preliminary owner/reviewer judgments. This readiness register supplements the [eleven product/security risks](../../security/risk-register.md) and [six STRIDE threats](../../security/threat-model.md); it does not replace their stable mappings. “Closure evidence” describes future requirements, not evidence already produced.
+
+| Readiness ID / review finding | Related risk(s) | Severity / blocked gate | Accountable role | Recommended treatment and closure evidence | Status |
+|---|---|---|---|---|---|
+| CA-READY-001 / CA-REV-P1D-001 | CA-RISK-010 | High / design baseline | Product / requirements authority | Approve the proposed design-versus-conformance gate distinction; record exact baseline version and separate Phase 2 authorization | Open |
+| CA-READY-002 / CA-REV-P1D-002 | CA-RISK-003/004 | High / time/causal design | Architecture lead | Accept unknown-clock unordered policy; freeze canonical timestamp/offset vectors; later clock/skew/gap tests and independent review | Open |
+| CA-READY-003 / CA-REV-P1D-003 | CA-RISK-010 | High / empirical security gate | Security reviewer | Confirm no-unresolved-Critical/High gate wording; any policy change and any risk acceptance recorded separately by authorized people | Open |
+| CA-READY-004 / CA-REV-P1D-004 | CA-RISK-007/010 | High / implementation readiness | Product / requirements authority | Name all authorities and qualified independent reviewers; dated scoped ADR dispositions, conflicts and evidence references | Open |
+| CA-READY-005 / CA-REV-P1D-005 | CA-RISK-001/002/003/004/005/007/011 | High / dependent engineering work | Architecture lead with security/privacy specialist | Resolve source checkpoints, canonicalization, API credentials/idempotency, bounded policies, DB/lifecycle races and controlled-copy inventory; approve scoped specification exit criteria before dependent code | Open |
+| CA-READY-006 / CA-REV-P1D-006 | CA-RISK-001/002/005/006/007/011 | High / full engineering gate | Evaluation engineer with independent reviewer | Full frozen corpus and truth/scorer; benchmarked and approved metrics; runtime RBAC/network/canary/integrity/replay evidence; no hidden failures | Open |
+| CA-READY-007 / CA-REV-P1D-007 | CA-RISK-005/008/009/010 | Medium / commercial distribution | Licensing/commercial reviewer with maintainer | Exact artifact/SBOM/license/NOTICE and advisory inventory; review AGPL/MPL, bundled dependencies, model weights, trademarks and distribution/service obligations; refresh before shipping | Open |
+| CA-READY-008 / CA-REV-P1D-008 | CA-RISK-006/009/010 | Medium / comparative claims | Independent evaluation/gate reviewer | Approve matched-input versus end-to-end tracks, native-capability exclusions and blinded rubric; publish limitations and denominators | Open |
+
+Residual technical risks remain even after design approval: source credentials can expose sensitive response fields; telemetry/model text can mislead; unknown history/skew can make attribution impossible; host/DB admins can rewrite local integrity records; purge may race replay or miss copies outside control; local models/toolsets can exceed resources or egress policy. These map to existing product/security risks and need executed evidence before any engineering-gate claim.
+
+External-provider access is a separate hard dependency only for an explicitly requested external-provider feature. It is not necessary for deterministic/local-only Phase 2 progress after proper authorization. No external route, provider credential, customer telemetry, backup system or production deployment is authorized by this register.
+
+Review on any requirement/source/privilege/model/toolset change, new dependency/license, data classification or retention destination, benchmark/corpus change, new High/Critical finding, named authority change, or gate request. Each closure must cite immutable artifacts, named reviewer and date; a passing test or PR merge alone is insufficient. The current package is not a risk acceptance record.

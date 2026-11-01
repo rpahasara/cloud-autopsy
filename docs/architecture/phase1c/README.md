@@ -30,3 +30,7 @@ One isolated synthetic kind environment; namespace-scoped collectors; a local co
 The API proposes authenticated local access through loopback or a protected local socket. No unauthenticated listener, remote ingress, customer data or multi-tenancy is permitted. Host-admin compromise remains outside the protection offered by the prototype. A networked deployment would require a new authentication, encryption and threat-boundary review.
 
 All CA-DEC-001 through CA-DEC-008 remain Proposed. Quality metrics, clock heuristics and performance/capacity budgets remain provisional until benchmarked and approved. Five initial scenario variants qualify the harness; the full gate needs the planned 8–12-scenario corpus. External AI-provider access remains disabled pending a separate data-egress and security approval.
+
+## Phase 1D proposed review amendments
+
+[Final consistency/readiness review](../../reviews/phase1d/README.md) adds a proposed SRS 0.4.0 governance clarification atop the historical PR #11 0.3.0 baseline, reconciles clock/gate wording and prepares scoped approvals. No requirement ID changes, accepted decision or implementation authorization is implied.

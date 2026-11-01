@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Document ID | `CA-SRS-P1` |
-| Version | `0.3.0-draft` |
+| Version | `0.4.0-draft` |
 | Status | Draft for review — not approved and not baselined |
 | Product | Cloud Autopsy |
 | Lifecycle stage | Phase 1 planning and evaluation prototype |
@@ -26,6 +26,7 @@
 | `0.1.0-draft` | 2026-11-01 | Initial functional and non-functional requirements | Not approved |
 | `0.2.0-draft` | 2026-11-01 | Expanded roles, security requirements, acceptance criteria, traceability, scenario verification, and change control | Not approved |
 | `0.3.0-draft` | 2026-11-01 | Independent review remediation: ownership, corpus, traceability, threats, lifecycle and proposed decisions | Not approved |
+| `0.4.0-draft` | 2026-11-01 | Proposed Phase 1D separation of design approval and implementation conformance; no requirement IDs changed | Not approved |
 
 ### 1.2 Baseline and change-control rules
 
@@ -679,15 +680,16 @@ The system and repository workflow shall not represent a passing test, merged pu
 
 ## 10. Phase 1 acceptance model
 
-### 10.1 Required evidence for a requirement
+### 10.1 Design approval and implementation conformance
 
-A requirement may be proposed for approval only when:
+This separation is a proposed Phase 1D governance amendment, pending named authority approval. A design baseline may be proposed for approval when:
 
-1. Its identifier, statement, owner, priority, verification method, and trace links are complete.
-2. Its acceptance criteria are measurable or explicitly carry an approved `TBD` disposition.
-3. Applicable STRIDE threats and risks have been reviewed.
-4. Verification evidence is versioned and links to the requirement and scenario/run manifest.
-5. Known failures, exclusions, and residual risks are visible.
+1. Every requirement has complete identifier, statement, accountable owner, priority, acceptance criteria, verification method and trace links.
+2. Applicable threats, risks, architecture and lifecycle assumptions are reviewed by named specialists.
+3. A versioned verification plan defines expected evidence, fixtures, failure handling and measurable criteria; provisional numeric settings have an explicit scoped disposition, owner and review trigger.
+4. Known design gaps and blockers are visible, and the named requirement authority records the exact accepted scope. No test pass or implementation authority is inferred.
+
+Implementation conformance and the empirical engineering gate require later executed, versioned test/run evidence against that approved scope, including failures, exclusions, residual risks and named independent gate review. Design approval does not claim this evidence already exists. Implementation requires a separate explicit authorization. The [Phase 1D completion checklist](reviews/phase1d/completion-checklist.md) distinguishes design completion, implementation authorization and empirical qualification; none is passed by this draft.
 
 ### 10.2 Proposed engineering gate
 
@@ -736,3 +738,7 @@ Product-owner approval is required for all eight proposals, with separate archit
 ## 14. Phase 1C proposed architecture
 
 The [architecture package](architecture/phase1c/README.md) and [36-row design traceability](architecture/phase1c/traceability.md) refine the same stable requirements using the historical 0.2.0 draft and current 0.3.0 remediation. This reference does not alter requirement meaning or approve either baseline. All architecture decisions remain Proposed.
+
+## 15. Phase 1D readiness review
+
+[Final design review and approval package](reviews/phase1d/README.md) records proposed consistency resolutions, exact product/specialist approval requests, technology evaluation, differentiation hypotheses, benchmark plan, open risks and an unstarted Phase 2 backlog. All 36 requirements remain Draft; no ADR is accepted and no implementation is authorized.

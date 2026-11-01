@@ -41,8 +41,12 @@ Owner: Product / requirements authority, with Architecture lead, Security review
 - [ ] Demonstrate deterministic equivalence and unsupported-claim/citation checks without ground-truth leakage.
 - [ ] Execute all CA-TEST-SEC-001 through CA-TEST-SEC-012 requirements and integration/contract tests with immutable artifact links.
 - [ ] Verify expiry/deletion, safe tombstones, controlled export/cache purge, incomplete replay and integrity-mismatch distinction under concurrent access.
-- [ ] Review every residual security finding; no unresolved Critical/High finding qualifies under the proposed gate without a separately reviewed policy disposition.
+- [ ] Review every residual security finding; any unresolved Critical/High finding blocks passage under the current proposed gate. A risk acceptance record alone cannot waive this criterion; a changed gate would require a separate explicit versioned approval.
 - [ ] Record named product, architecture, security and gate decisions as separate dated records; keep risk acceptance separate and explicit.
 - [ ] Leave issues open until their own acceptance evidence is complete; do not equate issue closure with approval or release authorization.
 
 No checklist item is asserted completed by this package. No benchmark, live RBAC check, network test, database migration or model invocation has occurred.
+
+## Phase 1D gate clarification
+
+The [formal completion/readiness checklist](../../reviews/phase1d/completion-checklist.md) distinguishes design approval from later executed conformance and explicitly authorized Phase 2 work. No gate or decision is accepted by this clarification.

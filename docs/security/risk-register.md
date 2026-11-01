@@ -60,3 +60,7 @@ Includes direct SRS risk links and risk links inherited from mapped STRIDE threa
 ## Phase 1C residual-risk assessment
 
 [Architecture security coverage](../architecture/phase1c/security.md) details residual semantic, disclosure, continuity, privileged-integrity, evaluation and resource-exhaustion risks. All existing ratings/statuses remain preliminary/open; no acceptance or downgrade is recorded.
+
+## Phase 1D readiness blockers
+
+[Outstanding-risk and readiness register](../reviews/phase1d/outstanding-risks.md) tracks eight review blockers and closure evidence linked to these existing risks. All risks remain Open; no acceptance or downgrade is recorded.

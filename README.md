@@ -14,7 +14,7 @@ All quality metrics and performance/capacity budgets are provisional until bench
 
 ## Proposed Phase 1 gates
 
-- Evidence-citation accuracy target: at least 70% on the versioned evaluation corpus.
+- Historical, unbenchmarked hypothesis: at least 70% evidence-citation accuracy; final metric/threshold disposition remains Proposed under CA-DEC-006.
 - Correct abstention on designated missing-telemetry scenarios.
 - No unsupported destructive action path; collection remains read-only.
 - Prompt-injection and approval-bypass scenarios are explicitly tested.
@@ -23,7 +23,7 @@ All quality metrics and performance/capacity budgets are provisional until bench
 ## Planning index
 
 - [Draft product charter](docs/product-charter.md)
-- [Proposed Phase 1 SRS baseline (`0.3.0-draft`)](docs/srs.md)
+- [Proposed Phase 1 SRS baseline (`0.4.0-draft`)](docs/srs.md)
 - [Traceability and Phase 1 backlog](docs/traceability.md)
 - [CA-SCENARIO-001](docs/scenarios/CA-SCENARIO-001.md)
 - [Independent-review remediation](docs/reviews/phase1-remediation.md)
@@ -44,3 +44,7 @@ All artifacts are drafts until a named authorized reviewer records approval. Iss
 ## Phase 1C architecture proposal
 
 [System architecture and security design](docs/architecture/phase1c/README.md) adds reviewable diagrams, data models, collector/RBAC, deterministic engine, AI boundary, API contracts, threat coverage and a proposed sign-off checklist. It is a separate draft stacked on PR #11, not an approved baseline or implementation.
+
+## Phase 1D final design review
+
+[Approval and implementation-readiness package](docs/reviews/phase1d/README.md) provides blockers, eight scoped ADR requests, independent reviewers, source-backed technology research, differentiation, benchmark plans, formal completion gates and a proposed Phase 2 backlog. Readiness remains blocked pending approval; no implementation is started.

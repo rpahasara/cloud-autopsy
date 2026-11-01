@@ -43,3 +43,14 @@ No named approver, approval date or acceptance record exists. This proposal does
 Specify separate no-tool model sandbox, data-only contracts, deterministic fact templates, route broker and rechecked approval context. External routes and provider credentials remain disabled/unselected.
 
 Detailed proposal: [Phase 1C ai](../phase1c/ai.md); [architecture package](../phase1c/README.md). These refinements are Proposed and add no approval or implementation authority. Review them when the existing triggers fire and before any future baseline sign-off.
+
+## Phase 1D approval request — 2026-11-01
+
+- **Product-owner disposition requested:** Confirm disabled-by-default synthesis and separately sandboxed local-only evaluation without tools, authority or cluster/DB access; do not enable external providers.
+- **Provisional assumptions excluded from acceptance:** Local model artifact/weights/license and limits remain unselected. Any external provider/region/route/terms/field/retention enablement requires a separate data-egress and security approval.
+- **Specialist reviewers required:** Security/privacy and licensing reviewers; separate egress authority only if later requested.
+- **Accepted terms:** None; no approval recorded.
+- **Current disposition:** Proposed; awaiting named product and specialist review.
+- **Approval record fields:** reviewed commit/digest, scoped accept/revise/defer/reject disposition, excluded assumptions, named authorities/reviewers and dates, independence/conflicts, evidence links, residual-risk disposition and review triggers. All fields remain unrecorded.
+
+See the [complete approval matrix](../../reviews/phase1d/approvals.md), [consistency review](../../reviews/phase1d/consistency-review.md) and [formal completion checklist](../../reviews/phase1d/completion-checklist.md). A partial or deferred disposition is recorded separately and does not mark this entire ADR Accepted. No implementation or external access is authorized.
