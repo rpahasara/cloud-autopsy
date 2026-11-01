@@ -1,44 +1,20 @@
 # STRIDE Threat Model — Phase 1 (Draft)
 
-**Status:** Initial placeholder analysis; not a security approval.
+Stable threat IDs are never reused. Treatments and tests are proposed; no security approval or executed test evidence exists. Assets: evidence/provenance, ground truth/scores, credentials, telemetry, policy boundaries and human trust. Trust boundaries are in [architecture context](../architecture/context.md).
 
-## Assets
+| Threat ID | STRIDE category | Threat | Risks | Requirements | Planned tests / assertions |
+|---|---|---|---|---|---|
+| CA-THREAT-S-001 | Spoofing | Forged source identity or reused evidence ID | CA-RISK-001, CA-RISK-005, CA-RISK-007 | CA-FR-001, CA-FR-002, CA-SEC-001, CA-SEC-007 | CA-TEST-FR-001, CA-TEST-FR-002, CA-TEST-SEC-001, CA-TEST-SEC-007: Inject conflicting source identities and IDs; reject collisions without overwriting provenance. |
+| CA-THREAT-T-001 | Tampering | Fixture, ground truth, rule or scorer altered after run | CA-RISK-001, CA-RISK-006, CA-RISK-007 | CA-FR-004, CA-FR-010, CA-FR-011, CA-NFR-001, CA-NFR-010, CA-SEC-007, CA-SEC-011 | CA-TEST-FR-004, CA-TEST-FR-010, CA-TEST-FR-011, CA-TEST-NFR-001, CA-TEST-NFR-010, CA-TEST-SEC-007, CA-TEST-SEC-011: Modify each protected input after manifest creation; detect mismatch. Reject unsupported schema or dependency provenance. |
+| CA-THREAT-R-001 | Repudiation | Cannot reconstruct claim, rule, model or deletion history | CA-RISK-007, CA-RISK-010 | CA-FR-010, CA-FR-012, CA-NFR-002, CA-NFR-006, CA-SEC-007, CA-SEC-008, CA-SEC-012 | CA-TEST-FR-010, CA-TEST-FR-012, CA-TEST-NFR-002, CA-TEST-NFR-006, CA-TEST-SEC-007, CA-TEST-SEC-008, CA-TEST-SEC-012: Replay from retained manifest; verify audit correlation, tombstone and explicit incomplete-replay state after expiry. |
+| CA-THREAT-I-001 | Information disclosure | Read credentials or telemetry disclose secrets to storage/model | CA-RISK-005 | CA-NFR-004, CA-SEC-001, CA-SEC-005, CA-SEC-006, CA-SEC-008 | CA-TEST-NFR-004, CA-TEST-SEC-001, CA-TEST-SEC-005, CA-TEST-SEC-006, CA-TEST-SEC-008: Seed secret canaries in inputs/audits; verify exclusion and disabled external egress; inspect least privilege. |
+| CA-THREAT-D-001 | Denial of service | Unbounded telemetry or model latency exhausts evaluator | CA-RISK-004, CA-RISK-011 | CA-FR-013, CA-NFR-003, CA-NFR-008, CA-NFR-009, CA-SEC-009, CA-SEC-010 | CA-TEST-FR-013, CA-TEST-NFR-003, CA-TEST-NFR-008, CA-TEST-NFR-009, CA-TEST-SEC-009, CA-TEST-SEC-010: Exercise at/above byte, record, cardinality, window and retry bounds; model timeout preserves deterministic output. |
+| CA-THREAT-E-001 | Elevation of privilege | Prompt injection or forged approval induces action/policy bypass | CA-RISK-002, CA-RISK-010 | CA-FR-007, CA-FR-008, CA-FR-014, CA-SEC-002, CA-SEC-003, CA-SEC-004, CA-SEC-010, CA-SEC-012 | CA-TEST-FR-007, CA-TEST-FR-008, CA-TEST-FR-014, CA-TEST-SEC-002, CA-TEST-SEC-003, CA-TEST-SEC-004, CA-TEST-SEC-010, CA-TEST-SEC-012: Scenario 001-C plus malicious annotation/tool response and forged approval; no action, mutation or approval status change. |
 
-- Evidence integrity and provenance.
-- Evaluation ground truth and score integrity.
-- Cluster/observability credentials, even when read-only.
-- Investigation records and potentially sensitive telemetry.
-- Tool-policy boundary and human trust in conclusions.
+## Reverse mapping and treatment ownership
 
-## Trust boundaries
+[Requirement matrix](../requirement-matrix.md) contains the reverse requirement-to-threat and test edges; [risk register](risk-register.md) contains reverse risk-to-threat edges and owning roles. Each test exercises its parent requirement acceptance criteria plus every threat assertion in the rows that reference it. Use the [scenario matrix](../scenarios/CA-SCENARIO-001.md) for A–E; standalone integrity, lifecycle, RBAC, egress, bounds and supply-chain tests are additional qualification work.
 
-See [architecture context](../architecture/context.md). External telemetry, Kubernetes objects, logs, annotations, commit/deployment metadata, model responses, and scenario content are untrusted inputs.
+## Residual questions
 
-## STRIDE register
-
-| Category | Example threat | Proposed Phase 1 treatment | Validation idea |
-|---|---|---|---|
-| Spoofing | Forged source identity or reused evidence identifier | Authenticated connectors; source-qualified immutable IDs | Inject conflicting IDs/sources |
-| Tampering | Evidence or ground truth altered to improve scores | Version control; hashes/version metadata; raw-vs-derived separation | Modify fixture after run and detect mismatch |
-| Repudiation | Cannot reconstruct which rule/model produced a claim | Versioned run manifest and provenance edges | Replay from manifest |
-| Information disclosure | Secrets/PII copied from logs to storage/model | Data minimization, redaction boundary, fixture-only Phase 1 | Seed canary secret and assert exclusion |
-| Denial of service | Oversized/high-cardinality telemetry exhausts collector/store | Scope, quotas, size limits, bounded windows | Oversize and cardinality tests |
-| Elevation of privilege | Prompt injection induces cluster write or policy bypass | No write tools; read-only RBAC; treat telemetry as data; output validation | Malicious-log and crafted-tool-response tests |
-
-## Abuse cases requiring explicit tests
-
-- Log text says to ignore policy and execute a destructive command.
-- Kubernetes annotation impersonates trusted product metadata.
-- Model returns citations to nonexistent evidence IDs.
-- Connector omits an expected source but reports success.
-- Correlated Deployment is promoted as root cause after causal evidence is removed.
-- Scenario author changes ground truth after observing results.
-
-## Open questions
-
-- Credential storage and rotation mechanism.
-- Exact redaction and retention rules.
-- Network egress policy for any model provider.
-- Evidence signing/tamper-evidence requirements beyond Phase 1.
-- Dependency and container supply-chain baseline.
-
+Credential storage/rotation, independent risk acceptance, retention approval, external network policy and stronger signing/tamper evidence remain unresolved. Review on any changed source, model, permission, schema, expiry policy or trust boundary.

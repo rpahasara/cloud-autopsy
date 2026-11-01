@@ -32,4 +32,3 @@ Until a formal process is approved, use a private GitHub security advisory if en
 ## No signoff by merge
 
 Merging this file or closing related issues does not constitute security approval or risk acceptance.
-

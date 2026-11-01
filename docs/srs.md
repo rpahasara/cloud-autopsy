@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Document ID | `CA-SRS-P1` |
-| Version | `0.2.0-draft` |
+| Version | `0.3.0-draft` |
 | Status | Draft for review — not approved and not baselined |
 | Product | Cloud Autopsy |
 | Lifecycle stage | Phase 1 planning and evaluation prototype |
@@ -25,6 +25,7 @@
 |---|---|---|---|
 | `0.1.0-draft` | 2026-11-01 | Initial functional and non-functional requirements | Not approved |
 | `0.2.0-draft` | 2026-11-01 | Expanded roles, security requirements, acceptance criteria, traceability, scenario verification, and change control | Not approved |
+| `0.3.0-draft` | 2026-11-01 | Independent review remediation: ownership, corpus, traceability, threats, lifecycle and proposed decisions | Not approved |
 
 ### 1.2 Baseline and change-control rules
 
@@ -64,7 +65,7 @@ Phase 1 is an evaluation prototype, not a production release. It uses synthetic 
 - Selected Kubernetes events and object changes.
 - Selected metrics, logs, and deployment metadata used by declared scenarios.
 - Normalized evidence, provenance relationships, incident-window time alignment, evidence bundles, a hypothesis ledger, constrained synthesis, replay metadata, and evaluation output.
-- `CA-SCENARIO-001` and its normal, missing-evidence, clock-skew, malicious-input, and model-failure variants.
+- Initial investigation-harness qualification using the five `CA-SCENARIO-001` variants; the full evaluation gate requires the planned 8–12-scenario [corpus](scenarios/corpus-plan.md). Variants do not count as independent scenarios.
 - Read-only access design and security-policy tests.
 
 ### 2.3 Out of scope
@@ -114,6 +115,7 @@ Phase 1 is an evaluation prototype, not a production release. It uses synthetic 
 | `CA-ROLE-003` | Requirements reviewer | Reviews requirement clarity, traceability, scope, and acceptance evidence. | Review does not equal approval unless also named as requirement authority. |
 | `CA-ROLE-004` | Security reviewer | Reviews trust boundaries, permissions, data handling, threat treatments, and security-test evidence. | Risk acceptance requires separately recorded authority. |
 | `CA-ROLE-005` | Repository maintainer | Maintains version control, pull-request workflow, issue links, and protected planning artifacts. | Merge access does not grant product or security approval authority. |
+| `CA-ROLE-007` | Architecture lead | Owns evidence, time, reasoning and replay contracts; assembles architecture evidence. | Does not acquire architecture approval authority by owning requirements. |
 | `CA-ROLE-006` | Requirement authority | Accepts, rejects, or returns proposed requirements for revision. | Unassigned in this draft. |
 
 ### 5.2 External system actors
@@ -137,7 +139,7 @@ Phase 1 is an evaluation prototype, not a production release. It uses synthetic 
 - PostgreSQL/JSONB is the candidate evidence store, not an approved choice.
 - Python/FastAPI is the candidate orchestration stack, not an approved choice.
 - kind, Prometheus, Grafana, and Loki are candidate demo components.
-- The model provider, model-data policy, retention period, incident-window defaults, and performance targets are unresolved.
+- MVP proposals for model policy, retention, incident windows and performance are recorded in [CA-DEC-001 through 008](architecture/adr/README.md); none is approved. External provider access requires separate data-egress and security approval.
 
 ### 6.3 Hard Phase 1 constraints
 
@@ -152,9 +154,13 @@ Every requirement in this section is `Draft`.
 
 ### CA-FR-001 — Acquire scoped evidence
 
+**Owner:** Architecture lead (CA-ROLE-007)
+
+<a id="ca-fr-001"></a>
+
 - **Priority:** Must
 - **Verification:** Test, Inspection
-- **Trace:** `CA-002`, `CA-004`, `CA-SCENARIO-001`
+- **Trace:** `CA-002`, `CA-004`; `CA-SCENARIO-001`; [complete decision/threat/test mapping](requirement-matrix.md#ca-fr-001)
 
 The system shall acquire only the Kubernetes and observability evidence sources enabled for the declared scenario and incident window.
 
@@ -166,11 +172,15 @@ The system shall acquire only the Kubernetes and observability evidence sources 
 
 ### CA-FR-002 — Normalize evidence with immutable identity
 
+**Owner:** Architecture lead (CA-ROLE-007)
+
+<a id="ca-fr-002"></a>
+
 - **Priority:** Must
 - **Verification:** Test
-- **Trace:** `CA-002`, `CA-RISK-001`, `CA-RISK-007`
+- **Trace:** `CA-002`, `CA-009`; `CA-RISK-001`, `CA-RISK-007`; [complete decision/threat/test mapping](requirement-matrix.md#ca-fr-002)
 
-The system shall normalize acquired observations into evidence nodes with stable identifiers while retaining a reference to the raw source representation.
+The system shall normalize acquired observations into evidence nodes with stable identifiers while retaining a reference to the raw source representation or its explicit expiry/deletion tombstone under the [lifecycle contract](evidence-lifecycle.md).
 
 **Acceptance criteria**
 
@@ -180,9 +190,13 @@ The system shall normalize acquired observations into evidence nodes with stable
 
 ### CA-FR-003 — Preserve timestamp provenance
 
+**Owner:** Architecture lead (CA-ROLE-007)
+
+<a id="ca-fr-003"></a>
+
 - **Priority:** Must
 - **Verification:** Test, Analysis
-- **Trace:** `CA-003`, `CA-RISK-003`, `CA-SCENARIO-001`
+- **Trace:** `CA-003`, `CA-009`; `CA-RISK-003`, `CA-SCENARIO-001`; [complete decision/threat/test mapping](requirement-matrix.md#ca-fr-003)
 
 The system shall retain event, observation, ingestion, and source clock-domain information without silently converting uncertain timestamps into a single authoritative time.
 
@@ -194,9 +208,13 @@ The system shall retain event, observation, ingestion, and source clock-domain i
 
 ### CA-FR-004 — Assemble a deterministic evidence bundle
 
+**Owner:** Architecture lead (CA-ROLE-007)
+
+<a id="ca-fr-004"></a>
+
 - **Priority:** Must
 - **Verification:** Test
-- **Trace:** `CA-005`, `CA-RISK-001`, `CA-SCENARIO-001`
+- **Trace:** `CA-003`, `CA-005`, `CA-009`; `CA-RISK-001`, `CA-SCENARIO-001`; [complete decision/threat/test mapping](requirement-matrix.md#ca-fr-004)
 
 Given identical versioned inputs and configuration, the deterministic engine shall produce the same ordered evidence identifiers, relationships, and gap identifiers.
 
@@ -208,9 +226,13 @@ Given identical versioned inputs and configuration, the deterministic engine sha
 
 ### CA-FR-005 — Represent evidence gaps
 
+**Owner:** Architecture lead (CA-ROLE-007)
+
+<a id="ca-fr-005"></a>
+
 - **Priority:** Must
 - **Verification:** Test
-- **Trace:** `CA-005`, `CA-006`, `CA-RISK-004`, `CA-SCENARIO-001-B`
+- **Trace:** `CA-005`, `CA-006`, `CA-009`; `CA-RISK-004`, `CA-SCENARIO-001-B`; [complete decision/threat/test mapping](requirement-matrix.md#ca-fr-005)
 
 The system shall create explicit gap records for expected evidence that is missing, failed, out of scope, or unverifiable.
 
@@ -222,9 +244,13 @@ The system shall create explicit gap records for expected evidence that is missi
 
 ### CA-FR-006 — Maintain a hypothesis ledger
 
+**Owner:** Architecture lead (CA-ROLE-007)
+
+<a id="ca-fr-006"></a>
+
 - **Priority:** Must
 - **Verification:** Test, Demonstration
-- **Trace:** `CA-006`, `CA-RISK-001`, `CA-RISK-004`, `CA-SCENARIO-001`
+- **Trace:** `CA-006`, `CA-009`; `CA-RISK-001`, `CA-RISK-004`, `CA-SCENARIO-001`; [complete decision/threat/test mapping](requirement-matrix.md#ca-fr-006)
 
 The system shall represent each candidate hypothesis with supporting, contradicting, missing, and not-evaluated evidence, plus a status and rationale.
 
@@ -236,9 +262,13 @@ The system shall represent each candidate hypothesis with supporting, contradict
 
 ### CA-FR-007 — Produce constrained narrative synthesis
 
+**Owner:** Architecture lead (CA-ROLE-007)
+
+<a id="ca-fr-007"></a>
+
 - **Priority:** Should
 - **Verification:** Test, Inspection
-- **Trace:** `CA-007`, `CA-RISK-001`, `CA-RISK-002`
+- **Trace:** `CA-007`, `CA-009`; `CA-RISK-001`, `CA-RISK-002`; [complete decision/threat/test mapping](requirement-matrix.md#ca-fr-007)
 
 When synthesis is enabled, the system shall provide the model only the structured evidence contract needed for the declared output and shall label telemetry as untrusted data.
 
@@ -250,9 +280,13 @@ When synthesis is enabled, the system shall provide the model only the structure
 
 ### CA-FR-008 — Validate claims and citations
 
+**Owner:** Architecture lead (CA-ROLE-007)
+
+<a id="ca-fr-008"></a>
+
 - **Priority:** Must
 - **Verification:** Test
-- **Trace:** `CA-007`, `CA-RISK-001`, `CA-SCENARIO-001`
+- **Trace:** `CA-007`, `CA-009`, `CA-010`; `CA-RISK-001`, `CA-SCENARIO-001`; [complete decision/threat/test mapping](requirement-matrix.md#ca-fr-008)
 
 The system shall validate factual claims against evidence identifiers before presenting them as supported.
 
@@ -264,9 +298,13 @@ The system shall validate factual claims against evidence identifiers before pre
 
 ### CA-FR-009 — Support abstention
 
+**Owner:** Architecture lead (CA-ROLE-007)
+
+<a id="ca-fr-009"></a>
+
 - **Priority:** Must
 - **Verification:** Test
-- **Trace:** `CA-006`, `CA-009`, `CA-RISK-004`
+- **Trace:** `CA-006`, `CA-009`; `CA-RISK-004`; [complete decision/threat/test mapping](requirement-matrix.md#ca-fr-009)
 
 The system shall support an explicit abstention outcome when evidence is insufficient, contradictory, or outside supported inference rules.
 
@@ -278,9 +316,13 @@ The system shall support an explicit abstention outcome when evidence is insuffi
 
 ### CA-FR-010 — Replay an investigation
 
+**Owner:** Architecture lead (CA-ROLE-007)
+
+<a id="ca-fr-010"></a>
+
 - **Priority:** Must
 - **Verification:** Test, Demonstration
-- **Trace:** `CA-002`, `CA-003`, `CA-005`, `CA-008`
+- **Trace:** `CA-002`, `CA-003`, `CA-005`, `CA-008`, `CA-009`; [complete decision/threat/test mapping](requirement-matrix.md#ca-fr-010)
 
 The system shall persist a versioned run manifest sufficient to reconstruct or compare an investigation from retained Phase 1 fixtures.
 
@@ -289,12 +331,17 @@ The system shall persist a versioned run manifest sufficient to reconstruct or c
 1. The manifest identifies connector, schema, rule, scenario, scoring, prompt, and model versions where applicable.
 2. Replay does not require Kubernetes write permissions.
 3. Differences between two run manifests and outputs can be enumerated.
+4. Under the [evidence lifecycle contract](evidence-lifecycle.md), expiry or authorized deletion yields a minimized tombstone and explicit incomplete replay, never silent source refetch or successful equivalence. Reconstructing from Git fixtures creates a linked new run and cannot rewrite the original result.
 
 ### CA-FR-011 — Execute and score evaluation scenarios
 
+**Owner:** Evaluation engineer (CA-ROLE-002)
+
+<a id="ca-fr-011"></a>
+
 - **Priority:** Must
 - **Verification:** Test
-- **Trace:** `CA-008`, `CA-009`, `CA-RISK-006`, `CA-RISK-007`
+- **Trace:** `CA-008`, `CA-009`; `CA-RISK-006`, `CA-RISK-007`; [complete decision/threat/test mapping](requirement-matrix.md#ca-fr-011)
 
 The evaluation harness shall execute versioned scenario variants against declared ground truth and produce machine-readable and human-readable results.
 
@@ -306,9 +353,13 @@ The evaluation harness shall execute versioned scenario variants against declare
 
 ### CA-FR-012 — Inspect and export investigation evidence
 
+**Owner:** Architecture lead (CA-ROLE-007)
+
+<a id="ca-fr-012"></a>
+
 - **Priority:** Should
 - **Verification:** Demonstration, Inspection
-- **Trace:** `CA-001`, `CA-006`, `CA-008`
+- **Trace:** `CA-001`, `CA-006`, `CA-008`; [complete decision/threat/test mapping](requirement-matrix.md#ca-fr-012)
 
 The system shall provide a human-inspectable representation of the timeline, provenance, hypothesis ledger, gaps, and evaluation result without requiring access to internal storage.
 
@@ -320,9 +371,13 @@ The system shall provide a human-inspectable representation of the timeline, pro
 
 ### CA-FR-013 — Preserve deterministic results on model failure
 
+**Owner:** Architecture lead (CA-ROLE-007)
+
+<a id="ca-fr-013"></a>
+
 - **Priority:** Must
 - **Verification:** Test
-- **Trace:** `CA-007`, `CA-NFR-003`, `CA-RISK-001`
+- **Trace:** `CA-007`, `CA-009`; `CA-NFR-003`, `CA-RISK-001`; [complete decision/threat/test mapping](requirement-matrix.md#ca-fr-013)
 
 The system shall preserve the deterministic evidence bundle and report synthesis as unavailable when the model is disabled, times out, returns invalid output, or fails.
 
@@ -334,9 +389,13 @@ The system shall preserve the deterministic evidence bundle and report synthesis
 
 ### CA-FR-014 — Enforce the Phase 1 read-only boundary
 
+**Owner:** Architecture lead (CA-ROLE-007)
+
+<a id="ca-fr-014"></a>
+
 - **Priority:** Must
 - **Verification:** Inspection, Test
-- **Trace:** `CA-004`, `CA-010`, `CA-RISK-002`, `CA-RISK-005`
+- **Trace:** `CA-004`, `CA-009`, `CA-010`; `CA-RISK-002`, `CA-RISK-005`; [complete decision/threat/test mapping](requirement-matrix.md#ca-fr-014)
 
 The Phase 1 system shall not expose or invoke cluster mutation, production remediation, or general-purpose command-execution capabilities.
 
@@ -352,7 +411,11 @@ Every requirement in this section is `Draft`.
 
 ### CA-NFR-001 — Reproducibility
 
-**Priority:** Must | **Verification:** Test | **Trace:** `CA-002`, `CA-005`, `CA-008`, `CA-SCENARIO-001-A/D`
+**Owner:** Evaluation engineer (CA-ROLE-002)
+
+<a id="ca-nfr-001"></a>
+
+**Priority:** Must | **Verification:** Test | **Trace:** `CA-002`, `CA-005`, `CA-008`, `CA-009`, `CA-010`; `CA-SCENARIO-001-A/D`; [complete decision/threat/test mapping](requirement-matrix.md#ca-nfr-001)
 
 Fixtures, ground truth, run configuration, scoring configuration, and result provenance shall be versioned so that a reported result can be reproduced or its unavailable dependency can be identified.
 
@@ -360,7 +423,11 @@ Fixtures, ground truth, run configuration, scoring configuration, and result pro
 
 ### CA-NFR-002 — Explainability and auditability
 
-**Priority:** Must | **Verification:** Inspection, Demonstration | **Trace:** `CA-005`, `CA-006`, `CA-SCENARIO-001-A/B`
+**Owner:** Architecture lead (CA-ROLE-007)
+
+<a id="ca-nfr-002"></a>
+
+**Priority:** Must | **Verification:** Inspection, Demonstration | **Trace:** `CA-003`, `CA-005`, `CA-006`, `CA-009`, `CA-010`; `CA-SCENARIO-001-A/B`; [complete decision/threat/test mapping](requirement-matrix.md#ca-nfr-002)
 
 The system shall make inclusion, exclusion, derivation, relationship, hypothesis status, and gap rationale inspectable.
 
@@ -368,7 +435,11 @@ The system shall make inclusion, exclusion, derivation, relationship, hypothesis
 
 ### CA-NFR-003 — Reliability and explicit partial failure
 
-**Priority:** Must | **Verification:** Test | **Trace:** `CA-004`, `CA-007`, `CA-008`, `CA-SCENARIO-001-B/E`
+**Owner:** Architecture lead (CA-ROLE-007)
+
+<a id="ca-nfr-003"></a>
+
+**Priority:** Must | **Verification:** Test | **Trace:** `CA-004`, `CA-007`, `CA-008`, `CA-009`, `CA-010`; `CA-SCENARIO-001-B/E`; [complete decision/threat/test mapping](requirement-matrix.md#ca-nfr-003)
 
 Connector, storage, rule, scorer, and model failures shall surface as explicit failed or partial states rather than silent success.
 
@@ -376,7 +447,11 @@ Connector, storage, rule, scorer, and model failures shall surface as explicit f
 
 ### CA-NFR-004 — Data minimization
 
-**Priority:** Must | **Verification:** Inspection, Test | **Trace:** `CA-004`, `CA-007`, `CA-010`, `CA-RISK-005`
+**Owner:** Architecture lead (CA-ROLE-007)
+
+<a id="ca-nfr-004"></a>
+
+**Priority:** Must | **Verification:** Inspection, Test | **Trace:** `CA-004`, `CA-007`, `CA-010`; `CA-RISK-005`; [complete decision/threat/test mapping](requirement-matrix.md#ca-nfr-004)
 
 The system shall collect and transmit only evidence fields required by the declared scenario and configured analysis boundary.
 
@@ -384,7 +459,11 @@ The system shall collect and transmit only evidence fields required by the decla
 
 ### CA-NFR-005 — Maintainability and separation of concerns
 
-**Priority:** Must | **Verification:** Inspection | **Trace:** `CA-002`, `CA-005`, `CA-007`, `CA-008`
+**Owner:** Architecture lead (CA-ROLE-007)
+
+<a id="ca-nfr-005"></a>
+
+**Priority:** Must | **Verification:** Inspection | **Trace:** `CA-002`, `CA-005`, `CA-007`, `CA-008`, `CA-010`; [complete decision/threat/test mapping](requirement-matrix.md#ca-nfr-005)
 
 Connector acquisition, normalization, deterministic reasoning, synthesis, scoring, and presentation contracts shall be separated and versioned.
 
@@ -392,7 +471,11 @@ Connector acquisition, normalization, deterministic reasoning, synthesis, scorin
 
 ### CA-NFR-006 — Observability of the evaluator
 
-**Priority:** Should | **Verification:** Test, Demonstration | **Trace:** `CA-008`, `CA-010`, `CA-SEC-008`
+**Owner:** Evaluation engineer (CA-ROLE-002)
+
+<a id="ca-nfr-006"></a>
+
+**Priority:** Should | **Verification:** Test, Demonstration | **Trace:** `CA-008`, `CA-010`; `CA-SEC-008`; [complete decision/threat/test mapping](requirement-matrix.md#ca-nfr-006)
 
 The prototype shall emit structured run state sufficient to diagnose which phase, connector, rule, or scorer failed without recording prohibited secrets or raw sensitive payloads.
 
@@ -400,7 +483,11 @@ The prototype shall emit structured run state sufficient to diagnose which phase
 
 ### CA-NFR-007 — Portability of the evaluation corpus
 
-**Priority:** Should | **Verification:** Demonstration | **Trace:** `CA-008`, `CA-009`, `CA-SCENARIO-001`
+**Owner:** Evaluation engineer (CA-ROLE-002)
+
+<a id="ca-nfr-007"></a>
+
+**Priority:** Should | **Verification:** Demonstration | **Trace:** `CA-008`, `CA-009`, `CA-010`; `CA-SCENARIO-001`; [complete decision/threat/test mapping](requirement-matrix.md#ca-nfr-007)
 
 Scenario fixtures and scoring contracts should be runnable in a documented local or CI environment without dependence on customer infrastructure.
 
@@ -408,7 +495,11 @@ Scenario fixtures and scoring contracts should be runnable in a documented local
 
 ### CA-NFR-008 — Performance budget
 
-**Priority:** Should | **Verification:** Test, Analysis | **Trace:** `CA-008`, `CA-DEC-007`
+**Owner:** Evaluation engineer (CA-ROLE-002)
+
+<a id="ca-nfr-008"></a>
+
+**Priority:** Should | **Verification:** Test, Analysis | **Trace:** `CA-008`, `CA-010`; `CA-DEC-007`; [complete decision/threat/test mapping](requirement-matrix.md#ca-nfr-008)
 
 The system shall measure evidence-ingestion, deterministic-assembly, synthesis, and total run duration separately.
 
@@ -416,7 +507,11 @@ The system shall measure evidence-ingestion, deterministic-assembly, synthesis, 
 
 ### CA-NFR-009 — Capacity and bounds
 
-**Priority:** Must | **Verification:** Test | **Trace:** `CA-004`, `CA-008`, `CA-010`, `CA-SEC-009`
+**Owner:** Evaluation engineer (CA-ROLE-002)
+
+<a id="ca-nfr-009"></a>
+
+**Priority:** Must | **Verification:** Test | **Trace:** `CA-004`, `CA-008`, `CA-010`; `CA-SEC-009`; [complete decision/threat/test mapping](requirement-matrix.md#ca-nfr-009)
 
 Every connector and investigation run shall have configured time-window, payload-size, record-count, and retry bounds.
 
@@ -424,7 +519,11 @@ Every connector and investigation run shall have configured time-window, payload
 
 ### CA-NFR-010 — Compatibility and schema evolution
 
-**Priority:** Should | **Verification:** Test, Inspection | **Trace:** `CA-002`, `CA-008`, `CA-SEC-007`
+**Owner:** Architecture lead (CA-ROLE-007)
+
+<a id="ca-nfr-010"></a>
+
+**Priority:** Should | **Verification:** Test, Inspection | **Trace:** `CA-002`, `CA-008`, `CA-010`; `CA-SEC-007`; [complete decision/threat/test mapping](requirement-matrix.md#ca-nfr-010)
 
 Evidence, run-manifest, hypothesis, and result schemas shall declare versions and document backward-compatibility or migration behavior.
 
@@ -436,7 +535,11 @@ Every requirement in this section is `Draft` and traces to the STRIDE model.
 
 ### CA-SEC-001 — Least-privilege read access
 
-**Priority:** Must | **Verification:** Inspection, Test | **Trace:** `CA-004`, `CA-RISK-005`
+**Owner:** Security reviewer (CA-ROLE-004)
+
+<a id="ca-sec-001"></a>
+
+**Priority:** Must | **Verification:** Inspection, Test | **Trace:** `CA-004`, `CA-009`, `CA-010`; `CA-RISK-005`; [complete decision/threat/test mapping](requirement-matrix.md#ca-sec-001)
 
 Connectors shall use the minimum read permissions required for declared evidence and shall not share a credential with a write-capable component.
 
@@ -444,7 +547,11 @@ Connectors shall use the minimum read permissions required for declared evidence
 
 ### CA-SEC-002 — No mutation or arbitrary execution surface
 
-**Priority:** Must | **Verification:** Inspection, Test | **Trace:** `CA-004`, `CA-RISK-002`
+**Owner:** Security reviewer (CA-ROLE-004)
+
+<a id="ca-sec-002"></a>
+
+**Priority:** Must | **Verification:** Inspection, Test | **Trace:** `CA-004`, `CA-009`, `CA-010`; `CA-RISK-002`; [complete decision/threat/test mapping](requirement-matrix.md#ca-sec-002)
 
 Phase 1 shall not expose cluster mutation tools, shell/command tools, or a general-purpose tool dispatcher to model output.
 
@@ -452,7 +559,11 @@ Phase 1 shall not expose cluster mutation tools, shell/command tools, or a gener
 
 ### CA-SEC-003 — Treat evidence as untrusted data
 
-**Priority:** Must | **Verification:** Test | **Trace:** `CA-007`, `CA-RISK-002`
+**Owner:** Security reviewer (CA-ROLE-004)
+
+<a id="ca-sec-003"></a>
+
+**Priority:** Must | **Verification:** Test | **Trace:** `CA-007`, `CA-009`, `CA-010`; `CA-RISK-002`; [complete decision/threat/test mapping](requirement-matrix.md#ca-sec-003)
 
 Logs, annotations, object fields, commit/deployment metadata, and connector responses shall be serialized and labeled as untrusted data across the synthesis boundary.
 
@@ -460,7 +571,11 @@ Logs, annotations, object fields, commit/deployment metadata, and connector resp
 
 ### CA-SEC-004 — Validate model output
 
-**Priority:** Must | **Verification:** Test | **Trace:** `CA-007`, `CA-RISK-001/002`
+**Owner:** Security reviewer (CA-ROLE-004)
+
+<a id="ca-sec-004"></a>
+
+**Priority:** Must | **Verification:** Test | **Trace:** `CA-007`, `CA-009`, `CA-010`; `CA-RISK-001/002`; [complete decision/threat/test mapping](requirement-matrix.md#ca-sec-004)
 
 Model output shall be schema-validated, citation-validated, size-bounded, and treated as untrusted until deterministic checks complete.
 
@@ -468,7 +583,11 @@ Model output shall be schema-validated, citation-validated, size-bounded, and tr
 
 ### CA-SEC-005 — Protect secrets
 
-**Priority:** Must | **Verification:** Inspection, Test | **Trace:** `CA-RISK-005`
+**Owner:** Security reviewer (CA-ROLE-004)
+
+<a id="ca-sec-005"></a>
+
+**Priority:** Must | **Verification:** Inspection, Test | **Trace:** `CA-004`, `CA-010`; `CA-RISK-005`; [complete decision/threat/test mapping](requirement-matrix.md#ca-sec-005)
 
 Credentials and secret values shall not be committed, included in fixtures, copied into model input, or written into ordinary run output.
 
@@ -476,7 +595,11 @@ Credentials and secret values shall not be committed, included in fixtures, copi
 
 ### CA-SEC-006 — Minimize and control model egress
 
-**Priority:** Must | **Verification:** Inspection, Test | **Trace:** `CA-RISK-005`
+**Owner:** Security reviewer (CA-ROLE-004)
+
+<a id="ca-sec-006"></a>
+
+**Priority:** Must | **Verification:** Inspection, Test | **Trace:** `CA-007`, `CA-010`; `CA-RISK-005`; [complete decision/threat/test mapping](requirement-matrix.md#ca-sec-006)
 
 If an external model is used, the transmitted field set, redaction rules, provider, retention assumptions, and egress path shall be declared before the integration is enabled.
 
@@ -484,15 +607,23 @@ If an external model is used, the transmitted field set, redaction rules, provid
 
 ### CA-SEC-007 — Evidence and ground-truth integrity
 
-**Priority:** Must | **Verification:** Test, Inspection | **Trace:** `CA-RISK-007`
+**Owner:** Security reviewer (CA-ROLE-004)
+
+<a id="ca-sec-007"></a>
+
+**Priority:** Must | **Verification:** Test, Inspection | **Trace:** `CA-002`, `CA-008`, `CA-009`, `CA-010`; `CA-RISK-007`; [complete decision/threat/test mapping](requirement-matrix.md#ca-sec-007)
 
 Run manifests shall record integrity data for fixtures, ground truth, rules, and scoring configuration so post-run changes are detectable.
 
-**Acceptance criteria:** Changing any protected fixture, ground-truth, rule, or scorer input after the manifest is created causes an integrity mismatch on verification.
+**Acceptance criteria:** Changing any protected fixture, ground-truth, rule, or scorer input after the manifest is created causes an integrity mismatch on verification. Authorized expiry/deletion is distinguished by a manifest-linked tombstone; it is not scored as tampering, successful replay or evidence of absence. Test both states under the [lifecycle contract](evidence-lifecycle.md).
 
 ### CA-SEC-008 — Audit security-relevant events
 
-**Priority:** Should | **Verification:** Test, Inspection | **Trace:** STRIDE repudiation
+**Owner:** Security reviewer (CA-ROLE-004)
+
+<a id="ca-sec-008"></a>
+
+**Priority:** Should | **Verification:** Test, Inspection | **Trace:** `CA-008`, `CA-010`; `CA-THREAT-R-001`; [complete decision/threat/test mapping](requirement-matrix.md#ca-sec-008)
 
 The system shall record connector authorization failure, validation rejection, policy denial, ground-truth/version mismatch, and model-output rejection without logging secrets.
 
@@ -500,7 +631,11 @@ The system shall record connector authorization failure, validation rejection, p
 
 ### CA-SEC-009 — Bound untrusted input
 
-**Priority:** Must | **Verification:** Test | **Trace:** STRIDE denial of service
+**Owner:** Security reviewer (CA-ROLE-004)
+
+<a id="ca-sec-009"></a>
+
+**Priority:** Must | **Verification:** Test | **Trace:** `CA-004`, `CA-009`, `CA-010`; `CA-THREAT-D-001`; [complete decision/threat/test mapping](requirement-matrix.md#ca-sec-009)
 
 The system shall enforce configured byte, record, cardinality, time-window, and retry limits before untrusted inputs can exhaust the evaluation environment.
 
@@ -508,7 +643,11 @@ The system shall enforce configured byte, record, cardinality, time-window, and 
 
 ### CA-SEC-010 — Fail securely
 
-**Priority:** Must | **Verification:** Test | **Trace:** `CA-RISK-001/002/004`
+**Owner:** Security reviewer (CA-ROLE-004)
+
+<a id="ca-sec-010"></a>
+
+**Priority:** Must | **Verification:** Test | **Trace:** `CA-007`, `CA-009`, `CA-010`; `CA-RISK-001/002/004`; [complete decision/threat/test mapping](requirement-matrix.md#ca-sec-010)
 
 Validation, authorization, citation, and policy failures shall fail closed for the affected capability and shall not be converted into a confirmed causal result.
 
@@ -516,7 +655,11 @@ Validation, authorization, citation, and policy failures shall fail closed for t
 
 ### CA-SEC-011 — Dependency and artifact integrity
 
-**Priority:** Must | **Verification:** Inspection, Test | **Trace:** `CA-010`
+**Owner:** Security reviewer (CA-ROLE-004)
+
+<a id="ca-sec-011"></a>
+
+**Priority:** Must | **Verification:** Inspection, Test | **Trace:** `CA-008`, `CA-010`; [complete decision/threat/test mapping](requirement-matrix.md#ca-sec-011)
 
 Future implementation dependencies and container artifacts shall be pinned or otherwise reproducibly resolved, scanned under the approved SSDLC policy, and associated with build provenance before a Phase 1 implementation result is accepted.
 
@@ -524,7 +667,11 @@ Future implementation dependencies and container artifacts shall be pinned or ot
 
 ### CA-SEC-012 — Separate result evidence from approval
 
-**Priority:** Must | **Verification:** Inspection | **Trace:** `CA-RISK-010`
+**Owner:** Security reviewer (CA-ROLE-004)
+
+<a id="ca-sec-012"></a>
+
+**Priority:** Must | **Verification:** Inspection | **Trace:** `CA-010`; `CA-RISK-010`; [complete decision/threat/test mapping](requirement-matrix.md#ca-sec-012)
 
 The system and repository workflow shall not represent a passing test, merged pull request, or closed issue as security approval, risk acceptance, or product-release authorization.
 
@@ -544,13 +691,9 @@ A requirement may be proposed for approval only when:
 
 ### 10.2 Proposed engineering gate
 
-The charter currently proposes at least 70% evidence-citation accuracy and correct abstention on designated missing-evidence cases. The following remain approval decisions and are not silently added as pass criteria:
+The five initial variants qualify the investigation harness only. The full evaluation gate requires the planned 8–12-scenario corpus, held-out cases, frozen ground truth and independent scoring review in [the corpus plan](scenarios/corpus-plan.md).
 
-- Whether citation accuracy is micro-, macro-, claim-, or scenario-weighted.
-- Required false-cause rejection rate and whether any false-cause selection is gate-blocking.
-- Required abstention rate for designated gap scenarios.
-- Maximum unsupported-claim count.
-- Performance and capacity budgets.
+The historical 70% citation target is an unbenchmarked hypothesis. [CA-DEC-006](architecture/adr/CA-DEC-006.md) proposes stricter quality targets and separates citation-ID validity from factual support. All numeric quality metrics, weights and performance/capacity budgets remain provisional until benchmarked and explicitly approved before gate use. No target has been achieved or approved. Security requirements cannot be waived by aggregate accuracy.
 
 ### 10.3 Prohibited acceptance shortcuts
 
@@ -573,32 +716,19 @@ The authoritative scenario definition is [CA-SCENARIO-001](scenarios/CA-SCENARIO
 
 ## 12. Requirements traceability summary
 
-| Backlog | Requirements | Scenario / evidence |
-|---|---|---|
-| `CA-001` / issue #1 | Document control, roles, all requirement classes | Baseline review and approval record |
-| `CA-002` / issue #2 | `CA-FR-002/010`, `CA-NFR-001/010`, `CA-SEC-007` | Evidence schema and replay fixtures |
-| `CA-003` / issue #3 | `CA-FR-003/004`, `CA-RISK-003` | `CA-SCENARIO-001-D` |
-| `CA-004` / issue #4 | `CA-FR-001/014`, `CA-SEC-001/002/005/009` | RBAC and connector-boundary tests |
-| `CA-005` / issue #5 | `CA-FR-004/005`, `CA-NFR-002/005` | Repeatability and gap fixtures |
-| `CA-006` / issue #6 | `CA-FR-006/009/012` | Hypothesis and abstention fixtures |
-| `CA-007` / issue #7 | `CA-FR-007/008/013`, `CA-SEC-003/004/006/010` | Citation, injection, and model-failure tests |
-| `CA-008` / issue #8 | `CA-FR-010/011`, `CA-NFR-001/006–010`, `CA-SEC-007/008/011` | Versioned evaluation report |
-| `CA-009` / issue #9 | Scenario-mapped requirements in section 11 | `CA-SCENARIO-001-A–E` |
-| `CA-010` / issue #10 | `CA-FR-014`, all `CA-SEC-*`, gate controls | STRIDE, risk, and security-gate review |
-
-Detailed backlog links are maintained in [traceability.md](traceability.md).
+The [complete 36-row matrix](requirement-matrix.md) is authoritative for requirement-to-issue, accountable role, decision, threat and planned-test edges. The [backlog register](traceability.md) supplies the exact reverse issue-to-requirement edges. The [STRIDE register](security/threat-model.md) supplies threat-to-risk-to-requirement-to-test edges, and the [risk register](security/risk-register.md) links back to these records. CA-FR-011 and CA-SEC-007 are explicitly verified in the scenario matrix. No planned test is claimed executed.
 
 ## 13. Decisions requiring owner approval
 
-| Decision ID | Decision | Proposed/default position | Why approval is required |
-|---|---|---|---|
-| `CA-DEC-001` | Phase 1 system boundary and evidence sources | Single kind cluster; Kubernetes events/changes, Prometheus, Loki, deployment metadata | Determines connector scope and acceptance fixtures. |
-| `CA-DEC-002` | Evidence store | PostgreSQL with JSONB and relational provenance edges | Consequential architecture and operational commitment. |
-| `CA-DEC-003` | Timestamp and skew policy | Preserve source clocks; no hidden ordering; numeric tolerance TBD | Affects causal ordering and scenario scores. |
-| `CA-DEC-004` | Model provider and data-egress policy | One provider behind a disabled-by-default constrained boundary; exact provider/redaction TBD | Determines privacy, retention, cost, and security controls. |
-| `CA-DEC-005` | Evidence retention | Synthetic Phase 1 fixtures retained in Git; generated runs retained for a defined TBD period | Determines data lifecycle and storage requirements. |
-| `CA-DEC-006` | Engineering gate metrics | Retain 70% citation target; define false-cause, abstention, unsupported-claim, and weighting rules | Prevents post-result threshold selection. |
-| `CA-DEC-007` | Performance and capacity budgets | Measure first; numeric budgets TBD | Avoids fabricated targets while preserving measurability. |
-| `CA-DEC-008` | Requirement and risk approval authority | Name product, security, and architecture approvers before baseline approval | Required for valid signoff and change control. |
+| Decision | Topic | Status |
+|---|---|---|
+| [CA-DEC-001](architecture/adr/CA-DEC-001.md) | System boundary and allowed sources | Proposed; no approval recorded |
+| [CA-DEC-002](architecture/adr/CA-DEC-002.md) | Evidence store and provenance | Proposed; no approval recorded |
+| [CA-DEC-003](architecture/adr/CA-DEC-003.md) | Timestamp provenance and skew | Proposed; no approval recorded |
+| [CA-DEC-004](architecture/adr/CA-DEC-004.md) | Model boundary, provider and data egress | Proposed; no approval recorded |
+| [CA-DEC-005](architecture/adr/CA-DEC-005.md) | Evidence lifecycle and replay after expiry | Proposed; no approval recorded |
+| [CA-DEC-006](architecture/adr/CA-DEC-006.md) | Evaluation and security gates | Proposed; no approval recorded |
+| [CA-DEC-007](architecture/adr/CA-DEC-007.md) | Performance and capacity budgets | Proposed; no approval recorded |
+| [CA-DEC-008](architecture/adr/CA-DEC-008.md) | Accountability and approval authorities | Proposed; no approval recorded |
 
-No decision above is approved by this draft.
+Product-owner approval is required for all eight proposals, with separate architecture, security and gate review as applicable. Named approval authorities remain unassigned. Proposed ownership is not approval.

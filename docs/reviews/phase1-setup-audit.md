@@ -48,3 +48,6 @@ The repository is correctly private, planning-only, and explicit that no product
 
 The proposed `0.2.0-draft` SRS is suitable for structured review, not for implementation or release authorization. Owner decisions listed in SRS section 13 must be resolved before the requirements can become an approved baseline.
 
+## Historical scope note
+
+The residual gaps above describe the original 0.2.0-draft audit, not the current remediation state. [Independent-review remediation](phase1-remediation.md) records the 0.3.0-draft changes. Accountable owning roles and proposed decisions now exist; named approvers, actual benchmarks and approvals remain outstanding.

@@ -2,15 +2,17 @@
 
 | Field | Value |
 |---|---|
-| Scenario version | `0.2.0-draft` |
+| Scenario version | `0.3.0-draft` |
 | Status | Draft for review — not approved |
-| Scenario owner | Unassigned |
-| Ground-truth reviewer | Unassigned |
+| Scenario owner | Evaluation engineer (CA-ROLE-002) |
+| Ground-truth reviewer | Independent evaluation/gate reviewer; named incumbent pending CA-DEC-008 |
 | Parent requirements | See verification matrix below |
 
 ## 1. Purpose
 
 Verify that Cloud Autopsy can reconstruct an incident from provenance-linked evidence, reject a temporally correlated but noncausal Deployment, represent missing evidence, preserve timestamp uncertainty, contain instruction-like telemetry, and retain deterministic results when synthesis is unavailable.
+
+These five variants qualify the initial investigation harness only. They are one scenario family, not five independent corpus cases. The full evaluation gate requires the planned 8–12-scenario [corpus](corpus-plan.md), reviewed held-out cases and approved benchmarked metrics.
 
 ## 2. Incident narrative
 
@@ -125,6 +127,10 @@ The model is disabled, times out, or returns invalid schema/citations.
 | Missing causal evidence triggers abstention | `CA-FR-009`, `CA-SEC-010` | B | Abstention outcome and reason |
 | Malicious telemetry remains inert | `CA-FR-007/014`, `CA-SEC-002/003/009/010` | C | Policy-denial/security test result |
 | Model failure preserves deterministic results | `CA-FR-013`, `CA-NFR-003` | E | Partial run with retained bundle |
+| Evidence normalization preserves source identity | `CA-FR-002` / `CA-TEST-FR-002` | All | Source-qualified identifiers, raw/derived fields and schema version |
+| Replay preserves results and declared availability | `CA-FR-010` / `CA-TEST-FR-010` | A, D plus lifecycle tests | Equivalent retained-input replay; explicit incomplete state after expiry |
+| Scenario execution and scoring preserve all outcomes | `CA-FR-011` / `CA-TEST-FR-011` | All | Versioned machine/human reports, failures, scorer and threshold versions |
+| Fixture and ground-truth integrity | `CA-SEC-007` / `CA-TEST-SEC-007`; `CA-THREAT-T-001` | All plus tamper test | Manifest hashes verified; changing protected inputs detects mismatch |
 | No write capability exists | `CA-FR-014`, `CA-SEC-001/002` | All | Permission inspection and negative tests |
 
 ## 9. Scoring outputs
@@ -141,7 +147,7 @@ Each run shall report, without silently discarding failures:
 - Security-policy pass/fail with rejected-event details.
 - Connector/model/scorer partial-failure status.
 
-Thresholds and weighting beyond the existing proposed 70% citation target require owner approval under `CA-DEC-006`.
+All quality targets and weighting, including the historical 70% target and the stricter review proposals, remain provisional until benchmarked and approved under `CA-DEC-006`. See the [requirement matrix](../requirement-matrix.md) for complete requirement/test/issue/threat links.
 
 ## 10. Exit criteria for scenario review
 
@@ -158,4 +164,3 @@ Thresholds and weighting beyond the existing proposed 70% citation target requir
 - Clock-skew values and tolerance policy.
 - Ground-truth file format and integrity mechanism.
 - Score weighting and gate thresholds.
-

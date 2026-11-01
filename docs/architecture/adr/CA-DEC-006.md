@@ -1,0 +1,39 @@
+# CA-DEC-006 — Evaluation and security gates
+
+- **Status:** Proposed
+- **Date:** 2026-11-01
+- **Decision owner:** Evaluation engineer (role accountable for proposal; named incumbent pending CA-DEC-008)
+- **Approval status:** No approval recorded; not accepted.
+- **Required approval:** Product / requirements authority; architecture approver; security reviewer for security implications; evaluation/gate reviewer for benchmark and scoring implications. External access additionally requires the separate CA-DEC-004 data-egress and security approval.
+
+## Proposed MVP position
+
+Five CA-SCENARIO-001 variants qualify the initial investigation harness only. The full gate needs a planned 8–12-scenario corpus with held-out cases. Provisional review targets: 100% valid in-bundle citation IDs; at least 90% supported factual claims overall and 80% per scenario; zero unsupported confirmed causal claims; zero false-cause selections; 100% correct abstention on designated gap cases; 100% deterministic equivalence; zero mutation/tool-policy bypasses or secret-canary propagation; no unresolved Critical/High security finding. Supersede the historical 70% hypothesis only after benchmark review and explicit approval.
+
+## Rationale
+
+Separate citation existence from factual support and prevent one easy scenario from masking failures.
+
+## Alternatives
+
+The historical 70% aggregate alone permits severe errors; a single blended score can hide safety failures.
+
+## Security implications
+
+Security failures cannot be averaged away. The zero-bypass and no-secret requirements remain proposed security constraints; measured quality targets do not constitute signoff.
+
+## Review triggers
+
+Corpus/scorer/ground-truth change, first benchmark, failed security case or threshold proposal.
+
+## Traceability and validation
+
+Requirements: [CA-FR-006](../../srs.md#ca-fr-006), [CA-FR-008](../../srs.md#ca-fr-008), [CA-FR-009](../../srs.md#ca-fr-009), [CA-FR-011](../../srs.md#ca-fr-011), [CA-NFR-001](../../srs.md#ca-nfr-001), [CA-NFR-007](../../srs.md#ca-nfr-007), [CA-SEC-004](../../srs.md#ca-sec-004), [CA-SEC-010](../../srs.md#ca-sec-010), [CA-SEC-012](../../srs.md#ca-sec-012).
+
+Backlog: [CA-002 / #2](https://github.com/rpahasara/cloud-autopsy/issues/2), [CA-005 / #5](https://github.com/rpahasara/cloud-autopsy/issues/5), [CA-006 / #6](https://github.com/rpahasara/cloud-autopsy/issues/6), [CA-007 / #7](https://github.com/rpahasara/cloud-autopsy/issues/7), [CA-008 / #8](https://github.com/rpahasara/cloud-autopsy/issues/8), [CA-009 / #9](https://github.com/rpahasara/cloud-autopsy/issues/9), [CA-010 / #10](https://github.com/rpahasara/cloud-autopsy/issues/10).
+
+Planned verification and reverse links: [requirement matrix](../../requirement-matrix.md). No implementation, benchmark or security test has been run. Review rationale and alternatives, then collect the linked evidence under a separately authorized implementation plan.
+
+## Approval record
+
+No named approver, approval date or acceptance record exists. This proposal does not authorize implementation, external provider access, risk acceptance or release.
