@@ -1,0 +1,45 @@
+{
+  "truth_version": "0.1.0-spike",
+  "scenario_id": "CX-DEPLOY-CAUSE",
+  "fixture_id": "cx-deploy-cause",
+  "fixture_version": "0.1.0-spike",
+  "custody_note": "Evaluator-only. Developer-authored counterexample written for PR #13 before the engine changes that evaluate it; NOT an independent or held-out case.",
+  "causal_change": {
+    "mechanism": "deployment_rollout",
+    "entity": {"kind": "Deployment", "namespace": "ca-demo", "name": "checkout-api"},
+    "source_ref": "k8s:deployment/ca-demo/checkout-api@rev2",
+    "failure_mechanism": "revision 2 sets env DB_POOL_MAX=4, overriding the ConfigMap value 50 on new pods only; new pods exhaust the pool"
+  },
+  "false_cause": {
+    "mechanism": "config_value_change",
+    "entity": {"kind": "ConfigMap", "namespace": "ca-demo", "name": "checkout-db-pool"},
+    "source_ref": "k8s:configmap/ca-demo/checkout-db-pool@1003"
+  },
+  "required_evidence": {
+    "base": [
+      "k8s:deployment/ca-demo/checkout-api@rev2",
+      "k8s:configmap/ca-demo/checkout-db-pool@1003",
+      "k8s:replicaset/ca-demo/checkout-api-6d4b5",
+      "k8s:replicaset/ca-demo/checkout-api-7c9f8",
+      "k8s:pod/ca-demo/checkout-api-7c9f8-b1",
+      "k8s:pod/ca-demo/checkout-api-7c9f8-b2",
+      "loki:{namespace=ca-demo,pod=checkout-api-7c9f8-b1}#0001",
+      "loki:{namespace=ca-demo,pod=checkout-api-7c9f8-b1}#0002",
+      "loki:{namespace=ca-demo,pod=checkout-api-7c9f8-b2}#0001",
+      "loki:{namespace=ca-demo,pod=checkout-api-7c9f8-b2}#0002",
+      "prom:checkout_api:error_ratio{namespace=ca-demo}@2026-10-20T09:01:45Z",
+      "alert:CheckoutHighErrorRate@2026-10-20T09:01:45Z"
+    ],
+    "withheld_by_variant": {}
+  },
+  "variants": {
+    "A": {
+      "expected_outcome": "resolved",
+      "expected_cause": "causal_change",
+      "expected_run_state": "deterministic_complete",
+      "expected_synthesis_status": "disabled",
+      "expected_gaps": [],
+      "false_cause_trap": true
+    }
+  }
+}

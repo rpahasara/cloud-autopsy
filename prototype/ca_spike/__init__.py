@@ -3,4 +3,4 @@
 This package must never read evaluator ground truth or perform network I/O.
 """
 
-ENGINE_VERSION = "ca-spike-engine/0.1"
+ENGINE_VERSION = "ca-spike-engine/0.2"

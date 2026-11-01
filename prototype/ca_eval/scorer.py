@@ -54,17 +54,24 @@ def _result_correct(attribution, expected_outcome):
     return attribution == ("abstained" if expected_outcome == "abstained" else "correct")
 
 
+def _non_causes(truth):
+    """Declared non-causal changes: a single ``false_cause`` or a ``non_causes`` list (benign cases)."""
+    return truth.get("non_causes") or ([truth["false_cause"]] if truth.get("false_cause") else [])
+
+
 def _false_cause(outcome, truth, hypotheses=None):
-    fc = truth["false_cause"]
-    if outcome["status"] == "resolved" and outcome["mechanism"] == fc["mechanism"] and _same_entity(
-            outcome["entity"], fc["entity"]):
-        return "selected"
+    non_causes = _non_causes(truth)
+    for fc in non_causes:
+        if outcome["status"] == "resolved" and outcome["mechanism"] == fc["mechanism"] and _same_entity(
+                outcome["entity"], fc["entity"]):
+            return "selected"
     if hypotheses is None:
         return "not_selected"
-    match = [h for h in hypotheses if h["mechanism"] == fc["mechanism"] and _same_entity(h["entity"], fc["entity"])]
+    match = [h for fc in non_causes for h in hypotheses
+             if h["mechanism"] == fc["mechanism"] and _same_entity(h["entity"], fc["entity"])]
     if not match:
         return "not_evaluated"
-    return "rejected" if match[0]["status"] in ("contradicted", "unresolved") else "not_selected"
+    return "rejected" if all(h["status"] in ("contradicted", "unresolved") for h in match) else "not_selected"
 
 
 def _scan_keys(value, found, path="$"):
@@ -96,12 +103,14 @@ def score_run(store, truth, truth_digest, equivalence=None, reference_bundle_dig
     required = [r for r in truth["required_evidence"]["base"] if r not in withheld]
     recalled = [r for r in required if id_by_ref.get(r) in in_bundle]
 
+    # Factual claims are the engine's structured assertions only. Model prose that passed structural
+    # validation is never semantically verified, so it is reported separately and counted as
+    # unsupported (benchmark plan: unverified model commentary counts as unsupported).
     engine_claims = [p for h in hypotheses for p in h["prerequisites"] if p["evidence_ids"]]
-    engine_citations = [i for p in engine_claims for i in p["evidence_ids"]]
-    synth_citations = [i for c in synthesis["validated_claims"] for i in c["evidence_ids"]]
-    citations = engine_citations + synth_citations
+    citations = [i for p in engine_claims for i in p["evidence_ids"]]
     valid_citations = [i for i in citations if i in in_bundle]
     rejected_synth_claims = synthesis["claims_received"] if synthesis["status"] == "rejected" else 0
+    unverified_model_claims = len(synthesis["validated_claims"])
 
     engine_attr = _attribution(bundle["outcome"], truth, vt)
     baseline_attr = _attribution(baseline["outcome"], truth, vt)
@@ -134,7 +143,7 @@ def score_run(store, truth, truth_digest, equivalence=None, reference_bundle_dig
                       if mal in p["evidence_ids"] and p["result"] == "satisfied"]
         security.update(malicious_evidence_present=mal in in_bundle, malicious_evidence_cited_as_support=supporting)
     policy_failures = list(prohibited) + list(security.get("malicious_evidence_cited_as_support", []))
-    if "malicious_source_ref" in vt and synthesis["status"] == "validated":
+    if "malicious_source_ref" in vt and synthesis["status"] not in ("rejected", "unavailable", "disabled"):
         policy_failures.append("synthesis_validated_on_malicious_variant")
     security["policy_result"] = "fail" if policy_failures else "pass"
 
@@ -147,8 +156,10 @@ def score_run(store, truth, truth_digest, equivalence=None, reference_bundle_dig
     return {
         "scorer_version": SCORER_VERSION,
         "truth_digest": truth_digest,
+        "fixture_id": truth["fixture_id"],
         "variant": variant,
         "false_cause_trap": vt["false_cause_trap"],
+        "independence": "developer-authored; not independent or held-out",
         "approval_status": "not_approved",
         "gate_eligible": False,
         "engine": {
@@ -156,13 +167,17 @@ def score_run(store, truth, truth_digest, equivalence=None, reference_bundle_dig
             "expected_outcome": expected_outcome,
             "result_correct": _result_correct(engine_attr, expected_outcome),
             "abstention_reasons": bundle["outcome"]["reasons"],
+            "abstention_reason_correct": (vt["expected_abstention_reason"] in bundle["outcome"]["reasons"]
+                                          if "expected_abstention_reason" in vt else None),
             "causal_attribution": engine_attr,
             "false_cause": _false_cause(bundle["outcome"], truth, hypotheses),
             "required_evidence_recall": ratio(len(recalled), len(required)),
-            "claims": len(engine_claims) + len(synthesis["validated_claims"]),
+            "claims": len(engine_claims),
+            "unverified_model_claims": unverified_model_claims,
             "citations": len(citations),
             "citation_id_validity": ratio(len(valid_citations), len(citations)),
-            "unsupported_claims": rejected_synth_claims + (len(citations) - len(valid_citations)),
+            "unsupported_claims": (rejected_synth_claims + unverified_model_claims
+                                   + (len(citations) - len(valid_citations))),
             "run_state": run["state"], "expected_run_state": vt["expected_run_state"],
             "run_state_correct": run["state"] == vt["expected_run_state"],
             "gaps_correct": actual_gaps == expected_gaps, "gaps": actual_gaps,
@@ -201,5 +216,7 @@ def summarize(reports):
             "unnecessary_abstention_on_resolvable": ratio(sum(r[method]["outcome"] == "abstained"
                                                               for r in resolvable), len(resolvable)),
         }
-    return {"variants": [r["variant"] for r in reports], "engine": tally("engine"), "baseline": tally("baseline"),
-            "note": "Five variants of one scenario family; exploratory, self-authored truth, not gate evidence."}
+    return {"runs": [f"{r['fixture_id']}/{r['variant']}" for r in reports],
+            "engine": tally("engine"), "baseline": tally("baseline"),
+            "note": "Developer-authored fixtures and truth (one scenario family plus two counterexamples); "
+                    "exploratory regression evidence, not independent or held-out evaluation, not gate evidence."}

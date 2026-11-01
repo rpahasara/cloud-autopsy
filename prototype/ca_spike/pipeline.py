@@ -11,7 +11,7 @@ from .canonical import CanonicalError, digest
 from .model import (AcquisitionOutcome, EVIDENCE_CLASS, evidence_identity, make_evidence_id,
                     observation_payload)
 from .store import ArtifactMissing
-from .synthesis import run_synthesis
+from .synthesis import build_input, run_synthesis
 
 
 def fixture_info(scenario):
@@ -62,6 +62,7 @@ def run_investigation(scenario, store, permute_seed=None, duplicate_delivery=Fal
     store.put("synthesis.json", synthesis)
     run = {
         "run_id": str(uuid.uuid4()),
+        "fixture_id": scenario["fixture_manifest"]["fixture_id"],
         "variant": scenario["variant"]["variant"],
         "state": run_state,
         "stage_history": ["queued", "collecting", "sealed", "assembling", bundle["deterministic_state"]],
@@ -132,11 +133,31 @@ def replay(store):
     sealed = seal(outcomes, deliveries, inputs["clock_domains"], inputs["plan"], inputs["fixture"])
     if sealed["manifest_digest"] != stored_manifest["manifest_digest"]:
         problems.append("retained_inputs_do_not_match_manifest")
+    # Whole persisted records, including derived fields (intervals, parse/clock status, class,
+    # trust label), must equal a fresh normalization of the authenticated retained inputs.
+    recomputed = {e.evidence_id: e.record() for e in sealed["evidence"]}
+    stored = {r.get("evidence_id"): r for r in records}
+    for eid in sorted(set(recomputed) | set(stored)):
+        if eid not in stored or eid not in recomputed or digest(stored[eid]) != digest(recomputed[eid]):
+            problems.append(f"persisted_evidence_differs_from_normalization:{eid}")
+    if len(stored) != len(records):
+        problems.append("duplicate_persisted_evidence_records")
     if problems:
         return {"state": "integrity_mismatch", "details": problems}
 
-    _, bundle_digest = assemble(sealed, inputs["plan"])
+    bundle, bundle_digest = assemble(sealed, inputs["plan"])
     if bundle_digest != stored_bundle["bundle_digest"]:
-        return {"state": "not_equivalent", "details": [f"recomputed {bundle_digest}"]}
+        problems.append("stored_bundle_differs_from_recomputation")
+    try:
+        if store.get("baseline.json") != naive_temporal_correlation(sealed["evidence"], inputs["plan"]):
+            problems.append("stored_baseline_differs_from_recomputation")
+        if store.get("synthesis.json")["input_digest"] != digest(build_input(bundle, bundle_digest)):
+            problems.append("synthesis_input_digest_mismatch")
+    except ArtifactMissing as exc:
+        return {"state": "missing_unexplained", "details": [f"artifact_missing:{exc}"]}
+    if problems:
+        return {"state": "integrity_mismatch", "details": problems}
     return {"state": "equivalent", "details": [], "bundle_digest": bundle_digest,
-            "manifest_digest": sealed["manifest_digest"]}
+            "manifest_digest": sealed["manifest_digest"],
+            "not_verified": ["synthesis response content (not retained; only its digest and validation result)",
+                             "run.json volatile metadata"]}

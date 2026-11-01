@@ -1,0 +1,44 @@
+{
+  "truth_version": "0.1.0-spike",
+  "scenario_id": "CX-BENIGN",
+  "fixture_id": "cx-benign",
+  "fixture_version": "0.1.0-spike",
+  "custody_note": "Evaluator-only. Developer-authored benign/no-incident counterexample written for PR #13 before the engine changes that evaluate it; NOT an independent or held-out case.",
+  "causal_change": null,
+  "false_cause": null,
+  "non_causes": [
+    {
+      "mechanism": "config_value_change",
+      "entity": {"kind": "ConfigMap", "namespace": "ca-demo", "name": "checkout-db-pool"},
+      "source_ref": "k8s:configmap/ca-demo/checkout-db-pool@1004"
+    },
+    {
+      "mechanism": "deployment_rollout",
+      "entity": {"kind": "Deployment", "namespace": "ca-demo", "name": "checkout-api"},
+      "source_ref": "k8s:deployment/ca-demo/checkout-api@rev2"
+    }
+  ],
+  "required_evidence": {
+    "base": [
+      "k8s:configmap/ca-demo/checkout-db-pool@1004",
+      "k8s:deployment/ca-demo/checkout-api@rev2",
+      "k8s:pod/ca-demo/checkout-api-7c9f8-b1",
+      "k8s:pod/ca-demo/checkout-api-7c9f8-b2",
+      "loki:{namespace=ca-demo,pod=checkout-api-7c9f8-b1}#0002",
+      "loki:{namespace=ca-demo,pod=checkout-api-7c9f8-b2}#0002",
+      "prom:checkout_api:error_ratio{namespace=ca-demo}@2026-10-22T10:05:45Z"
+    ],
+    "withheld_by_variant": {}
+  },
+  "variants": {
+    "A": {
+      "expected_outcome": "abstained",
+      "expected_cause": null,
+      "expected_abstention_reason": "no_symptom_observed",
+      "expected_run_state": "deterministic_complete",
+      "expected_synthesis_status": "disabled",
+      "expected_gaps": [],
+      "false_cause_trap": true
+    }
+  }
+}

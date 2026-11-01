@@ -45,7 +45,48 @@ class SynthesisValidatorTests(RunTestCase):
         self.assertEqual(run_synthesis("stub", {"behavior": "unavailable"}, self.bundle, self.digest)["status"],
                          "unavailable")
         ok = run_synthesis("stub", {"behavior": "respond", "response": self.response()}, self.bundle, self.digest)
-        self.assertEqual(ok["status"], "validated")
+        # PR #13: structural validation is named as such; it is not semantic validation of prose
+        self.assertEqual(ok["status"], "structurally_validated")
+        self.assertEqual(ok["semantic_validation"], "not_performed")
+
+    def test_empty_citation_list_is_rejected(self):
+        _, reasons, _ = validate_response(self.response(evidence_ids=[]), self.bundle, self.digest)
+        self.assertIn("claim[0]:empty_citation", reasons)
+
+    def test_factual_claim_on_unsatisfied_assertion_is_rejected(self):
+        p = prereq(hypothesis(self.bundle, "deployment_rollout"), "changed_field_mapped")
+        self.assertEqual(p["result"], "unsatisfied")
+        response = self.response(text="The rollout changed a pool setting.", evidence_ids=p["evidence_ids"],
+                                 assertion_keys=[p["assertion_key"]])
+        _, reasons, _ = validate_response(response, self.bundle, self.digest)
+        self.assertIn("claim[0]:assertion_not_satisfied", reasons)
+
+    def test_unresolved_claim_must_cite_a_non_satisfied_assertion(self):
+        p = prereq(hypothesis(self.bundle, "deployment_rollout"), "changed_field_mapped")
+        ok = self.response(kind="unresolved", text="No mechanism maps the rollout's changed fields.",
+                           evidence_ids=p["evidence_ids"], assertion_keys=[p["assertion_key"]])
+        self.assertEqual(validate_response(ok, self.bundle, self.digest)[1], [])
+        _, reasons, _ = validate_response(self.response(kind="unresolved"), self.bundle, self.digest)
+        self.assertIn("claim[0]:unresolved_claim_on_satisfied_assertion", reasons)
+
+    def test_citations_must_exactly_match_the_assertion_evidence(self):
+        partial = self.response(evidence_ids=self.assertion["evidence_ids"][:0] or [])
+        full = prereq(hypothesis(self.bundle, "config_value_change"), "consumed_by_symptomatic_pods")
+        subset = self.response(evidence_ids=full["evidence_ids"][:1], assertion_keys=[full["assertion_key"]])
+        _, reasons, _ = validate_response(subset, self.bundle, self.digest)
+        self.assertIn("claim[0]:citation_set_differs_from_assertion", reasons)
+        self.assertIn("claim[0]:empty_citation", validate_response(partial, self.bundle, self.digest)[1])
+
+    def test_contradictory_prose_is_never_presented_as_a_supported_fact(self):
+        lie = self.response(text="The Deployment checkout-api is the confirmed root cause.")
+        record = run_synthesis("stub", {"behavior": "respond", "response": lie}, self.bundle, self.digest)
+        self.assertEqual(record["status"], "structurally_validated")
+        claim = record["validated_claims"][0]
+        self.assertEqual(claim["semantic_status"], "unverified_model_text")
+        self.assertNotIn("Deployment", claim["supported_fact"])
+        self.assertIn("change_observed", claim["supported_fact"])
+        self.assertNotIn("text", claim)  # model prose is only exposed under an explicitly untrusted key
+        self.assertEqual(claim["text_untrusted"], lie["claims"][0]["text"])
 
     def test_synthesis_never_mutates_the_bundle(self):
         before = repr(self.bundle)

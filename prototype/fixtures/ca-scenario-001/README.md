@@ -9,7 +9,7 @@ Synthetic, offline fixture for [CA-SPIKE-001](../../../docs/spikes/CA-SPIKE-001.
 - The application polls `/etc/checkout/pool/pool.maxConnections` every 5 s. On a content change it rebuilds its DB connection pool **without restarting** (restart count stays 0) and logs template `CONFIG_RELOADED` with the parsed value and the SHA-256 of the file content. On start-up it logs `CONFIG_LOADED` in the same form.
 - When the pool is saturated a request waits 5 s, fails and the app logs `POOL_EXHAUSTED`. At ~120 requests/s, 4 connections are insufficient; 50 are sufficient.
 
-A consumption link is established by **content**, not by time: the ConfigMap change's `after_value_sha256` equals the `value_sha256` logged by the pod, the pod mounts that ConfigMap without `subPath`, and the log is not strictly earlier than the change.
+A consumption link is established by **content** and confirmed by **chronology**: the ConfigMap change's `after_value_sha256` equals the `value_sha256` logged by the pod, the pod mounts that ConfigMap without `subPath`, and the log is provably later than the change. Since PR #13 (`ca-rel/0.2-spike`), an unordered log-versus-change pair is recorded as a chronology rejection and never counts as consumption.
 
 ## Causal change, correlated non-cause and ordering (reference clock, UTC, 2026-10-15)
 

@@ -3,11 +3,17 @@
 There is no model client in this spike and no network code. A stub response stands in
 for an untrusted model output so the validator can be exercised. Validation rejects the
 entire attempt on any structural or policy failure and never alters the ledger.
+
+A passing attempt is only ``structurally_validated``: every claim cites a non-empty
+evidence set exactly equal to its assertions' evidence, factual kinds cite satisfied
+assertions and ``unresolved`` claims cite non-satisfied ones. The free text is not
+checked semantically; it is kept as ``text_untrusted`` and the only fact exposed is
+``supported_fact``, rendered from the deterministic ledger.
 """
 
 from .canonical import CanonicalError, canonical_bytes, digest
 
-CONTRACT_VERSION = "ca-synth/0.1-spike"
+CONTRACT_VERSION = "ca-synth/0.2-spike"
 ALLOWED_TOP = {"contract_version", "bundle_digest", "claims", "limitations"}
 ALLOWED_CLAIM = {"claim_id", "kind", "text", "evidence_ids", "assertion_keys"}
 ALLOWED_KINDS = {"observed", "derived", "unresolved"}
@@ -73,6 +79,9 @@ def validate_response(response, bundle, bundle_digest):
         reasons.append("too_many_claims")
     allowed_ids = set(bundle["evidence_ids"])
     assertions = {p["assertion_key"]: p for h in bundle["ledger"]["hypotheses"] for p in h["prerequisites"]}
+    facts = {p["assertion_key"]: (f"{h['mechanism']} {h['entity']['kind']}/{h['entity']['namespace']}/"
+                                  f"{h['entity']['name']}: {p['key']} = {p['result']}")
+             for h in bundle["ledger"]["hypotheses"] for p in h["prerequisites"]}
     validated = []
     for i, claim in enumerate(claims):
         tag = f"claim[{i}]"
@@ -89,20 +98,35 @@ def validate_response(response, bundle, bundle_digest):
             reasons.append(f"{tag}:invalid_text")
         ids = claim.get("evidence_ids") if isinstance(claim.get("evidence_ids"), list) else []
         keys = claim.get("assertion_keys") if isinstance(claim.get("assertion_keys"), list) else []
+        if not ids:
+            reasons.append(f"{tag}:empty_citation")
         bad_ids = [x for x in ids if x not in allowed_ids]
         if bad_ids:
             reasons.append(f"{tag}:citation_not_in_bundle:{len(bad_ids)}")
         if not keys:
             reasons.append(f"{tag}:no_assertion_key")
-        for key in keys:
-            assertion = assertions.get(key)
-            if assertion is None:
-                reasons.append(f"{tag}:unknown_assertion_key")
-            elif not set(ids) <= set(assertion["evidence_ids"]):
+        known = [assertions[k] for k in keys if k in assertions]
+        if len(known) != len(keys):
+            reasons.append(f"{tag}:unknown_assertion_key")
+        if known and ids:
+            supported_ids = set().union(*(set(a["evidence_ids"]) for a in known))
+            if not set(ids) <= supported_ids:
                 reasons.append(f"{tag}:citation_not_in_assertion")
+            elif set(ids) != supported_ids:
+                reasons.append(f"{tag}:citation_set_differs_from_assertion")
+        kind = claim.get("kind")
+        if kind in ("observed", "derived") and any(a["result"] != "satisfied" for a in known):
+            reasons.append(f"{tag}:assertion_not_satisfied")
+        if kind == "unresolved" and any(a["result"] == "satisfied" for a in known):
+            reasons.append(f"{tag}:unresolved_claim_on_satisfied_assertion")
         if not any(r.startswith(tag) for r in reasons):
-            validated.append({"claim_id": claim["claim_id"], "kind": claim["kind"], "evidence_ids": sorted(ids),
-                              "assertion_keys": sorted(keys), "text_untrusted": text})
+            validated.append({
+                "claim_id": claim["claim_id"], "kind": kind, "evidence_ids": sorted(ids),
+                "assertion_keys": sorted(keys),
+                # The only fact this attempt may present is rendered from the deterministic ledger.
+                "supported_fact": "; ".join(sorted(facts[k] for k in keys)),
+                "semantic_status": "unverified_model_text",
+                "text_untrusted": text})
     if reasons:
         return [], reasons, len(claims)
     return validated, [], len(claims)
@@ -113,7 +137,10 @@ def run_synthesis(mode, stub, bundle, bundle_digest):
     contract = build_input(bundle, bundle_digest)
     record = {"mode": mode, "contract_version": CONTRACT_VERSION, "input_digest": digest(contract),
               "status": "disabled", "reasons": [], "response_digest": None, "claims_received": 0,
-              "validated_claims": []}
+              "validated_claims": [],
+              # Structural checks only: schema, citation membership, typed assertion status. Model
+              # prose is never semantically verified and is never a supported finding.
+              "semantic_validation": "not_performed"}
     if mode == "disabled":
         return record
     if mode != "stub":
@@ -133,5 +160,5 @@ def run_synthesis(mode, stub, bundle, bundle_digest):
     if reasons:
         record.update(status="rejected", reasons=reasons)
     else:
-        record.update(status="validated", validated_claims=validated)
+        record.update(status="structurally_validated", validated_claims=validated)
     return record

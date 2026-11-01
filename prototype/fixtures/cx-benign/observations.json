@@ -1,0 +1,588 @@
+{
+  "fixture_id": "cx-benign",
+  "fixture_version": "0.1.0-spike",
+  "schema_version": "ca-fixture/0.1",
+  "clock_domains": {
+    "k8s-apiserver": {
+      "status": "declared",
+      "offset_ms": 0,
+      "offset_uncertainty_ms": 0,
+      "precision_ms": 1000,
+      "provenance": "fixture-declared"
+    },
+    "node-a": {
+      "status": "declared",
+      "offset_ms": 0,
+      "offset_uncertainty_ms": 250,
+      "precision_ms": 1,
+      "provenance": "fixture-declared"
+    },
+    "node-b": {
+      "status": "declared",
+      "offset_ms": 0,
+      "offset_uncertainty_ms": 250,
+      "precision_ms": 1,
+      "provenance": "fixture-declared"
+    },
+    "prometheus": {
+      "status": "declared",
+      "offset_ms": 0,
+      "offset_uncertainty_ms": 0,
+      "precision_ms": 1,
+      "provenance": "fixture-declared"
+    }
+  },
+  "acquisitions": [
+    {
+      "query_id": "k8s.configmap-checkpoints",
+      "source_id": "k8s-api",
+      "window": {
+        "start": "2026-10-22T09:55:00Z",
+        "end": "2026-10-22T10:15:00Z"
+      },
+      "status": "complete",
+      "observations": [
+        {
+          "source_ref": "k8s:configmap/ca-demo/checkout-db-pool@1004",
+          "observation_kind": "configmap_change",
+          "source_uid": "uid-cm-checkout-db-pool",
+          "source_version": "1004",
+          "entity": {
+            "kind": "ConfigMap",
+            "namespace": "ca-demo",
+            "name": "checkout-db-pool"
+          },
+          "times": [
+            {
+              "type": "event",
+              "raw": "2026-10-22T10:05:00Z",
+              "clock_domain": "k8s-apiserver"
+            }
+          ],
+          "attributes": {
+            "data_key": "pool.maxConnections",
+            "before_value": "50",
+            "after_value": "60",
+            "before_value_sha256": "1a6562590ef19d1045d06c4055742d38288e9e6dcd71ccde5cee80f1d5a774eb",
+            "after_value_sha256": "39fa9ec190eee7b6f4dff1100d6343e10918d044c75eac8f9e9a2596173f80c9",
+            "previous_resource_version": "1003",
+            "actor": "ops-config-sync"
+          }
+        }
+      ]
+    },
+    {
+      "query_id": "k8s.deployments",
+      "source_id": "k8s-api",
+      "window": {
+        "start": "2026-10-22T09:55:00Z",
+        "end": "2026-10-22T10:15:00Z"
+      },
+      "status": "complete",
+      "observations": [
+        {
+          "source_ref": "k8s:deployment/ca-demo/checkout-api@rev2",
+          "observation_kind": "deployment_rollout",
+          "source_uid": "uid-deploy-checkout-api",
+          "source_version": "2001",
+          "entity": {
+            "kind": "Deployment",
+            "namespace": "ca-demo",
+            "name": "checkout-api"
+          },
+          "times": [
+            {
+              "type": "event",
+              "raw": "2026-10-22T10:00:00Z",
+              "clock_domain": "k8s-apiserver"
+            },
+            {
+              "type": "completed",
+              "raw": "2026-10-22T10:01:40Z",
+              "clock_domain": "k8s-apiserver"
+            }
+          ],
+          "attributes": {
+            "revision": "2",
+            "previous_revision": "1",
+            "changed_fields": [
+              "spec.template.spec.containers[checkout-api].image"
+            ],
+            "field_changes": [],
+            "image_before": "registry.invalid/ca-demo/checkout-api:1.8.2",
+            "image_after": "registry.invalid/ca-demo/checkout-api:1.8.3",
+            "config_refs_before": [
+              "checkout-db-pool"
+            ],
+            "config_refs_after": [
+              "checkout-db-pool"
+            ],
+            "old_replicaset": "checkout-api-6d4b5",
+            "new_replicaset": "checkout-api-7c9f8",
+            "actor": "ci-deployer"
+          }
+        }
+      ]
+    },
+    {
+      "query_id": "k8s.replicasets",
+      "source_id": "k8s-api",
+      "window": {
+        "start": "2026-10-22T09:55:00Z",
+        "end": "2026-10-22T10:15:00Z"
+      },
+      "status": "complete",
+      "observations": [
+        {
+          "source_ref": "k8s:replicaset/ca-demo/checkout-api-6d4b5",
+          "observation_kind": "replicaset",
+          "source_uid": "uid-rs-checkout-api-6d4b5",
+          "source_version": "1501",
+          "entity": {
+            "kind": "ReplicaSet",
+            "namespace": "ca-demo",
+            "name": "checkout-api-6d4b5"
+          },
+          "times": [
+            {
+              "type": "event",
+              "raw": "2026-10-21T15:00:00Z",
+              "clock_domain": "k8s-apiserver"
+            }
+          ],
+          "attributes": {
+            "owner_deployment": "checkout-api",
+            "revision": "1",
+            "image": "registry.invalid/ca-demo/checkout-api:1.8.2"
+          }
+        },
+        {
+          "source_ref": "k8s:replicaset/ca-demo/checkout-api-7c9f8",
+          "observation_kind": "replicaset",
+          "source_uid": "uid-rs-checkout-api-7c9f8",
+          "source_version": "2002",
+          "entity": {
+            "kind": "ReplicaSet",
+            "namespace": "ca-demo",
+            "name": "checkout-api-7c9f8"
+          },
+          "times": [
+            {
+              "type": "event",
+              "raw": "2026-10-22T10:00:00Z",
+              "clock_domain": "k8s-apiserver"
+            }
+          ],
+          "attributes": {
+            "owner_deployment": "checkout-api",
+            "revision": "2",
+            "image": "registry.invalid/ca-demo/checkout-api:1.8.3"
+          }
+        }
+      ]
+    },
+    {
+      "query_id": "k8s.pods",
+      "source_id": "k8s-api",
+      "window": {
+        "start": "2026-10-22T09:55:00Z",
+        "end": "2026-10-22T10:15:00Z"
+      },
+      "status": "complete",
+      "observations": [
+        {
+          "source_ref": "k8s:pod/ca-demo/checkout-api-6d4b5-a1",
+          "observation_kind": "pod",
+          "source_uid": "uid-pod-6d4b5-a1",
+          "source_version": "lifecycle",
+          "entity": {
+            "kind": "Pod",
+            "namespace": "ca-demo",
+            "name": "checkout-api-6d4b5-a1"
+          },
+          "times": [
+            {
+              "type": "event",
+              "raw": "2026-10-22T07:00:00Z",
+              "clock_domain": "k8s-apiserver"
+            },
+            {
+              "type": "terminated",
+              "raw": "2026-10-22T10:01:40Z",
+              "clock_domain": "k8s-apiserver"
+            }
+          ],
+          "attributes": {
+            "owner_replicaset": "checkout-api-6d4b5",
+            "node": "node-a",
+            "restart_count": 0,
+            "configmap_volumes": [
+              {
+                "configmap": "checkout-db-pool",
+                "mount_path": "/etc/checkout/pool",
+                "sub_path": false
+              }
+            ]
+          }
+        },
+        {
+          "source_ref": "k8s:pod/ca-demo/checkout-api-7c9f8-b1",
+          "observation_kind": "pod",
+          "source_uid": "uid-pod-7c9f8-b1",
+          "source_version": "lifecycle",
+          "entity": {
+            "kind": "Pod",
+            "namespace": "ca-demo",
+            "name": "checkout-api-7c9f8-b1"
+          },
+          "times": [
+            {
+              "type": "event",
+              "raw": "2026-10-22T10:00:05Z",
+              "clock_domain": "k8s-apiserver"
+            }
+          ],
+          "attributes": {
+            "owner_replicaset": "checkout-api-7c9f8",
+            "node": "node-a",
+            "restart_count": 0,
+            "configmap_volumes": [
+              {
+                "configmap": "checkout-db-pool",
+                "mount_path": "/etc/checkout/pool",
+                "sub_path": false
+              }
+            ]
+          }
+        },
+        {
+          "source_ref": "k8s:pod/ca-demo/checkout-api-7c9f8-b2",
+          "observation_kind": "pod",
+          "source_uid": "uid-pod-7c9f8-b2",
+          "source_version": "lifecycle",
+          "entity": {
+            "kind": "Pod",
+            "namespace": "ca-demo",
+            "name": "checkout-api-7c9f8-b2"
+          },
+          "times": [
+            {
+              "type": "event",
+              "raw": "2026-10-22T10:01:00Z",
+              "clock_domain": "k8s-apiserver"
+            }
+          ],
+          "attributes": {
+            "owner_replicaset": "checkout-api-7c9f8",
+            "node": "node-b",
+            "restart_count": 0,
+            "configmap_volumes": [
+              {
+                "configmap": "checkout-db-pool",
+                "mount_path": "/etc/checkout/pool",
+                "sub_path": false
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "query_id": "loki.checkout-api",
+      "source_id": "loki",
+      "window": {
+        "start": "2026-10-22T09:55:00Z",
+        "end": "2026-10-22T10:15:00Z"
+      },
+      "status": "complete",
+      "observations": [
+        {
+          "source_ref": "loki:{namespace=ca-demo,pod=checkout-api-6d4b5-a1}#0001",
+          "observation_kind": "log_line",
+          "source_uid": "uid-pod-6d4b5-a1",
+          "source_version": "line-0001",
+          "entity": {
+            "kind": "Pod",
+            "namespace": "ca-demo",
+            "name": "checkout-api-6d4b5-a1"
+          },
+          "times": [
+            {
+              "type": "event",
+              "raw": "2026-10-22T07:00:03.100Z",
+              "clock_domain": "node-a"
+            }
+          ],
+          "attributes": {
+            "pod": "checkout-api-6d4b5-a1",
+            "template": "CONFIG_LOADED",
+            "fields": {
+              "config_key": "pool.maxConnections",
+              "value": "50",
+              "value_sha256": "1a6562590ef19d1045d06c4055742d38288e9e6dcd71ccde5cee80f1d5a774eb",
+              "config_source": "configmap",
+              "config_path": "/etc/checkout/pool/pool.maxConnections"
+            },
+            "message": "config loaded key=pool.maxConnections value=50 source=configmap"
+          }
+        },
+        {
+          "source_ref": "loki:{namespace=ca-demo,pod=checkout-api-7c9f8-b1}#0001",
+          "observation_kind": "log_line",
+          "source_uid": "uid-pod-7c9f8-b1",
+          "source_version": "line-0001",
+          "entity": {
+            "kind": "Pod",
+            "namespace": "ca-demo",
+            "name": "checkout-api-7c9f8-b1"
+          },
+          "times": [
+            {
+              "type": "event",
+              "raw": "2026-10-22T10:00:07.000Z",
+              "clock_domain": "node-a"
+            }
+          ],
+          "attributes": {
+            "pod": "checkout-api-7c9f8-b1",
+            "template": "CONFIG_LOADED",
+            "fields": {
+              "config_key": "pool.maxConnections",
+              "value": "50",
+              "value_sha256": "1a6562590ef19d1045d06c4055742d38288e9e6dcd71ccde5cee80f1d5a774eb",
+              "config_source": "configmap",
+              "config_path": "/etc/checkout/pool/pool.maxConnections"
+            },
+            "message": "config loaded key=pool.maxConnections value=50 source=configmap"
+          }
+        },
+        {
+          "source_ref": "loki:{namespace=ca-demo,pod=checkout-api-7c9f8-b2}#0001",
+          "observation_kind": "log_line",
+          "source_uid": "uid-pod-7c9f8-b2",
+          "source_version": "line-0001",
+          "entity": {
+            "kind": "Pod",
+            "namespace": "ca-demo",
+            "name": "checkout-api-7c9f8-b2"
+          },
+          "times": [
+            {
+              "type": "event",
+              "raw": "2026-10-22T10:01:03.000Z",
+              "clock_domain": "node-b"
+            }
+          ],
+          "attributes": {
+            "pod": "checkout-api-7c9f8-b2",
+            "template": "CONFIG_LOADED",
+            "fields": {
+              "config_key": "pool.maxConnections",
+              "value": "50",
+              "value_sha256": "1a6562590ef19d1045d06c4055742d38288e9e6dcd71ccde5cee80f1d5a774eb",
+              "config_source": "configmap",
+              "config_path": "/etc/checkout/pool/pool.maxConnections"
+            },
+            "message": "config loaded key=pool.maxConnections value=50 source=configmap"
+          }
+        },
+        {
+          "source_ref": "loki:{namespace=ca-demo,pod=checkout-api-7c9f8-b1}#0002",
+          "observation_kind": "log_line",
+          "source_uid": "uid-pod-7c9f8-b1",
+          "source_version": "line-0002",
+          "entity": {
+            "kind": "Pod",
+            "namespace": "ca-demo",
+            "name": "checkout-api-7c9f8-b1"
+          },
+          "times": [
+            {
+              "type": "event",
+              "raw": "2026-10-22T10:05:41.000Z",
+              "clock_domain": "node-a"
+            }
+          ],
+          "attributes": {
+            "pod": "checkout-api-7c9f8-b1",
+            "template": "CONFIG_RELOADED",
+            "fields": {
+              "config_key": "pool.maxConnections",
+              "value": "60",
+              "value_sha256": "39fa9ec190eee7b6f4dff1100d6343e10918d044c75eac8f9e9a2596173f80c9",
+              "config_source": "configmap",
+              "config_path": "/etc/checkout/pool/pool.maxConnections"
+            },
+            "message": "config reloaded key=pool.maxConnections value=60 source=configmap"
+          }
+        },
+        {
+          "source_ref": "loki:{namespace=ca-demo,pod=checkout-api-7c9f8-b2}#0002",
+          "observation_kind": "log_line",
+          "source_uid": "uid-pod-7c9f8-b2",
+          "source_version": "line-0002",
+          "entity": {
+            "kind": "Pod",
+            "namespace": "ca-demo",
+            "name": "checkout-api-7c9f8-b2"
+          },
+          "times": [
+            {
+              "type": "event",
+              "raw": "2026-10-22T10:05:49.000Z",
+              "clock_domain": "node-b"
+            }
+          ],
+          "attributes": {
+            "pod": "checkout-api-7c9f8-b2",
+            "template": "CONFIG_RELOADED",
+            "fields": {
+              "config_key": "pool.maxConnections",
+              "value": "60",
+              "value_sha256": "39fa9ec190eee7b6f4dff1100d6343e10918d044c75eac8f9e9a2596173f80c9",
+              "config_source": "configmap",
+              "config_path": "/etc/checkout/pool/pool.maxConnections"
+            },
+            "message": "config reloaded key=pool.maxConnections value=60 source=configmap"
+          }
+        }
+      ]
+    },
+    {
+      "query_id": "prom.checkout-api",
+      "source_id": "prometheus",
+      "window": {
+        "start": "2026-10-22T09:55:00Z",
+        "end": "2026-10-22T10:15:00Z"
+      },
+      "status": "complete",
+      "observations": [
+        {
+          "source_ref": "prom:checkout_api:error_ratio{namespace=ca-demo}@2026-10-22T09:59:45Z",
+          "observation_kind": "metric_sample",
+          "source_uid": "series:checkout_api:error_ratio{namespace=ca-demo}",
+          "source_version": "2026-10-22T09:59:45Z",
+          "entity": {
+            "kind": "Service",
+            "namespace": "ca-demo",
+            "name": "checkout-api"
+          },
+          "times": [
+            {
+              "type": "event",
+              "raw": "2026-10-22T09:59:45Z",
+              "clock_domain": "prometheus"
+            }
+          ],
+          "attributes": {
+            "series": "checkout_api:error_ratio",
+            "labels": "namespace=ca-demo",
+            "value": "0.002"
+          }
+        },
+        {
+          "source_ref": "prom:checkout_api:error_ratio{namespace=ca-demo}@2026-10-22T10:01:45Z",
+          "observation_kind": "metric_sample",
+          "source_uid": "series:checkout_api:error_ratio{namespace=ca-demo}",
+          "source_version": "2026-10-22T10:01:45Z",
+          "entity": {
+            "kind": "Service",
+            "namespace": "ca-demo",
+            "name": "checkout-api"
+          },
+          "times": [
+            {
+              "type": "event",
+              "raw": "2026-10-22T10:01:45Z",
+              "clock_domain": "prometheus"
+            }
+          ],
+          "attributes": {
+            "series": "checkout_api:error_ratio",
+            "labels": "namespace=ca-demo",
+            "value": "0.003"
+          }
+        },
+        {
+          "source_ref": "prom:checkout_api:error_ratio{namespace=ca-demo}@2026-10-22T10:03:45Z",
+          "observation_kind": "metric_sample",
+          "source_uid": "series:checkout_api:error_ratio{namespace=ca-demo}",
+          "source_version": "2026-10-22T10:03:45Z",
+          "entity": {
+            "kind": "Service",
+            "namespace": "ca-demo",
+            "name": "checkout-api"
+          },
+          "times": [
+            {
+              "type": "event",
+              "raw": "2026-10-22T10:03:45Z",
+              "clock_domain": "prometheus"
+            }
+          ],
+          "attributes": {
+            "series": "checkout_api:error_ratio",
+            "labels": "namespace=ca-demo",
+            "value": "0.002"
+          }
+        },
+        {
+          "source_ref": "prom:checkout_api:error_ratio{namespace=ca-demo}@2026-10-22T10:05:45Z",
+          "observation_kind": "metric_sample",
+          "source_uid": "series:checkout_api:error_ratio{namespace=ca-demo}",
+          "source_version": "2026-10-22T10:05:45Z",
+          "entity": {
+            "kind": "Service",
+            "namespace": "ca-demo",
+            "name": "checkout-api"
+          },
+          "times": [
+            {
+              "type": "event",
+              "raw": "2026-10-22T10:05:45Z",
+              "clock_domain": "prometheus"
+            }
+          ],
+          "attributes": {
+            "series": "checkout_api:error_ratio",
+            "labels": "namespace=ca-demo",
+            "value": "0.002"
+          }
+        },
+        {
+          "source_ref": "prom:checkout_api:error_ratio{namespace=ca-demo}@2026-10-22T10:07:45Z",
+          "observation_kind": "metric_sample",
+          "source_uid": "series:checkout_api:error_ratio{namespace=ca-demo}",
+          "source_version": "2026-10-22T10:07:45Z",
+          "entity": {
+            "kind": "Service",
+            "namespace": "ca-demo",
+            "name": "checkout-api"
+          },
+          "times": [
+            {
+              "type": "event",
+              "raw": "2026-10-22T10:07:45Z",
+              "clock_domain": "prometheus"
+            }
+          ],
+          "attributes": {
+            "series": "checkout_api:error_ratio",
+            "labels": "namespace=ca-demo",
+            "value": "0.003"
+          }
+        }
+      ]
+    },
+    {
+      "query_id": "prom.alerts",
+      "source_id": "prometheus",
+      "window": {
+        "start": "2026-10-22T09:55:00Z",
+        "end": "2026-10-22T10:15:00Z"
+      },
+      "status": "complete",
+      "observations": []
+    }
+  ]
+}

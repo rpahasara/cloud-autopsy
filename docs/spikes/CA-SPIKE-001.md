@@ -30,10 +30,24 @@ Ground truth was written and its SHA-256 digest pinned in [`prototype/ca_eval/tr
 
 Pinned truth digest (`prototype/truth/ca-scenario-001/ground-truth.json`, raw bytes): `d84051c6bfbc619d46efd4819ec1c31b13ce71e8883b69f656a0b600deffebe6`
 
+The PR #13 counterexample truths (`cx-deploy-cause`, `cx-benign`) were written and pinned after the review but before the engine changes that evaluate them; the pre-change engine abstained on the Deployment cause. They are developer-authored regression cases, not independent or held-out evaluation.
+
+## PR #13 review remediation (engine `0.2`)
+
+| Finding | Change |
+|---|---|
+| P0 demo `rmtree` | Output must be a strict subdirectory of `prototype/out`, contain no symlink/junction, and carry a demo-written sentinel before deletion |
+| P1 replay derived fields | Replay compares whole persisted evidence records, the baseline and the synthesis input digest with a fresh recomputation from authenticated retained inputs |
+| P1 synthesis truth | Status renamed `structurally_validated`; non-empty citations must equal the cited assertions' evidence; factual kinds need satisfied assertions; prose stays `text_untrusted`, only a ledger-rendered `supported_fact` is exposed, and the scorer counts model prose as unsupported |
+| P1 Deployment cause | Catalog maps typed rollout `field_changes`; new `cx-deploy-cause` and `cx-benign` counterexamples |
+| P1 fail-open gaps/time | `partial` coverage and duplicate query outcomes create gaps; consumption requires a strictly later log, otherwise a recorded chronology rejection |
+| P2 joins | One hypothesis per specific change; joins scoped by namespace and pod UID; same-name identities with different UIDs are reported and excluded |
+
 ## Known limitations
 
-- One scenario family, five variants, self-authored fixtures/truth/rules: the engine-versus-baseline comparison shows the designed trap works, not general causal accuracy. The mechanism catalog maps only `pool.maxConnections` → `POOL_EXHAUSTED`.
-- Engine citation-ID validity is trivially complete because the engine only cites sealed evidence; semantic support is checked only through rule predicates.
+- One scenario family plus two counterexamples, all self-authored fixtures/truth/rules: results show the designed cases behave as intended, not general causal accuracy. The catalog maps only `pool.maxConnections` → `POOL_EXHAUSTED`, from a ConfigMap key or a typed Deployment field change; image-only defects have no template and cannot be supported.
+- Engine citation-ID validity is trivially complete because the engine only cites sealed evidence; semantic support is checked only through rule predicates. Model prose is never semantically verified.
+- Replay integrity uses hashes stored beside the artifacts; anyone able to rewrite the inputs, manifest and outputs together can forge a consistent run. Synthesis responses are not retained, so only their input digest is re-verified.
 - No live connectors, RBAC, network policy, PostgreSQL roles, lifecycle expiry/deletion states or local model are exercised.
 - Pairwise ordering excludes metric samples to stay bounded; it is quadratic in non-metric evidence.
 - Timing is one run on the author's workstation; no warmups, repetitions or p95.

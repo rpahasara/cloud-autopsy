@@ -41,6 +41,43 @@ class ScorerTests(RunTestCase):
         self.assertEqual(summary["engine"]["false_cause_selected"]["value"], "0/5")
         self.assertEqual(summary["baseline"]["false_cause_selected"]["value"], "5/5")
 
+    def test_structurally_valid_model_prose_counts_as_unsupported(self):
+        scenario = self.scenario("A")
+        run, store, bundle = self.run_scenario(scenario)
+        from ca_spike.synthesis import CONTRACT_VERSION, run_synthesis
+        p = next(p for h in bundle["ledger"]["hypotheses"] for p in h["prerequisites"] if p["result"] == "satisfied")
+        response = {"contract_version": CONTRACT_VERSION, "bundle_digest": run["bundle_digest"], "limitations": [],
+                    "claims": [{"claim_id": "x", "kind": "observed", "text": "The Deployment is the root cause.",
+                                "evidence_ids": p["evidence_ids"], "assertion_keys": [p["assertion_key"]]}]}
+        store.put("synthesis.json", run_synthesis("stub", {"behavior": "respond", "response": response},
+                                                  bundle, run["bundle_digest"]))
+        engine = score_run(store, self.truth, self.truth_digest)["engine"]
+        self.assertEqual(engine["unverified_model_claims"], 1)
+        self.assertEqual(engine["unsupported_claims"], 1)
+
+
+class CounterexampleScoringTests(RunTestCase):
+    def _score(self, fixture_id):
+        from ca_spike.fixtures import load_scenario
+        truth, digest = load_truth(ROOT, fixture_id)
+        _, store, _ = self.run_scenario(load_scenario(ROOT / "fixtures" / fixture_id, "A"))
+        return score_run(store, truth, digest)
+
+    def test_deploy_cause_engine_correct_baseline_selects_configmap(self):
+        report = self._score("cx-deploy-cause")
+        self.assertEqual(report["engine"]["causal_attribution"], "correct")
+        self.assertEqual(report["engine"]["false_cause"], "rejected")
+        self.assertEqual(report["baseline"]["false_cause"], "selected")
+        self.assertEqual(report["engine"]["required_evidence_recall"]["value"], "12/12")
+
+    def test_benign_both_methods_abstain_without_selecting_a_non_cause(self):
+        report = self._score("cx-benign")
+        self.assertTrue(report["engine"]["result_correct"])
+        self.assertTrue(report["engine"]["abstention_reason_correct"])
+        self.assertEqual(report["engine"]["false_cause"], "rejected")
+        self.assertTrue(report["baseline"]["result_correct"])  # the naive baseline also abstains here
+        self.assertEqual(report["independence"], "developer-authored; not independent or held-out")
+
 
 if __name__ == "__main__":
     unittest.main()
