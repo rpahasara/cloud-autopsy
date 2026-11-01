@@ -263,7 +263,8 @@ def _print_demo(report, out):
             s = summary[method]
             print(f"  {method:8}: result correct {s['result_correct']['value']}, "
                   f"correct cause {s['correct_cause_on_resolvable']['value']}, "
-                  f"false cause selected {s['false_cause_selected']['value']}, "
+                  f"false cause selected {s['false_cause_selected']['value']} (identity-verifiable traps; "
+                  f"unverifiable {s['false_cause_identity_unverifiable']['value']}), "
                   f"correct abstention {s['correct_abstention_on_unresolvable']['value']}, "
                   f"change identity unverifiable {s['change_identity_unverifiable']['value']}")
     d = next(r for r in report["runs"] if r["fixture_id"] == FIXTURE_ID and r["variant"] == "D")["clock"]

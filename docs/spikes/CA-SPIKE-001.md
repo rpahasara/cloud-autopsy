@@ -51,6 +51,8 @@ The PR #13 counterexample truths (`cx-deploy-cause`, `cx-benign`) were written a
 | Baseline lacked change identity | `ca-baseline-naive/0.2` reports the evidence ID of the change it already selected; selection logic is unchanged |
 | Synthesis validator could crash | An iterative strict-JSON shape check (types, string keys, depth ≤ 16, ≤ 20,000 nodes) runs before field logic; mistyped fields, duplicate claim IDs/citations and non-string `limitations` are rejected with deterministic reason codes; a validator exception rejects the attempt instead of failing the run |
 
+| False-cause denominator (P2) | `false_cause_selected` divides by identity-verifiable trap runs only; `false_cause_identity_unverifiable` (over all trap runs) and `false_cause_traps` are reported beside it, so an unverifiable identity never counts as an avoided false cause |
+
 No pinned fixture or truth changed, and no threshold exists to change. Headline counts are unchanged because each pinned fixture has one change per entity; the scorer fix closes a latent gap exercised only by the new regression tests.
 
 ## Known limitations
@@ -63,6 +65,8 @@ No pinned fixture or truth changed, and no threshold exists to change. Headline 
 - Timing is one run on the author's workstation; no warmups, repetitions or p95.
 
 ## Reproduce
+
+CI (`.github/workflows/spike-ci.yml`) runs the unit tests, fixture and truth-pin verification, the documentation validators and the demo self-checks on Linux with read-only repository permissions, SHA-pinned actions and no secrets.
 
 ```
 make demo            # or: python prototype/cli.py demo

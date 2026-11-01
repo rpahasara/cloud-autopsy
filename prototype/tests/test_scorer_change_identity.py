@@ -34,7 +34,9 @@ def _add_unrelated_changes(scenario):
     return scenario
 
 
-class ExactChangeIdentityTests(RunTestCase):
+class _UnrelatedChangesCase(RunTestCase):
+    """Run ca-scenario-001/A with unrelated same-entity changes; outputs can then be rewritten."""
+
     def setUp(self):
         super().setUp()
         self.truth, self.digest = load_truth(ROOT, "ca-scenario-001")
@@ -46,6 +48,8 @@ class ExactChangeIdentityTests(RunTestCase):
         target.update(outcome_update)
         self.store.put(artifact, doc)
 
+
+class ExactChangeIdentityTests(_UnrelatedChangesCase):
     def test_engine_unchanged_by_unrelated_same_entity_changes(self):
         report = score_run(self.store, self.truth, self.digest)
         self.assertEqual(report["engine"]["causal_attribution"], "correct")
@@ -112,6 +116,27 @@ class ExactChangeIdentityTests(RunTestCase):
         self.assertEqual(engine["selected_change"]["identity"], "inconsistent_with_outcome")
         self.assertEqual(engine["causal_attribution"], "identity_unverifiable")
         self.assertEqual(engine["false_cause"], "identity_unverifiable")
+
+
+class FalseCauseDenominatorTests(_UnrelatedChangesCase):
+    """Re-review P2: an unverifiable change identity must not count as having avoided the false cause."""
+
+    def test_summary_excludes_unverifiable_identity_from_false_cause_denominator(self):
+        verified = score_run(self.store, self.truth, self.digest)
+        self._rewrite("bundle.json", {"change_evidence_id": "ev:CHANGE:" + "0" * 24})
+        unverifiable = score_run(self.store, self.truth, self.digest)
+        self.assertEqual(unverifiable["engine"]["false_cause"], "identity_unverifiable")
+
+        engine = summarize([unverifiable])["engine"]
+        self.assertEqual(engine["false_cause_selected"]["value"], "not_evaluated")
+        self.assertEqual(engine["false_cause_selected"]["denominator"], 0)
+        self.assertEqual(engine["false_cause_identity_unverifiable"]["value"], "1/1")
+        self.assertEqual(engine["false_cause_traps"], 1)
+
+        engine = summarize([verified, unverifiable])["engine"]
+        self.assertEqual(engine["false_cause_selected"]["value"], "0/1")
+        self.assertEqual(engine["false_cause_identity_unverifiable"]["value"], "1/2")
+        self.assertEqual(engine["false_cause_traps"], 2)
 
 
 class BaselineChangeIdentityTests(RunTestCase):

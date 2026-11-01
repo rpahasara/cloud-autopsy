@@ -247,11 +247,17 @@ def summarize(reports):
         trap = [r for r in reports if r["false_cause_trap"]]
         resolvable = [r for r in reports if r["engine"]["expected_outcome"] == "resolved"]
         unresolvable = [r for r in reports if r["engine"]["expected_outcome"] == "abstained"]
+        # Only trap runs whose selected change could be identified can show the false cause was avoided.
+        unverifiable_trap = [r for r in trap if r[method]["false_cause"] == "identity_unverifiable"]
+        verifiable_trap = [r for r in trap if r[method]["false_cause"] != "identity_unverifiable"]
         return {
             "result_correct": ratio(sum(x["result_correct"] for x in rows), len(rows)),
             "correct_cause_on_resolvable": ratio(sum(r[method]["causal_attribution"] == "correct"
                                                      for r in resolvable), len(resolvable)),
-            "false_cause_selected": ratio(sum(r[method]["false_cause"] == "selected" for r in trap), len(trap)),
+            "false_cause_traps": len(trap),
+            "false_cause_selected": ratio(sum(r[method]["false_cause"] == "selected" for r in verifiable_trap),
+                                          len(verifiable_trap)),
+            "false_cause_identity_unverifiable": ratio(len(unverifiable_trap), len(trap)),
             "correct_abstention_on_unresolvable": ratio(sum(r[method]["outcome"] == "abstained"
                                                             for r in unresolvable), len(unresolvable)),
             "unnecessary_abstention_on_resolvable": ratio(sum(r[method]["outcome"] == "abstained"
