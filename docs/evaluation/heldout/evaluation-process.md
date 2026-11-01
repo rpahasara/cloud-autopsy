@@ -16,7 +16,7 @@ Exploratory evaluation of frozen candidate `c21b50dc5edd6cd07de55d2f3e0bce6103b4
    python -I tools/heldout/heldout_kit.py run --engine-root <ENGINE> --seal evaluation-seal.json --fixtures CA-SCENARIO-008=<dir> --fixtures CA-SCENARIO-009=<dir> --fixtures CA-SCENARIO-010=<dir> --out <PRED> --record-out <PRED>.freeze.json
    ```
 
-   Each variant runs offline with synthesis as declared by the fixture; no network, cluster or model is used. An exception in a variant is recorded in `execution-log.json` and the remaining variants continue. A family whose archive cannot be verified (changed, malformed, linked or missing files) is recorded with every sealed variant `not_run` and the other families still run. A variant whose file references a file outside the sealed set (for example a synthesis stub) is `not_run` with reason `variant_references_unsealed_file`. Retained-input replay is run for each completed variant.
+   Each variant runs offline with synthesis as declared by the fixture; no network, cluster or model is used. An exception in a variant is recorded in `execution-log.json` and the remaining variants continue. A family whose archive cannot be verified (changed, malformed, linked or missing files) is recorded with every sealed variant `not_run` and the other families still run. A variant whose file references a file outside the sealed set (for example a synthesis stub) is `not_run` with reason `variant_references_unsealed_file`; a variant with a malformed `synthesis` block or a non-string `stub` is `not_run` with reason `variant_file_malformed`, and the other variants and families still run. Retained-input replay is run for each completed variant.
 
 3. Publish `<PRED>.freeze.json`, the predictions record, before any truth is released.
 

@@ -28,7 +28,7 @@ import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 
-KIT_VERSION = "ca-heldout-kit/0.2"
+KIT_VERSION = "ca-heldout-kit/0.3"
 COMMIT_SCHEME = "sha256(b'ca-heldout-truth-commit/0.1\\x00' + salt32 + truth_bytes)"
 COMMIT_PREFIX = b"ca-heldout-truth-commit/0.1\x00"
 PLACEHOLDER = b"<<FILL"
@@ -199,16 +199,28 @@ def write_manifest(fixture_dir, fixture_id, fixture_version):
     return manifest
 
 
+def _create_private(path, data):
+    """Create ``path`` exclusively (never replacing a file), owner-only (0600) where POSIX modes apply.
+
+    On Windows the mode only controls the read-only flag; access is governed by the directory's ACLs.
+    """
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags, 0o600)
+    except FileExistsError:
+        raise KitError(f"{path}: already exists; refusing to overwrite a salt") from None
+    with os.fdopen(fd, "wb") as fh:
+        fh.write(data)
+
+
 def commit_truth(truth_file, salt_out):
     truth_file, salt_out = Path(truth_file), Path(salt_out)
     require_outside_git(truth_file, "ground truth")
     require_outside_git(salt_out.parent, "the truth salt")
-    if salt_out.exists():
-        raise KitError(f"{salt_out}: already exists; refusing to overwrite a salt")
     data = truth_file.read_bytes()
     _check_content(truth_file.name, data, "truth")
     salt = secrets.token_bytes(32)
-    salt_out.write_text(salt.hex() + "\n", encoding="ascii")
+    _create_private(salt_out, (salt.hex() + "\n").encode("ascii"))
     return {"record_version": "ca-heldout-truth-commitment/0.1", "kit_version": KIT_VERSION,
             "scheme": COMMIT_SCHEME, "truth_commitment": _sha256(COMMIT_PREFIX + salt + data),
             "created_utc": _now()}
@@ -384,12 +396,17 @@ def _sealed_reference_problem(fixture_dir, variant, sealed_paths):
     """Return a not_run reason when a sealed variant file references a file outside the sealed set."""
     try:
         doc = strict_json((Path(fixture_dir) / "variants" / f"{variant}.json").read_bytes(), variant)
-        stub = (doc.get("synthesis") or {}).get("stub") if type(doc) is dict else None
-    except (KitError, OSError, AttributeError):
+    except (KitError, OSError):
         return "variant_file_unreadable"
-    if stub is not None and stub not in sealed_paths:
-        return "variant_references_unsealed_file"
-    return None
+    synthesis = doc.get("synthesis") if type(doc) is dict else None
+    if synthesis is not None and type(synthesis) is not dict:
+        return "variant_file_malformed"
+    stub = (synthesis or {}).get("stub")
+    if stub is None:
+        return None
+    if not isinstance(stub, str):  # check the type before any hashing or path use
+        return "variant_file_malformed"
+    return None if stub in sealed_paths else "variant_references_unsealed_file"
 
 
 def run(engine_root, seal_doc, fixture_dirs, out_dir, git_check=True, record_out=None):
@@ -433,7 +450,10 @@ def run(engine_root, seal_doc, fixture_dirs, out_dir, git_check=True, record_out
             run_dir = out_dir / fam["scenario_id"] / variant
             if not _inside(run_dir, out_dir):
                 raise KitError(f"output path for {variant} escapes the predictions directory")
-            reason = _sealed_reference_problem(fixture_dir, variant, sealed_paths)
+            try:
+                reason = _sealed_reference_problem(fixture_dir, variant, sealed_paths)
+            except Exception:  # defence in depth: a malformed variant never stops the evaluation
+                reason = "variant_file_malformed"
             if reason:
                 entry["variants"].append({"variant": variant, "execution": "not_run", "reason": reason})
                 continue
