@@ -1,0 +1,5 @@
+{
+  "stub_version": "0.1",
+  "behavior": "<<FILL: respond | timeout | unavailable>>",
+  "response": "<<FILL: any JSON standing in for an untrusted model response; delete this file if unused>>"
+}

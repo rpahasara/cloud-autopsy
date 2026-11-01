@@ -1,0 +1,36 @@
+{
+  "plan_id": "<<FILL: plan id>>",
+  "plan_version": "<<FILL: plan version>>",
+  "namespace": "<<FILL: primary namespace>>",
+  "incident_window": {
+    "start": "<<FILL: RFC 3339 UTC>>",
+    "end": "<<FILL: RFC 3339 UTC>>"
+  },
+  "expected_acquisitions": [
+    {
+      "query_id": "<<FILL: query id>>",
+      "source_id": "<<FILL: source system>>",
+      "evidence_class": "<<FILL: K8S-CONFIG | K8S-DEPLOY | K8S-POD | LOG | METRIC | ALERT>>",
+      "mandatory_for": [
+        "<<FILL: cause-category label(s) needing this query, or leave the list empty>>"
+      ]
+    }
+  ],
+  "symptom": {
+    "alert_rule": "<<FILL: alert rule name>>",
+    "error_ratio_series": "<<FILL: metric series name>>",
+    "error_ratio_threshold": "<<FILL: decimal string>>"
+  },
+  "candidate_scope": {
+    "workload": {
+      "kind": "<<FILL: workload kind>>",
+      "namespace": "<<FILL: namespace>>",
+      "name": "<<FILL: workload name>>"
+    }
+  },
+  "limits": {
+    "max_input_bytes": 262144000,
+    "max_observations": 100000,
+    "max_string_chars": 8192
+  }
+}

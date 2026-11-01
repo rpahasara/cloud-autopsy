@@ -1,0 +1,8 @@
+{
+  "variant": "A",
+  "description": "<<FILL: neutral description that does not reveal the expected answer>>",
+  "synthesis": {
+    "mode": "<<FILL: disabled | stub>>"
+  },
+  "ops": []
+}

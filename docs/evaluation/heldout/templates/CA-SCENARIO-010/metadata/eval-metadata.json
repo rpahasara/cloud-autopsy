@@ -1,0 +1,29 @@
+{
+  "metadata_version": "ca-heldout-meta/0.1",
+  "scenario_id": "CA-SCENARIO-010",
+  "fixture_id": "ca-scenario-010",
+  "coverage_category": "Unseen adversarial telemetry and source-identity collision",
+  "split": "held_out",
+  "candidate_commit": "c21b50dc5edd6cd07de55d2f3e0bce6103b4d952",
+  "variants": [
+    "<<FILL: every variant ID, e.g. A>>"
+  ],
+  "source_allowlist": [
+    "<<FILL: source_id values used by the fixtures>>"
+  ],
+  "author": {
+    "name": "<<FILL: name>>",
+    "affiliation": "<<FILL: affiliation>>",
+    "attestation": "<<FILL: I have not read the restricted material listed in docs/evaluation/heldout/README.md#author-restrictions, and I wrote these fixtures and truth without access to the candidate engine or scorer>>"
+  },
+  "reviewer": {
+    "name": "<<FILL: name>>",
+    "affiliation": "<<FILL: affiliation>>",
+    "attestation": "<<FILL: I reviewed fixtures and truth for consistency and hold a separate truth copy>>"
+  },
+  "prepublication_review": {
+    "name": "<<FILL: person (not the author) who checked this public file for answers or hints>>",
+    "attestation": "<<FILL: I reviewed every field of this public metadata, including notes, and it discloses no expected answers or hints>>"
+  },
+  "notes": "<<FILL: public notes only; never expected answers>>"
+}

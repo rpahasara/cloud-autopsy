@@ -1,0 +1,48 @@
+{
+  "schema_version": "ca-fixture/0.1",
+  "fixture_id": "ca-scenario-010",
+  "fixture_version": "<<FILL: author version, e.g. 1.0.0-heldout>>",
+  "clock_domains": {
+    "<<FILL: clock domain name>>": {
+      "status": "<<FILL: declared | unknown>>",
+      "offset_ms": "<<FILL: integer offset from reference time; omit if unknown>>",
+      "offset_uncertainty_ms": "<<FILL: integer +/- bound; omit if unknown>>",
+      "precision_ms": "<<FILL: integer timestamp granularity>>",
+      "provenance": "fixture-declared"
+    }
+  },
+  "acquisitions": [
+    {
+      "query_id": "<<FILL: query id from source-plan.json>>",
+      "source_id": "<<FILL: source system>>",
+      "window": {
+        "start": "<<FILL: RFC 3339 UTC>>",
+        "end": "<<FILL: RFC 3339 UTC>>"
+      },
+      "status": "<<FILL: complete | empty | partial | truncated | failed | denied>>",
+      "observations": [
+        {
+          "source_ref": "<<FILL: unique source reference, e.g. k8s:<kind>/<namespace>/<name>@<version>>>",
+          "observation_kind": "<<FILL: record type, see schema-reference.md>>",
+          "source_uid": "<<FILL: stable object identity (Kubernetes UID or series ID)>>",
+          "source_version": "<<FILL: object version this record describes>>",
+          "entity": {
+            "kind": "<<FILL: Kubernetes kind>>",
+            "namespace": "<<FILL: namespace>>",
+            "name": "<<FILL: name>>"
+          },
+          "times": [
+            {
+              "type": "<<FILL: event | completed | terminated | active_since>>",
+              "raw": "<<FILL: timestamp text exactly as emitted, e.g. RFC 3339 UTC>>",
+              "clock_domain": "<<FILL: declared clock domain>>"
+            }
+          ],
+          "attributes": {
+            "<<FILL: attribute key>>": "<<FILL: value (decimals as strings)>>"
+          }
+        }
+      ]
+    }
+  ]
+}
