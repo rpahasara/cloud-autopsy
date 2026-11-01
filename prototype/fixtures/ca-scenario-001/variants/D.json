@@ -1,0 +1,35 @@
+{
+  "variant": "D",
+  "description": "Clock skew and ambiguous ordering",
+  "synthesis": {
+    "mode": "disabled"
+  },
+  "ops": [
+    {
+      "op": "set_clock_domain",
+      "domain": "node-a",
+      "clock": {
+        "status": "unknown",
+        "precision_ms": 1,
+        "provenance": "fixture-declared"
+      }
+    },
+    {
+      "op": "set_clock_domain",
+      "domain": "node-b",
+      "clock": {
+        "status": "declared",
+        "offset_ms": 3000,
+        "offset_uncertainty_ms": 1000,
+        "precision_ms": 1,
+        "provenance": "fixture-declared"
+      }
+    },
+    {
+      "op": "set_time_raw",
+      "source_ref": "loki:{namespace=ca-demo,pod=checkout-api-7c9f8-b2}#0001",
+      "time_type": "event",
+      "raw": "2026-10-15 08:12:22"
+    }
+  ]
+}

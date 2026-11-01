@@ -1,0 +1,19 @@
+{
+  "variant": "B",
+  "description": "Missing causal evidence (ConfigMap connector failure)",
+  "synthesis": {
+    "mode": "disabled"
+  },
+  "ops": [
+    {
+      "op": "remove_observation",
+      "source_ref": "k8s:configmap/ca-demo/checkout-db-pool@1002"
+    },
+    {
+      "op": "set_acquisition_status",
+      "query_id": "k8s.configmap-checkpoints",
+      "status": "failed",
+      "reason": "connector_timeout"
+    }
+  ]
+}

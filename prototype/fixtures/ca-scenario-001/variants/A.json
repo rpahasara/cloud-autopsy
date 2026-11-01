@@ -1,0 +1,8 @@
+{
+  "variant": "A",
+  "description": "Normal evidence path",
+  "synthesis": {
+    "mode": "disabled"
+  },
+  "ops": []
+}

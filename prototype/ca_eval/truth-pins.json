@@ -1,0 +1,7 @@
+{
+  "pin_version": "0.1",
+  "pinned_at": "2026-11-01, before engine implementation (no Git commit; see docs/spikes/CA-SPIKE-001.md)",
+  "truth": {
+    "ca-scenario-001": {"path": "truth/ca-scenario-001/ground-truth.json", "sha256": "d84051c6bfbc619d46efd4819ec1c31b13ce71e8883b69f656a0b600deffebe6"}
+  }
+}

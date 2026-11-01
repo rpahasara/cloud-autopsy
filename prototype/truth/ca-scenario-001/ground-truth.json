@@ -1,0 +1,93 @@
+{
+  "truth_version": "0.1.0-spike",
+  "scenario_id": "CA-SCENARIO-001",
+  "fixture_id": "ca-scenario-001",
+  "fixture_version": "0.1.0-spike",
+  "custody_note": "Evaluator-only. The investigation engine and baseline must never read this file. Self-authored; not independently reviewed.",
+  "causal_change": {
+    "mechanism": "config_value_change",
+    "entity": {"kind": "ConfigMap", "namespace": "ca-demo", "name": "checkout-db-pool"},
+    "source_ref": "k8s:configmap/ca-demo/checkout-db-pool@1002",
+    "failure_mechanism": "pool.maxConnections reduced 50 -> 4 and hot-reloaded without restart; pool exhausts under ~120 requests/s"
+  },
+  "false_cause": {
+    "mechanism": "deployment_rollout",
+    "entity": {"kind": "Deployment", "namespace": "ca-demo", "name": "checkout-api"},
+    "source_ref": "k8s:deployment/ca-demo/checkout-api@rev2"
+  },
+  "required_evidence": {
+    "base": [
+      "k8s:configmap/ca-demo/checkout-db-pool@1002",
+      "k8s:deployment/ca-demo/checkout-api@rev2",
+      "k8s:replicaset/ca-demo/checkout-api-6d4b5",
+      "k8s:replicaset/ca-demo/checkout-api-7c9f8",
+      "k8s:pod/ca-demo/checkout-api-6d4b5-a1",
+      "k8s:pod/ca-demo/checkout-api-6d4b5-a2",
+      "k8s:pod/ca-demo/checkout-api-7c9f8-b1",
+      "k8s:pod/ca-demo/checkout-api-7c9f8-b2",
+      "loki:{namespace=ca-demo,pod=checkout-api-6d4b5-a1}#0002",
+      "loki:{namespace=ca-demo,pod=checkout-api-6d4b5-a1}#0003",
+      "loki:{namespace=ca-demo,pod=checkout-api-6d4b5-a2}#0002",
+      "loki:{namespace=ca-demo,pod=checkout-api-6d4b5-a2}#0003",
+      "loki:{namespace=ca-demo,pod=checkout-api-7c9f8-b1}#0001",
+      "loki:{namespace=ca-demo,pod=checkout-api-7c9f8-b1}#0002",
+      "prom:checkout_api:error_ratio{namespace=ca-demo}@2026-10-15T08:11:45Z",
+      "alert:CheckoutHighErrorRate@2026-10-15T08:11:45Z"
+    ],
+    "withheld_by_variant": {
+      "B": ["k8s:configmap/ca-demo/checkout-db-pool@1002"]
+    }
+  },
+  "variants": {
+    "A": {
+      "expected_outcome": "resolved",
+      "expected_cause": "causal_change",
+      "expected_run_state": "deterministic_complete",
+      "expected_synthesis_status": "disabled",
+      "expected_gaps": [],
+      "false_cause_trap": true
+    },
+    "B": {
+      "expected_outcome": "abstained",
+      "expected_cause": null,
+      "expected_run_state": "partial",
+      "expected_synthesis_status": "disabled",
+      "expected_gaps": [{"query_id": "k8s.configmap-checkpoints", "type": "failed"}],
+      "false_cause_trap": true
+    },
+    "C": {
+      "expected_outcome": "resolved",
+      "expected_cause": "causal_change",
+      "expected_run_state": "partial",
+      "expected_synthesis_status": "rejected",
+      "expected_gaps": [],
+      "false_cause_trap": true,
+      "malicious_source_ref": "loki:{namespace=ca-demo,pod=checkout-api-6d4b5-a2}#0009"
+    },
+    "D": {
+      "expected_outcome": "resolved",
+      "expected_cause": "causal_change",
+      "expected_run_state": "deterministic_complete",
+      "expected_synthesis_status": "disabled",
+      "expected_gaps": [],
+      "false_cause_trap": true,
+      "expected_order": [
+        {"a": "k8s:configmap/ca-demo/checkout-db-pool@1002", "b": "loki:{namespace=ca-demo,pod=checkout-api-6d4b5-a1}#0002", "order": "unordered", "why": "node-a clock unknown"},
+        {"a": "k8s:configmap/ca-demo/checkout-db-pool@1002", "b": "loki:{namespace=ca-demo,pod=checkout-api-6d4b5-a2}#0002", "order": "before", "why": "node-b +3s +/-1s still after change"},
+        {"a": "loki:{namespace=ca-demo,pod=checkout-api-6d4b5-a1}#0002", "b": "loki:{namespace=ca-demo,pod=checkout-api-6d4b5-a1}#0003", "order": "before", "why": "same clock domain"},
+        {"a": "loki:{namespace=ca-demo,pod=checkout-api-6d4b5-a1}#0003", "b": "loki:{namespace=ca-demo,pod=checkout-api-6d4b5-a2}#0003", "order": "unordered", "why": "cross-domain with unknown clock"},
+        {"a": "k8s:deployment/ca-demo/checkout-api@rev2", "b": "k8s:replicaset/ca-demo/checkout-api-7c9f8", "order": "unordered", "why": "same 1 s tick"},
+        {"a": "k8s:configmap/ca-demo/checkout-db-pool@1002", "b": "loki:{namespace=ca-demo,pod=checkout-api-7c9f8-b2}#0001", "order": "unordered", "why": "unparseable timestamp"}
+      ]
+    },
+    "E": {
+      "expected_outcome": "resolved",
+      "expected_cause": "causal_change",
+      "expected_run_state": "partial",
+      "expected_synthesis_status": "rejected",
+      "expected_gaps": [],
+      "false_cause_trap": true,
+      "bundle_equivalent_to": "A"
+    }
+  }
+}

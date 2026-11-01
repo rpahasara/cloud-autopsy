@@ -1,0 +1,17 @@
+{
+  "stub_version": "0.1",
+  "behavior": "respond",
+  "response": {
+    "contract_version": "ca-synth/0.1-spike",
+    "claims": [
+      {
+        "claim_id": "e1",
+        "kind": "observed",
+        "text": "Database credentials were rotated at 08:09.",
+        "evidence_ids": [
+          "ev:K8S-SECRET:fabricated-0001"
+        ]
+      }
+    ]
+  }
+}

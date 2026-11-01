@@ -1,0 +1,16 @@
+{
+  "fixture_id": "ca-scenario-001",
+  "fixture_version": "0.1.0-spike",
+  "digest_algorithm": "sha256",
+  "files": {
+    "observations.json": "73ba0f2b931a03ab534b6215cd912faf36f5de45c846e62a0782a17aa1125b01",
+    "source-plan.json": "3fcb66a6e049222978ebe8d4de366cf8b9f42c669871b43aa3297b58ff3634a7",
+    "synthesis-stubs/C-injection-echo.json": "0b8329e4c44255eb94ce1abc34c2521d912272075b0a78d08ce02fec7b279143",
+    "synthesis-stubs/E-invalid-response.json": "e513c6cd32686359677db7003bce58475dfb568dfd6a7353187628e8f76d4710",
+    "variants/A.json": "2a93b65bc5280b95389c278d0d20d8ee31e83edd31dd00dc6285ec7b316bed9a",
+    "variants/B.json": "a711374be58ac77482b55a5667e3549f0fd43f58c630d518c1c0a6cb1ff9abf3",
+    "variants/C.json": "b2f0a97f8d5fda7440b875d26320c4c8423a9c2dadc88d794719365987bce245",
+    "variants/D.json": "70f0adfb8321f684d294f211c9bda831f98202b26c6c76780d2cc9d690b12f44",
+    "variants/E.json": "47d0b635c85b5ae8e498f1ef7e5a2d25fdcdb0a9628db58f5647e7f77b3e1c3e"
+  }
+}
