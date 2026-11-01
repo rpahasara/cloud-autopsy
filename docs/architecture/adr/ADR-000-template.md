@@ -2,7 +2,7 @@
 
 - **Status:** Proposed
 - **Date:** YYYY-MM-DD
-- **Owners:** Unassigned
+- **Decision owner:** Accountable role; named incumbent pending assignment
 - **Reviewers:** Unassigned
 - **Related requirements/issues:** TBD
 
@@ -28,6 +28,10 @@ Not approved until the status and authorized approval record are updated.
 
 ## Operational consequences
 
+## Review triggers
+
+List changed evidence, boundary, benchmark or authority conditions requiring renewed review.
+
 ## Reversibility and migration
 
 ## Validation evidence
@@ -35,4 +39,3 @@ Not approved until the status and authorized approval record are updated.
 ## Approval record
 
 No approval recorded.
-

@@ -43,3 +43,7 @@ No architecture decision in this document is approved. The components below defi
 
 Each assumption requires evaluation and, if adopted as consequential, an ADR.
 
+
+## Proposed decision records
+
+[CA-DEC-001 through CA-DEC-008](adr/README.md) now capture these hypotheses, their alternatives and review triggers. The [lifecycle contract](../evidence-lifecycle.md) defines expiry and replay. All remain proposed; external AI-provider access requires separate data-egress and security approval.

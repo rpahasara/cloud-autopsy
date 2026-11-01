@@ -28,4 +28,3 @@ Describe reproducible checks and attach/link versioned evidence. Do not state th
 ## Approval status
 
 This PR does not itself constitute product, requirement, architecture, security, or risk signoff.
-

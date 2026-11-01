@@ -38,6 +38,8 @@ A read-only, deterministic evidence engine that produces a replayable, provenanc
 - Multi-cloud breadth, generalized AIOps, or a polished commercial UI.
 - Model routing, graph database adoption, or durable workflow infrastructure unless justified by an approved ADR.
 
+The five initial CA-SCENARIO-001 variants qualify the investigation harness only. The full evaluation gate requires the planned [8–12-scenario corpus](scenarios/corpus-plan.md). All numeric quality metrics and performance/capacity budgets remain provisional until benchmarked and approved; stricter alternatives to the historical 70% hypothesis are proposed in [CA-DEC-006](architecture/adr/CA-DEC-006.md).
+
 ## Proposed success measures
 
 - At least 70% evidence-citation accuracy across the agreed corpus.
@@ -61,4 +63,3 @@ No gate is currently passed or approved.
 - Absence of evidence is represented explicitly.
 - Every factual claim must link to evidence or be labeled unsupported/unresolved.
 - Reproducibility takes priority over demo polish.
-

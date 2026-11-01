@@ -1,16 +1,16 @@
 # Architecture Decision Record Register
 
-ADRs are proposals until their `Status` is explicitly changed through authorized review. No ADR may use issue closure or merge alone as approval evidence.
+CA-DEC identifiers are the canonical decision IDs used by the SRS. The previous ADR-001 through ADR-006 entries were topic placeholders, never accepted records; their evidence-store, time, connector, rule, model and replay topics are now covered by CA-DEC-001/002/003/004/005. No old approval is implied.
 
-| ADR | Topic | Status |
+| Decision | Topic | Status |
 |---|---|---|
-| ADR-000 | Template | Template |
-| ADR-001 | Evidence store and provenance representation | Placeholder |
-| ADR-002 | Timestamp model and clock-skew handling | Placeholder |
-| ADR-003 | Connector and read-only trust boundary | Placeholder |
-| ADR-004 | Deterministic rule/graph representation | Placeholder |
-| ADR-005 | Constrained model boundary and citation validation | Placeholder |
-| ADR-006 | Replay and versioning contract | Placeholder |
+| [CA-DEC-001](CA-DEC-001.md) | System boundary and allowed sources | Proposed |
+| [CA-DEC-002](CA-DEC-002.md) | Evidence store and provenance | Proposed |
+| [CA-DEC-003](CA-DEC-003.md) | Timestamp provenance and skew | Proposed |
+| [CA-DEC-004](CA-DEC-004.md) | Model boundary, provider and data egress | Proposed |
+| [CA-DEC-005](CA-DEC-005.md) | Evidence lifecycle and replay after expiry | Proposed |
+| [CA-DEC-006](CA-DEC-006.md) | Evaluation and security gates | Proposed |
+| [CA-DEC-007](CA-DEC-007.md) | Performance and capacity budgets | Proposed |
+| [CA-DEC-008](CA-DEC-008.md) | Accountability and approval authorities | Proposed |
 
-Use [ADR-000-template.md](ADR-000-template.md) for new decisions.
-
+Use [the template](ADR-000-template.md) for future proposals. Every record requires rationale, alternatives, security implications, decision owner, approval status and review triggers. Merge and issue closure never accept a decision.
