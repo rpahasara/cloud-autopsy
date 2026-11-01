@@ -1,0 +1,24 @@
+erDiagram
+  SOURCE ||--o{ ACQUISITION : produces
+  ACQUISITION ||--o{ OBSERVATION : contains
+  OBSERVATION ||--o{ EVIDENCE : normalizes
+  EVIDENCE ||--o{ EVIDENCE_TIME : timestamps
+  EVIDENCE ||--o{ PAYLOAD : retains
+  EVIDENCE ||--o{ PROVENANCE_EDGE : child
+  INVESTIGATION ||--o{ RUN : attempts
+  RUN ||--o{ RUN_EVIDENCE : freezes
+  EVIDENCE ||--o{ RUN_EVIDENCE : member
+  RUN ||--|| MANIFEST : seals
+  RUN ||--o{ GAP : exposes
+  RUN ||--o{ HYPOTHESIS : evaluates
+  HYPOTHESIS ||--o{ HYPOTHESIS_EVIDENCE : classifies
+  RUN_EVIDENCE ||--o{ HYPOTHESIS_EVIDENCE : references
+  HYPOTHESIS ||--o{ HYPOTHESIS_GAP : limited_by
+  GAP ||--o{ HYPOTHESIS_GAP : affects
+  RUN ||--o{ CLAIM : proposes
+  CLAIM ||--o{ CITATION : cites
+  RUN_EVIDENCE ||--o{ CITATION : permits
+  RUN ||--o{ SYNTHESIS_ATTEMPT : narrates
+  RUN ||--o{ SCORE_REPORT : scores
+  RUN ||--o{ AUDIT_EVENT : records
+  PAYLOAD ||--o{ LIFECYCLE_EVENT : expires

@@ -37,3 +37,20 @@ Planned verification and reverse links: [requirement matrix](../../requirement-m
 ## Approval record
 
 No named approver, approval date or acceptance record exists. This proposal does not authorize implementation, external provider access, risk acceptance or release.
+
+## Phase 1C design refinement — 2026-11-01
+
+Specify namespace-only Role permissions, named ConfigMap checkpoint reads, separate fixture-setup identity and explicit list/watch continuity gaps. The collector never receives generalized write or query authority.
+
+Detailed proposal: [Phase 1C collection](../phase1c/collection.md); [architecture package](../phase1c/README.md). These refinements are Proposed and add no approval or implementation authority. Review them when the existing triggers fire and before any future baseline sign-off.
+
+## Phase 1D approval request — 2026-11-01
+
+- **Product-owner disposition requested:** Confirm the single synthetic namespace/source allowlist, named ConfigMap checkpoint reads and read-only exclusions.
+- **Provisional assumptions excluded from acceptance:** Exact source/API/image versions, query fields and workload consumption checkpoints need reviewed specification before collection work. Python/FastAPI remains a candidate orchestration stack; choose and review it explicitly before dependent application code.
+- **Specialist reviewers required:** Architecture and Kubernetes/security reviewers.
+- **Accepted terms:** None; no approval recorded.
+- **Current disposition:** Proposed; awaiting named product and specialist review.
+- **Approval record fields:** reviewed commit/digest, scoped accept/revise/defer/reject disposition, excluded assumptions, named authorities/reviewers and dates, independence/conflicts, evidence links, residual-risk disposition and review triggers. All fields remain unrecorded.
+
+See the [complete approval matrix](../../reviews/phase1d/approvals.md), [consistency review](../../reviews/phase1d/consistency-review.md) and [formal completion checklist](../../reviews/phase1d/completion-checklist.md). A partial or deferred disposition is recorded separately and does not mark this entire ADR Accepted. No implementation or external access is authorized.

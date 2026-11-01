@@ -1,0 +1,22 @@
+sequenceDiagram
+  participant E as Engine
+  participant G as Egress guard
+  participant M as Model sandbox
+  participant V as Claim validator
+  participant L as Lifecycle worker
+  participant D as Evidence store
+  E->>G: frozen bundle and policy reference
+  G->>G: Disabled by default, minimize, alias, size-check
+  alt approved local synthesis or separately approved external route
+    G->>M: F8 bounded data-only contract
+    M-->>V: F10 schema-constrained candidate claims
+    V->>D: validated claims or typed rejection
+  else disabled, timeout or policy denial
+    G-->>E: synthesis unavailable, deterministic result retained
+  end
+  L->>D: F15 lock affected artifact lifecycle rows
+  L->>D: append tombstone and set unavailable atomically
+  L->>D: purge payload, derivatives and controlled exports
+  L->>D: record purge completion or retryable failure
+  E->>D: replay availability and integrity check
+  D-->>E: retained inputs or explicit incomplete replay state

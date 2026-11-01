@@ -1,0 +1,22 @@
+flowchart TB
+  U[Authenticated investigator] --> API[Control API and policy]
+  F[Versioned synthetic fixtures] --> C[Read-only collectors]
+  K[Isolated kind namespace] --> C
+  O[Allowlisted metrics and logs] --> C
+  C --> N[Validate and normalize]
+  N --> DB[(PostgreSQL evidence and provenance)]
+  API --> W[Run coordinator]
+  W --> E[Deterministic engine]
+  DB --> E
+  E --> B[Frozen bundle and hypothesis ledger]
+  B --> DB
+  B --> V[Claim and citation validator]
+  B --> G[Minimization and egress guard]
+  G -. disabled unless authorized .-> M[Isolated synthesis adapter]
+  M -. untrusted narrative candidate .-> V
+  V --> R[Validated or rejected result]
+  R --> API
+  B --> EV[Independent scorer]
+  GT[Frozen ground truth] --> EV
+  EV --> DB
+  L[Lifecycle worker] --> DB

@@ -37,3 +37,20 @@ Planned verification and reverse links: [requirement matrix](../../requirement-m
 ## Approval record
 
 No named approver, approval date or acceptance record exists. This proposal does not authorize implementation, external provider access, risk acceptance or release.
+
+## Phase 1C design refinement — 2026-11-01
+
+Apply finite per-stage input, retry, response and concurrency limits with backpressure. Idempotent accepted operations persist request/outcome digests; benchmark method, retry/key horizon and numeric budgets remain open.
+
+Detailed proposal: [Phase 1C api](../phase1c/api.md); [architecture package](../phase1c/README.md). These refinements are Proposed and add no approval or implementation authority. Review them when the existing triggers fire and before any future baseline sign-off.
+
+## Phase 1D approval request — 2026-11-01
+
+- **Product-owner disposition requested:** Confirm bounded single-investigation measurement, separate stage timing and model-latency isolation with explicit truncation/rejection.
+- **Provisional assumptions excluded from acceptance:** Reference hardware, workload, sample plan, p95 targets, numeric bounds, retry deadline and idempotency horizon remain provisional; finite approved execution settings are prerequisites.
+- **Specialist reviewers required:** Performance/evaluation, architecture and security reviewers.
+- **Accepted terms:** None; no approval recorded.
+- **Current disposition:** Proposed; awaiting named product and specialist review.
+- **Approval record fields:** reviewed commit/digest, scoped accept/revise/defer/reject disposition, excluded assumptions, named authorities/reviewers and dates, independence/conflicts, evidence links, residual-risk disposition and review triggers. All fields remain unrecorded.
+
+See the [complete approval matrix](../../reviews/phase1d/approvals.md), [consistency review](../../reviews/phase1d/consistency-review.md) and [formal completion checklist](../../reviews/phase1d/completion-checklist.md). A partial or deferred disposition is recorded separately and does not mark this entire ADR Accepted. No implementation or external access is authorized.

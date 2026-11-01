@@ -40,3 +40,7 @@ All 36 requirements are Draft. Owning roles are accountable for change impact an
 | <a id="ca-sec-010"></a>[CA-SEC-010](srs.md#ca-sec-010) | Security reviewer (CA-ROLE-004) | [CA-007 / #7](https://github.com/rpahasara/cloud-autopsy/issues/7), [CA-009 / #9](https://github.com/rpahasara/cloud-autopsy/issues/9), [CA-010 / #10](https://github.com/rpahasara/cloud-autopsy/issues/10) | CA-DEC-004, CA-DEC-006, CA-DEC-008 | CA-RISK-001, CA-RISK-002, CA-RISK-004, CA-RISK-010, CA-RISK-011 | CA-THREAT-D-001, CA-THREAT-E-001 | CA-TEST-SEC-010 |
 | <a id="ca-sec-011"></a>[CA-SEC-011](srs.md#ca-sec-011) | Security reviewer (CA-ROLE-004) | [CA-008 / #8](https://github.com/rpahasara/cloud-autopsy/issues/8), [CA-010 / #10](https://github.com/rpahasara/cloud-autopsy/issues/10) | CA-DEC-008 | CA-RISK-001, CA-RISK-006, CA-RISK-007 | CA-THREAT-T-001 | CA-TEST-SEC-011 |
 | <a id="ca-sec-012"></a>[CA-SEC-012](srs.md#ca-sec-012) | Security reviewer (CA-ROLE-004) | [CA-010 / #10](https://github.com/rpahasara/cloud-autopsy/issues/10) | CA-DEC-006, CA-DEC-008 | CA-RISK-002, CA-RISK-007, CA-RISK-010 | CA-THREAT-R-001, CA-THREAT-E-001 | CA-TEST-SEC-012 |
+
+## Phase 1C architecture evidence
+
+[Architecture traceability](architecture/phase1c/traceability.md) maps all 36 unchanged requirement IDs and their planned tests to detailed architecture specifications; [security coverage](architecture/phase1c/security.md) refines threats by data flow. These are design artifacts, not executed verification.

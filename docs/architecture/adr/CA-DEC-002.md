@@ -37,3 +37,20 @@ Planned verification and reverse links: [requirement matrix](../../requirement-m
 ## Approval record
 
 No named approver, approval date or acceptance record exists. This proposal does not authorize implementation, external provider access, risk acceptance or release.
+
+## Phase 1C design refinement — 2026-11-01
+
+Specify relational identities, same-run composite foreign keys, payload/metadata separation, canonical-byte digests, immutable manifests and bounded snapshot sealing. Logical schema is review material, not a migration.
+
+Detailed proposal: [Phase 1C data-model](../phase1c/data-model.md); [architecture package](../phase1c/README.md). These refinements are Proposed and add no approval or implementation authority. Review them when the existing triggers fire and before any future baseline sign-off.
+
+## Phase 1D approval request — 2026-11-01
+
+- **Product-owner disposition requested:** Confirm PostgreSQL relational evidence/provenance, same-run integrity, separated payload lifecycle and immutable sealed manifests; exclude graph/object stores from MVP.
+- **Provisional assumptions excluded from acceptance:** PostgreSQL 18 is a proposed supported line only; exact minor/image, canonical-byte/hash vectors, role and transaction/deletion details remain pending specialist review.
+- **Specialist reviewers required:** Database/architecture and security/privacy-lifecycle reviewers.
+- **Accepted terms:** None; no approval recorded.
+- **Current disposition:** Proposed; awaiting named product and specialist review.
+- **Approval record fields:** reviewed commit/digest, scoped accept/revise/defer/reject disposition, excluded assumptions, named authorities/reviewers and dates, independence/conflicts, evidence links, residual-risk disposition and review triggers. All fields remain unrecorded.
+
+See the [complete approval matrix](../../reviews/phase1d/approvals.md), [consistency review](../../reviews/phase1d/consistency-review.md) and [formal completion checklist](../../reviews/phase1d/completion-checklist.md). A partial or deferred disposition is recorded separately and does not mark this entire ADR Accepted. No implementation or external access is authorized.

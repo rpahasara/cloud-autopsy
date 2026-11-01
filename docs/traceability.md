@@ -1,6 +1,6 @@
 # Phase 1 Traceability and Backlog (Draft)
 
-Maps SRS `0.3.0-draft`. All issues remain open; all requirements remain Draft. This table and the [requirement matrix](requirement-matrix.md) contain exact reverse issue/requirement edges; CA-001 governs the whole planning package in addition to its direct requirements. Planned tests are specifications, not results.
+Maps proposed SRS `0.4.0-draft` (PR #11 baseline remains `0.3.0-draft`). All issues remain open; all requirements remain Draft. This table and the [requirement matrix](requirement-matrix.md) contain exact reverse issue/requirement edges; CA-001 governs the whole planning package in addition to its direct requirements. Planned tests are specifications, not results.
 
 | Backlog / GitHub | Requirements | Decisions | Planned evidence | Status |
 |---|---|---|---|---|
@@ -31,3 +31,11 @@ Maps SRS `0.3.0-draft`. All issues remain open; all requirements remain Draft. T
 - [ ] Benchmarked and approved quality metrics and performance/capacity budgets.
 - [ ] Full 8–12-scenario corpus and reviewed held-out results.
 - [ ] Explicit requirements baseline approval and separately authorized implementation plan.
+
+## Phase 1C architecture proposal
+
+[Architecture traceability](architecture/phase1c/traceability.md) gives detailed design evidence for issues #1 through #10 and all 36 stable requirements. The separate architecture draft is stacked on PR #11; no issue is closed or requirement/decision approved.
+
+## Phase 1D review and planned implementation
+
+[Readiness review](reviews/phase1d/README.md) adds scoped approval requests and a [proposed Phase 2 backlog](reviews/phase1d/phase2-backlog.md) referencing stable requirement IDs and existing Phase 1 issues. All Phase 2 items are Planned / unapproved, not created implementation issues or authorization to start.

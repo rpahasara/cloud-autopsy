@@ -42,7 +42,7 @@ The five initial CA-SCENARIO-001 variants qualify the investigation harness only
 
 ## Proposed success measures
 
-- At least 70% evidence-citation accuracy across the agreed corpus.
+- Historical, unbenchmarked hypothesis: at least 70% evidence-citation accuracy; final metrics and thresholds remain Proposed under CA-DEC-006.
 - Correct abstention on missing-evidence cases.
 - Measured false-cause rejection on deliberately correlated-but-noncausal changes.
 - Reproducible scenario execution and machine-readable ground truth.
