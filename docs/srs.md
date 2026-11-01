@@ -352,7 +352,7 @@ Every requirement in this section is `Draft`.
 
 ### CA-NFR-001 — Reproducibility
 
-**Priority:** Must | **Verification:** Test
+**Priority:** Must | **Verification:** Test | **Trace:** `CA-002`, `CA-005`, `CA-008`, `CA-SCENARIO-001-A/D`
 
 Fixtures, ground truth, run configuration, scoring configuration, and result provenance shall be versioned so that a reported result can be reproduced or its unavailable dependency can be identified.
 
@@ -360,7 +360,7 @@ Fixtures, ground truth, run configuration, scoring configuration, and result pro
 
 ### CA-NFR-002 — Explainability and auditability
 
-**Priority:** Must | **Verification:** Inspection, Demonstration
+**Priority:** Must | **Verification:** Inspection, Demonstration | **Trace:** `CA-005`, `CA-006`, `CA-SCENARIO-001-A/B`
 
 The system shall make inclusion, exclusion, derivation, relationship, hypothesis status, and gap rationale inspectable.
 
@@ -368,7 +368,7 @@ The system shall make inclusion, exclusion, derivation, relationship, hypothesis
 
 ### CA-NFR-003 — Reliability and explicit partial failure
 
-**Priority:** Must | **Verification:** Test
+**Priority:** Must | **Verification:** Test | **Trace:** `CA-004`, `CA-007`, `CA-008`, `CA-SCENARIO-001-B/E`
 
 Connector, storage, rule, scorer, and model failures shall surface as explicit failed or partial states rather than silent success.
 
@@ -376,7 +376,7 @@ Connector, storage, rule, scorer, and model failures shall surface as explicit f
 
 ### CA-NFR-004 — Data minimization
 
-**Priority:** Must | **Verification:** Inspection, Test
+**Priority:** Must | **Verification:** Inspection, Test | **Trace:** `CA-004`, `CA-007`, `CA-010`, `CA-RISK-005`
 
 The system shall collect and transmit only evidence fields required by the declared scenario and configured analysis boundary.
 
@@ -384,7 +384,7 @@ The system shall collect and transmit only evidence fields required by the decla
 
 ### CA-NFR-005 — Maintainability and separation of concerns
 
-**Priority:** Must | **Verification:** Inspection
+**Priority:** Must | **Verification:** Inspection | **Trace:** `CA-002`, `CA-005`, `CA-007`, `CA-008`
 
 Connector acquisition, normalization, deterministic reasoning, synthesis, scoring, and presentation contracts shall be separated and versioned.
 
@@ -392,7 +392,7 @@ Connector acquisition, normalization, deterministic reasoning, synthesis, scorin
 
 ### CA-NFR-006 — Observability of the evaluator
 
-**Priority:** Should | **Verification:** Test, Demonstration
+**Priority:** Should | **Verification:** Test, Demonstration | **Trace:** `CA-008`, `CA-010`, `CA-SEC-008`
 
 The prototype shall emit structured run state sufficient to diagnose which phase, connector, rule, or scorer failed without recording prohibited secrets or raw sensitive payloads.
 
@@ -400,7 +400,7 @@ The prototype shall emit structured run state sufficient to diagnose which phase
 
 ### CA-NFR-007 — Portability of the evaluation corpus
 
-**Priority:** Should | **Verification:** Demonstration
+**Priority:** Should | **Verification:** Demonstration | **Trace:** `CA-008`, `CA-009`, `CA-SCENARIO-001`
 
 Scenario fixtures and scoring contracts should be runnable in a documented local or CI environment without dependence on customer infrastructure.
 
@@ -408,7 +408,7 @@ Scenario fixtures and scoring contracts should be runnable in a documented local
 
 ### CA-NFR-008 — Performance budget
 
-**Priority:** Should | **Verification:** Test, Analysis
+**Priority:** Should | **Verification:** Test, Analysis | **Trace:** `CA-008`, `CA-DEC-007`
 
 The system shall measure evidence-ingestion, deterministic-assembly, synthesis, and total run duration separately.
 
@@ -416,7 +416,7 @@ The system shall measure evidence-ingestion, deterministic-assembly, synthesis, 
 
 ### CA-NFR-009 — Capacity and bounds
 
-**Priority:** Must | **Verification:** Test
+**Priority:** Must | **Verification:** Test | **Trace:** `CA-004`, `CA-008`, `CA-010`, `CA-SEC-009`
 
 Every connector and investigation run shall have configured time-window, payload-size, record-count, and retry bounds.
 
@@ -424,7 +424,7 @@ Every connector and investigation run shall have configured time-window, payload
 
 ### CA-NFR-010 — Compatibility and schema evolution
 
-**Priority:** Should | **Verification:** Test, Inspection
+**Priority:** Should | **Verification:** Test, Inspection | **Trace:** `CA-002`, `CA-008`, `CA-SEC-007`
 
 Evidence, run-manifest, hypothesis, and result schemas shall declare versions and document backward-compatibility or migration behavior.
 
@@ -440,11 +440,15 @@ Every requirement in this section is `Draft` and traces to the STRIDE model.
 
 Connectors shall use the minimum read permissions required for declared evidence and shall not share a credential with a write-capable component.
 
+**Acceptance criteria:** A reviewed permission manifest contains only declared read operations, and negative tests demonstrate that create, update, patch, delete, exec, and privilege-escalation operations are denied.
+
 ### CA-SEC-002 — No mutation or arbitrary execution surface
 
 **Priority:** Must | **Verification:** Inspection, Test | **Trace:** `CA-004`, `CA-RISK-002`
 
 Phase 1 shall not expose cluster mutation tools, shell/command tools, or a general-purpose tool dispatcher to model output.
+
+**Acceptance criteria:** Tool inventory inspection finds no mutation or arbitrary-execution capability, and malicious-input tests produce no executable action or write attempt.
 
 ### CA-SEC-003 — Treat evidence as untrusted data
 
@@ -452,11 +456,15 @@ Phase 1 shall not expose cluster mutation tools, shell/command tools, or a gener
 
 Logs, annotations, object fields, commit/deployment metadata, and connector responses shall be serialized and labeled as untrusted data across the synthesis boundary.
 
+**Acceptance criteria:** The synthesis input contract distinguishes instructions from evidence data, and the malicious-log variant remains inert without altering policy or control flow.
+
 ### CA-SEC-004 — Validate model output
 
 **Priority:** Must | **Verification:** Test | **Trace:** `CA-007`, `CA-RISK-001/002`
 
 Model output shall be schema-validated, citation-validated, size-bounded, and treated as untrusted until deterministic checks complete.
+
+**Acceptance criteria:** Invalid schema, nonexistent citations, oversized output, and prohibited action fields are rejected and recorded as validation failures.
 
 ### CA-SEC-005 — Protect secrets
 
@@ -464,13 +472,15 @@ Model output shall be schema-validated, citation-validated, size-bounded, and tr
 
 Credentials and secret values shall not be committed, included in fixtures, copied into model input, or written into ordinary run output.
 
+**Acceptance criteria:** Secret scanning and seeded-canary tests detect committed or propagated secret material, while accepted run artifacts contain no canary value.
+
 ### CA-SEC-006 — Minimize and control model egress
 
 **Priority:** Must | **Verification:** Inspection, Test | **Trace:** `CA-RISK-005`
 
 If an external model is used, the transmitted field set, redaction rules, provider, retention assumptions, and egress path shall be declared before the integration is enabled.
 
-**Acceptance note:** Provider and policy selection are `TBD-APPROVAL`.
+**Acceptance criteria:** With provider integration disabled, no model egress occurs. Before enablement, an approved data-flow record identifies provider, fields, redaction, region/route, and retention assumptions. Provider and policy selection remain `TBD-APPROVAL`.
 
 ### CA-SEC-007 — Evidence and ground-truth integrity
 
@@ -478,11 +488,15 @@ If an external model is used, the transmitted field set, redaction rules, provid
 
 Run manifests shall record integrity data for fixtures, ground truth, rules, and scoring configuration so post-run changes are detectable.
 
+**Acceptance criteria:** Changing any protected fixture, ground-truth, rule, or scorer input after the manifest is created causes an integrity mismatch on verification.
+
 ### CA-SEC-008 — Audit security-relevant events
 
 **Priority:** Should | **Verification:** Test, Inspection | **Trace:** STRIDE repudiation
 
 The system shall record connector authorization failure, validation rejection, policy denial, ground-truth/version mismatch, and model-output rejection without logging secrets.
+
+**Acceptance criteria:** Each declared security event produces a typed, timestamped audit record with run correlation, while a seeded secret is absent from audit output.
 
 ### CA-SEC-009 — Bound untrusted input
 
@@ -490,11 +504,15 @@ The system shall record connector authorization failure, validation rejection, p
 
 The system shall enforce configured byte, record, cardinality, time-window, and retry limits before untrusted inputs can exhaust the evaluation environment.
 
+**Acceptance criteria:** Boundary tests at and above each configured limit demonstrate accepted, truncated, or rejected behavior without unbounded processing or silent data loss.
+
 ### CA-SEC-010 — Fail securely
 
 **Priority:** Must | **Verification:** Test | **Trace:** `CA-RISK-001/002/004`
 
 Validation, authorization, citation, and policy failures shall fail closed for the affected capability and shall not be converted into a confirmed causal result.
+
+**Acceptance criteria:** Forced failures produce denied/partial status, preserve available deterministic evidence, and never yield a confirmed root-cause result from the failed capability.
 
 ### CA-SEC-011 — Dependency and artifact integrity
 
@@ -502,11 +520,15 @@ Validation, authorization, citation, and policy failures shall fail closed for t
 
 Future implementation dependencies and container artifacts shall be pinned or otherwise reproducibly resolved, scanned under the approved SSDLC policy, and associated with build provenance before a Phase 1 implementation result is accepted.
 
+**Acceptance criteria:** A future implementation result is ineligible for the Phase 1 gate unless dependency resolution, scan output, and artifact provenance are version-linked and reviewable.
+
 ### CA-SEC-012 — Separate result evidence from approval
 
 **Priority:** Must | **Verification:** Inspection | **Trace:** `CA-RISK-010`
 
 The system and repository workflow shall not represent a passing test, merged pull request, or closed issue as security approval, risk acceptance, or product-release authorization.
+
+**Acceptance criteria:** Generated reports and repository templates distinguish verification result from approval status and require a separately named authority and approval record.
 
 ## 10. Phase 1 acceptance model
 
