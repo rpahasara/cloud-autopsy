@@ -1,7 +1,7 @@
 """Naive temporal-correlation baseline (CA-BENCH-B0 style diagnostic floor).
 
 Picks the change event whose parsed timestamp is closest before the first error-ratio
-sample above the alert threshold. It ignores clock uncertainty, mechanisms,
+sample above the alert threshold and reports that change by evidence ID. It ignores clock uncertainty, mechanisms,
 consumption, contradictions and gaps, and it never abstains while any change exists.
 It reads the same sealed evidence as the engine and never reads ground truth.
 """
@@ -10,7 +10,7 @@ from decimal import Decimal, InvalidOperation
 
 from .timemodel import parse_rfc3339_ms
 
-BASELINE_VERSION = "ca-baseline-naive/0.1-spike"
+BASELINE_VERSION = "ca-baseline-naive/0.2-spike"
 CHANGE_KINDS = {"configmap_change": "config_value_change", "deployment_rollout": "deployment_rollout"}
 
 
@@ -54,5 +54,6 @@ def naive_temporal_correlation(evidence, plan):
         "outcome": {"status": "resolved" if selected else "abstained",
                     "mechanism": selected["mechanism"] if selected else None,
                     "entity": selected["entity"] if selected else None,
+                    "change_evidence_id": selected["evidence_id"] if selected else None,
                     "reasons": [] if selected else ["no_change_before_symptom_onset"]},
     }

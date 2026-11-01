@@ -38,13 +38,44 @@ def _same_entity(a, b):
     return bool(a and b) and all(a.get(k) == b.get(k) for k in ("kind", "namespace", "name"))
 
 
-def _attribution(outcome, truth, variant_truth):
-    """Classify a method's outcome against truth: correct / incorrect / abstained."""
+# Evaluator-side mapping from change observation kind to mechanism (kept apart from the engine).
+_CHANGE_KIND_MECHANISM = {"configmap_change": "config_value_change", "deployment_rollout": "deployment_rollout"}
+
+
+def _selected_change(outcome, evidence_by_id):
+    """Resolve a resolved outcome's ``change_evidence_id`` to the sealed change's ``source_ref``.
+
+    ``identity`` is ``resolved`` only when the ID names a sealed change record whose kind and
+    entity agree with the outcome. Otherwise it is ``missing`` (no change-level identity, as in
+    ca-baseline-naive/0.1), ``not_in_evidence`` or ``inconsistent_with_outcome``, and the
+    outcome can be neither credited nor cleared of selecting a false cause.
+    """
+    if outcome.get("status") != "resolved":
+        return {"identity": "not_applicable", "change_evidence_id": None, "source_ref": None}
+    cid = outcome.get("change_evidence_id")
+    if not isinstance(cid, str) or not cid:
+        return {"identity": "missing", "change_evidence_id": None, "source_ref": None}
+    record = evidence_by_id.get(cid)
+    if record is None:
+        return {"identity": "not_in_evidence", "change_evidence_id": cid, "source_ref": None}
+    consistent = (_CHANGE_KIND_MECHANISM.get(record.get("observation_kind")) == outcome.get("mechanism")
+                  and _same_entity(record.get("entity"), outcome.get("entity")))
+    return {"identity": "resolved" if consistent else "inconsistent_with_outcome",
+            "change_evidence_id": cid, "source_ref": record.get("source_ref")}
+
+
+def _attribution(outcome, selected, truth, variant_truth):
+    """Classify against truth: correct / incorrect / abstained / identity_unverifiable.
+
+    Correct requires the exact causal change (``source_ref``), not just its mechanism and entity.
+    """
     if outcome["status"] != "resolved":
         return "abstained"
+    if selected["identity"] != "resolved":
+        return "identity_unverifiable"
     expected = truth["causal_change"] if variant_truth["expected_cause"] == "causal_change" else None
-    if expected and outcome["mechanism"] == expected["mechanism"] and _same_entity(outcome["entity"],
-                                                                                  expected["entity"]):
+    if expected and selected["source_ref"] == expected["source_ref"] and outcome["mechanism"] == expected[
+            "mechanism"] and _same_entity(outcome["entity"], expected["entity"]):
         return "correct"
     return "incorrect"
 
@@ -59,16 +90,22 @@ def _non_causes(truth):
     return truth.get("non_causes") or ([truth["false_cause"]] if truth.get("false_cause") else [])
 
 
-def _false_cause(outcome, truth, hypotheses=None):
-    non_causes = _non_causes(truth)
-    for fc in non_causes:
-        if outcome["status"] == "resolved" and outcome["mechanism"] == fc["mechanism"] and _same_entity(
-                outcome["entity"], fc["entity"]):
+def _false_cause(outcome, selected, truth, evidence_by_id, hypotheses=None):
+    """Whether a declared non-causal change was selected, judged per exact change (``source_ref``)."""
+    non_cause_refs = {fc["source_ref"] for fc in _non_causes(truth)}
+    if outcome["status"] == "resolved":
+        if selected["identity"] != "resolved":
+            return "identity_unverifiable"
+        if selected["source_ref"] in non_cause_refs:
             return "selected"
     if hypotheses is None:
         return "not_selected"
-    match = [h for fc in non_causes for h in hypotheses
-             if h["mechanism"] == fc["mechanism"] and _same_entity(h["entity"], fc["entity"])]
+
+    def change_ref(h):
+        cid = h.get("change_evidence_id")
+        return evidence_by_id.get(cid, {}).get("source_ref") if isinstance(cid, str) else None
+
+    match = [h for h in hypotheses if change_ref(h) in non_cause_refs]
     if not match:
         return "not_evaluated"
     return "rejected" if all(h["status"] in ("contradicted", "unresolved") for h in match) else "not_selected"
@@ -94,8 +131,8 @@ def score_run(store, truth, truth_digest, equivalence=None, reference_bundle_dig
     synthesis = store.get("synthesis.json")
     variant = run["variant"]
     vt = truth["variants"][variant]
-    ref_by_id = {e["evidence_id"]: e["source_ref"] for e in evidence}
-    id_by_ref = {v: k for k, v in ref_by_id.items()}
+    evidence_by_id = {e["evidence_id"]: e for e in evidence}
+    id_by_ref = {e["source_ref"]: e["evidence_id"] for e in evidence}
     in_bundle = set(bundle["evidence_ids"])
     hypotheses = bundle["ledger"]["hypotheses"]
 
@@ -112,8 +149,10 @@ def score_run(store, truth, truth_digest, equivalence=None, reference_bundle_dig
     rejected_synth_claims = synthesis["claims_received"] if synthesis["status"] == "rejected" else 0
     unverified_model_claims = len(synthesis["validated_claims"])
 
-    engine_attr = _attribution(bundle["outcome"], truth, vt)
-    baseline_attr = _attribution(baseline["outcome"], truth, vt)
+    engine_change = _selected_change(bundle["outcome"], evidence_by_id)
+    baseline_change = _selected_change(baseline["outcome"], evidence_by_id)
+    engine_attr = _attribution(bundle["outcome"], engine_change, truth, vt)
+    baseline_attr = _attribution(baseline["outcome"], baseline_change, truth, vt)
     expected_outcome = vt["expected_outcome"]
 
     expected_gaps = sorted((g["query_id"], g["type"]) for g in vt["expected_gaps"])
@@ -170,7 +209,8 @@ def score_run(store, truth, truth_digest, equivalence=None, reference_bundle_dig
             "abstention_reason_correct": (vt["expected_abstention_reason"] in bundle["outcome"]["reasons"]
                                           if "expected_abstention_reason" in vt else None),
             "causal_attribution": engine_attr,
-            "false_cause": _false_cause(bundle["outcome"], truth, hypotheses),
+            "selected_change": engine_change,
+            "false_cause": _false_cause(bundle["outcome"], engine_change, truth, evidence_by_id, hypotheses),
             "required_evidence_recall": ratio(len(recalled), len(required)),
             "claims": len(engine_claims),
             "unverified_model_claims": unverified_model_claims,
@@ -189,7 +229,8 @@ def score_run(store, truth, truth_digest, equivalence=None, reference_bundle_dig
             "outcome": baseline["outcome"]["status"],
             "result_correct": _result_correct(baseline_attr, expected_outcome),
             "causal_attribution": baseline_attr,
-            "false_cause": _false_cause(baseline["outcome"], truth),
+            "selected_change": baseline_change,
+            "false_cause": _false_cause(baseline["outcome"], baseline_change, truth, evidence_by_id),
             "selected_entity": baseline["outcome"]["entity"],
         },
         "clock": clock,
@@ -215,6 +256,9 @@ def summarize(reports):
                                                             for r in unresolvable), len(unresolvable)),
             "unnecessary_abstention_on_resolvable": ratio(sum(r[method]["outcome"] == "abstained"
                                                               for r in resolvable), len(resolvable)),
+            # Resolved outcomes whose change could not be identified: never credited, never cleared.
+            "change_identity_unverifiable": ratio(sum(r[method]["causal_attribution"] == "identity_unverifiable"
+                                                      for r in reports), len(reports)),
         }
     return {"runs": [f"{r['fixture_id']}/{r['variant']}" for r in reports],
             "engine": tally("engine"), "baseline": tally("baseline"),

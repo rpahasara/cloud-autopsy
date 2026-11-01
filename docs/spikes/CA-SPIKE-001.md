@@ -43,6 +43,16 @@ The PR #13 counterexample truths (`cx-deploy-cause`, `cx-benign`) were written a
 | P1 fail-open gaps/time | `partial` coverage and duplicate query outcomes create gaps; consumption requires a strictly later log, otherwise a recorded chronology rejection |
 | P2 joins | One hypothesis per specific change; joins scoped by namespace and pod UID; same-name identities with different UIDs are reported and excluded |
 
+### Re-review follow-up (scorer `0.2`, baseline `0.2`, synthesis validator `0.3`)
+
+| Finding | Change |
+|---|---|
+| Scorer credited entity, not change | Attribution resolves `change_evidence_id` to the sealed change's `source_ref` and requires the exact truth `source_ref`; false-cause selection and rejection are judged per `source_ref`. A missing, unknown or kind/entity-inconsistent change ID is reported as `identity_unverifiable`: never credited, never cleared of the false cause, and tallied separately |
+| Baseline lacked change identity | `ca-baseline-naive/0.2` reports the evidence ID of the change it already selected; selection logic is unchanged |
+| Synthesis validator could crash | An iterative strict-JSON shape check (types, string keys, depth ≤ 16, ≤ 20,000 nodes) runs before field logic; mistyped fields, duplicate claim IDs/citations and non-string `limitations` are rejected with deterministic reason codes; a validator exception rejects the attempt instead of failing the run |
+
+No pinned fixture or truth changed, and no threshold exists to change. Headline counts are unchanged because each pinned fixture has one change per entity; the scorer fix closes a latent gap exercised only by the new regression tests.
+
 ## Known limitations
 
 - One scenario family plus two counterexamples, all self-authored fixtures/truth/rules: results show the designed cases behave as intended, not general causal accuracy. The catalog maps only `pool.maxConnections` → `POOL_EXHAUSTED`, from a ConfigMap key or a typed Deployment field change; image-only defects have no template and cannot be supported.

@@ -264,7 +264,8 @@ def _print_demo(report, out):
             print(f"  {method:8}: result correct {s['result_correct']['value']}, "
                   f"correct cause {s['correct_cause_on_resolvable']['value']}, "
                   f"false cause selected {s['false_cause_selected']['value']}, "
-                  f"correct abstention {s['correct_abstention_on_unresolvable']['value']}")
+                  f"correct abstention {s['correct_abstention_on_unresolvable']['value']}, "
+                  f"change identity unverifiable {s['change_identity_unverifiable']['value']}")
     d = next(r for r in report["runs"] if r["fixture_id"] == FIXTURE_ID and r["variant"] == "D")["clock"]
     print(f"clock-order checks ({FIXTURE_ID}/D): {d['matched']['value']}")
     p = report["performance"]
