@@ -40,5 +40,10 @@ jobs:
           python -I tools/validate_phase1c.py
           python -I tools/validate_phase1d.py
 
+      - name: Supply-chain policy checks (CA-P2-001, offline)
+        run: |
+          python -I -m unittest discover -s tools/supply_chain -t tools/supply_chain -v
+          python -I tools/supply_chain/supply_chain.py check
+
       - name: Demo self-checks
         run: python -I prototype/cli.py demo
