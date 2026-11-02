@@ -1,7 +1,11 @@
 # CA-SPIKE-001 offline prototype (Python 3.13 standard library only; no network).
 PYTHON ?= python
 
-.PHONY: demo test verify-fixtures clean-demo supply-chain
+.PHONY: demo test verify-fixtures clean-demo supply-chain contracts-test
+
+# CA-P2-002a provisional contract tests (src/cloud_autopsy/contracts); CI runs the same command.
+contracts-test:
+	$(PYTHON) -I -m unittest discover -s tests/contracts -t tests/contracts
 
 # CA-P2-001 offline supply-chain checks (inventory, licenses, pins, imports, secrets, SBOM drift).
 supply-chain:
