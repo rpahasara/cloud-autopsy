@@ -48,3 +48,7 @@ All artifacts are drafts until a named authorized reviewer records approval. Iss
 ## Phase 1D final design review
 
 [Approval and implementation-readiness package](docs/reviews/phase1d/README.md) provides blockers, eight scoped ADR requests, independent reviewers, source-backed technology research, differentiation, benchmark plans, formal completion gates and a proposed Phase 2 backlog. Readiness remains blocked pending approval; no implementation is started.
+
+## Phase 2 preparation (CA-P2-001)
+
+[Dependency, licensing and SSDLC foundation](docs/phase2/ca-p2-001/README.md) proposes the minimum stack, dependency inventory, license/NOTICE records, SBOM approach, offline supply-chain checks and the CA-P2-002 contract plan. Nothing is approved; Gate D, Gate I and all CA-DEC decisions remain open.

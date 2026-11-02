@@ -1,0 +1,176 @@
+{
+  "bomFormat": "CycloneDX",
+  "components": [
+    {
+      "bom-ref": "actions-checkout",
+      "externalReferences": [
+        {
+          "type": "license",
+          "url": "https://github.com/actions/checkout/blob/11bd71901bbe5b1630ceea73d27597364c9af683/LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "actions/checkout",
+      "properties": [
+        {
+          "name": "ca:pin-kind",
+          "value": "git-commit"
+        },
+        {
+          "name": "ca:pin",
+          "value": "11bd71901bbe5b1630ceea73d27597364c9af683"
+        },
+        {
+          "name": "ca:usage-scope",
+          "value": "ci-only"
+        },
+        {
+          "name": "ca:license-review",
+          "value": "pending"
+        }
+      ],
+      "purl": "pkg:github/actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+      "scope": "excluded",
+      "type": "application",
+      "version": "v4.2.2"
+    },
+    {
+      "bom-ref": "actions-setup-python",
+      "externalReferences": [
+        {
+          "type": "license",
+          "url": "https://github.com/actions/setup-python/blob/a26af69be951a213d495a4c3e4e4022e16d87065/LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "actions/setup-python",
+      "properties": [
+        {
+          "name": "ca:pin-kind",
+          "value": "git-commit"
+        },
+        {
+          "name": "ca:pin",
+          "value": "a26af69be951a213d495a4c3e4e4022e16d87065"
+        },
+        {
+          "name": "ca:usage-scope",
+          "value": "ci-only"
+        },
+        {
+          "name": "ca:license-review",
+          "value": "pending"
+        }
+      ],
+      "purl": "pkg:github/actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065",
+      "scope": "excluded",
+      "type": "application",
+      "version": "v5.6.0"
+    },
+    {
+      "bom-ref": "cpython",
+      "externalReferences": [
+        {
+          "type": "license",
+          "url": "https://docs.python.org/3.13/license.html"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "PSF-2.0"
+        }
+      ],
+      "name": "CPython",
+      "properties": [
+        {
+          "name": "ca:pin-kind",
+          "value": "version-line"
+        },
+        {
+          "name": "ca:pin",
+          "value": "3.13"
+        },
+        {
+          "name": "ca:usage-scope",
+          "value": "build-and-test"
+        },
+        {
+          "name": "ca:license-review",
+          "value": "pending"
+        }
+      ],
+      "scope": "excluded",
+      "type": "platform",
+      "version": "3.13"
+    },
+    {
+      "bom-ref": "runner-ubuntu-24-04",
+      "externalReferences": [
+        {
+          "type": "license",
+          "url": "https://github.com/actions/runner-images/blob/main/LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "GitHub-hosted runner ubuntu-24.04",
+      "properties": [
+        {
+          "name": "ca:pin-kind",
+          "value": "mutable-label"
+        },
+        {
+          "name": "ca:pin",
+          "value": "ubuntu-24.04"
+        },
+        {
+          "name": "ca:usage-scope",
+          "value": "ci-only"
+        },
+        {
+          "name": "ca:license-review",
+          "value": "pending"
+        }
+      ],
+      "scope": "excluded",
+      "type": "application",
+      "version": "ubuntu-24.04"
+    }
+  ],
+  "metadata": {
+    "component": {
+      "bom-ref": "cloud-autopsy",
+      "name": "cloud-autopsy",
+      "type": "application",
+      "version": "unreleased"
+    },
+    "properties": [
+      {
+        "name": "ca:inventory-status",
+        "value": "Proposed. No licensing, security or upgrade-owner review recorded. Not an approved dependency set."
+      }
+    ],
+    "tools": {
+      "components": [
+        {
+          "name": "ca-supply-chain/0.1",
+          "type": "application"
+        }
+      ]
+    }
+  },
+  "serialNumber": "urn:uuid:c85726a9-3b29-5d8c-951d-c7284c848a48",
+  "specVersion": "1.6",
+  "version": 1
+}

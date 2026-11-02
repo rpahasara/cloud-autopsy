@@ -1,7 +1,12 @@
 # CA-SPIKE-001 offline prototype (Python 3.13 standard library only; no network).
 PYTHON ?= python
 
-.PHONY: demo test verify-fixtures clean-demo
+.PHONY: demo test verify-fixtures clean-demo supply-chain
+
+# CA-P2-001 offline supply-chain checks (inventory, licenses, pins, imports, secrets, SBOM drift).
+supply-chain:
+	$(PYTHON) -I -m unittest discover -s tools/supply_chain -t tools/supply_chain
+	$(PYTHON) -I tools/supply_chain/supply_chain.py check
 
 demo:
 	$(PYTHON) -I prototype/cli.py demo

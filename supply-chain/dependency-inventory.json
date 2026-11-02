@@ -1,0 +1,55 @@
+{
+  "schema": "ca-dep-inventory/0.1",
+  "status": "Proposed. No licensing, security or upgrade-owner review recorded. Not an approved dependency set.",
+  "product_version": "unreleased",
+  "policy": "docs/phase2/ca-p2-001/dependency-policy.md",
+  "dependency_manifests": [],
+  "components": [
+    {
+      "id": "cpython",
+      "type": "runtime",
+      "name": "CPython",
+      "version": "3.13",
+      "pin": {"kind": "version-line", "value": "3.13"},
+      "scope": "build-and-test",
+      "purpose": "Interpreter for the prototype, repository tooling and the proposed contracts package; standard library only.",
+      "license": {"spdx": "PSF-2.0", "source": "https://docs.python.org/3.13/license.html", "review": "pending"},
+      "upgrade_owner": "Unassigned (repository maintainer nomination pending under CA-DEC-008)",
+      "notes": "CI resolves the latest 3.13 patch at run time. Exact patch pin is decision CA-P2-001-D3."
+    },
+    {
+      "id": "actions-checkout",
+      "type": "github-action",
+      "name": "actions/checkout",
+      "version": "v4.2.2",
+      "pin": {"kind": "git-commit", "value": "11bd71901bbe5b1630ceea73d27597364c9af683"},
+      "scope": "ci-only",
+      "purpose": "Read-only checkout with persist-credentials disabled.",
+      "license": {"spdx": "MIT", "source": "https://github.com/actions/checkout/blob/11bd71901bbe5b1630ceea73d27597364c9af683/LICENSE", "review": "pending"},
+      "upgrade_owner": "Unassigned (repository maintainer nomination pending under CA-DEC-008)"
+    },
+    {
+      "id": "actions-setup-python",
+      "type": "github-action",
+      "name": "actions/setup-python",
+      "version": "v5.6.0",
+      "pin": {"kind": "git-commit", "value": "a26af69be951a213d495a4c3e4e4022e16d87065"},
+      "scope": "ci-only",
+      "purpose": "Installs the CI interpreter; no package installation is configured.",
+      "license": {"spdx": "MIT", "source": "https://github.com/actions/setup-python/blob/a26af69be951a213d495a4c3e4e4022e16d87065/LICENSE", "review": "pending"},
+      "upgrade_owner": "Unassigned (repository maintainer nomination pending under CA-DEC-008)"
+    },
+    {
+      "id": "runner-ubuntu-24-04",
+      "type": "ci-runner",
+      "name": "GitHub-hosted runner ubuntu-24.04",
+      "version": "ubuntu-24.04",
+      "pin": {"kind": "mutable-label", "value": "ubuntu-24.04"},
+      "scope": "ci-only",
+      "purpose": "Hosted CI virtual machine. The label is updated by GitHub and cannot be digest-pinned on hosted runners.",
+      "license": {"spdx": "MIT", "source": "https://github.com/actions/runner-images/blob/main/LICENSE", "review": "pending"},
+      "upgrade_owner": "Unassigned (repository maintainer nomination pending under CA-DEC-008)",
+      "notes": "MIT covers the image definition repository only; preinstalled software carries its own licenses and is never shipped."
+    }
+  ]
+}
