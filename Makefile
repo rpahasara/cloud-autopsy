@@ -3,7 +3,7 @@ PYTHON ?= python
 
 .PHONY: demo test verify-fixtures clean-demo supply-chain contracts-test
 
-# CA-P2-002a provisional contract tests (src/cloud_autopsy/contracts); not yet run in CI.
+# CA-P2-002a provisional contract tests (src/cloud_autopsy/contracts); CI runs the same command.
 contracts-test:
 	$(PYTHON) -I -m unittest discover -s tests/contracts -t tests/contracts
 

@@ -45,5 +45,8 @@ jobs:
           python -I -m unittest discover -s tools/supply_chain -t tools/supply_chain -v
           python -I tools/supply_chain/supply_chain.py check
 
+      - name: Contract tests (CA-P2-002a)
+        run: python -I -m unittest discover -s tests/contracts -t tests/contracts -v
+
       - name: Demo self-checks
         run: python -I prototype/cli.py demo
