@@ -58,6 +58,15 @@ ATTRIBUTE_FORBIDDEN = "attribute_forbidden"
 EVIDENCE_ID_MISMATCH = "evidence_id_mismatch"
 CONTENT_DIGEST_MISMATCH = "content_digest_mismatch"
 
+# Run plan, acquisition batch and frozen-input codes (CA-P2-002d, provisional).
+PLAN_INVALID = "plan_invalid"
+PLAN_MISMATCH = "plan_mismatch"
+REGISTRY_MISMATCH = "registry_mismatch"
+BATCH_INVALID = "batch_invalid"
+LIMIT_EXCEEDED = "limit_exceeded"
+MANIFEST_DIGEST_MISMATCH = "manifest_digest_mismatch"
+REPLAY_MISMATCH = "replay_mismatch"
+
 CANONICAL_CODES = frozenset({
     INPUT_NOT_BYTES, DOCUMENT_TOO_LARGE, INVALID_UTF8, BYTE_ORDER_MARK, MALFORMED_JSON,
     DUPLICATE_KEY, FLOAT_NOT_PERMITTED, NON_FINITE_NUMBER, INTEGER_OUT_OF_RANGE, LONE_SURROGATE,
@@ -77,7 +86,9 @@ EVIDENCE_CODES = frozenset({
     OBSERVATION_TOO_LARGE, ATTRIBUTE_MISSING, ATTRIBUTE_UNKNOWN, ATTRIBUTE_INVALID, ATTRIBUTE_FORBIDDEN,
     EVIDENCE_ID_MISMATCH, CONTENT_DIGEST_MISMATCH,
 })
-ALL_CODES = CANONICAL_CODES | VERSION_CODES | TIME_CODES | RECORD_CODES | EVIDENCE_CODES
+MANIFEST_CODES = frozenset({PLAN_INVALID, PLAN_MISMATCH, REGISTRY_MISMATCH, BATCH_INVALID, LIMIT_EXCEEDED,
+                            MANIFEST_DIGEST_MISMATCH, REPLAY_MISMATCH})
+ALL_CODES = CANONICAL_CODES | VERSION_CODES | TIME_CODES | RECORD_CODES | EVIDENCE_CODES | MANIFEST_CODES
 
 
 class ContractError(ValueError):
@@ -109,3 +120,7 @@ class RecordError(ContractError):
 
 class EvidenceError(ContractError):
     """Rejected source registry, observation, attribute or evidence record."""
+
+
+class ManifestError(ContractError):
+    """Rejected run plan, acquisition batch, seal input or frozen-input manifest."""

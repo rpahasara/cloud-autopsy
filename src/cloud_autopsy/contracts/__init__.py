@@ -2,13 +2,17 @@
 
 Slice CA-P2-002a provides typed errors, exact-match versioning and the canonical JSON
 profile; CA-P2-002b adds timestamp provenance and clock intervals; CA-P2-002c adds the
-source registry, observation kinds, evidence identity and conflict classification.
+source registry, observation kinds, evidence identity and conflict classification;
+CA-P2-002d adds run plans, acquisition batches and frozen-input manifests.
 Contracts perform no I/O beyond the bytes or values passed to them.
 """
 
+from .acquisition import BATCH_VERSION
 from .canonical import CANON_VERSION, DIGEST_ALGORITHM
 from .evidence import (CONTENT_ALGORITHM, EVIDENCE_VERSION, ID_ALGORITHM, KIND_REGISTRY_VERSION,
                        OBSERVATION_VERSION)
+from .frozen_input import FROZEN_INPUT_VERSION, GAP_POLICY_VERSION, MANIFEST_ALGORITHM
+from .plan import RUN_PLAN_VERSION
 from .sources import SOURCE_REGISTRY_VERSION
 from .timeinterval import TIME_VERSION
 
@@ -23,5 +27,10 @@ CONTRACT_VERSIONS = {
     "evidence": EVIDENCE_VERSION,
     "evidence-id": ID_ALGORITHM,
     "evidence-content-digest": CONTENT_ALGORITHM,
+    "run-plan": RUN_PLAN_VERSION,
+    "acquisition-batch": BATCH_VERSION,
+    "frozen-input": FROZEN_INPUT_VERSION,
+    "frozen-input-digest": MANIFEST_ALGORITHM,
+    "gap-policy": GAP_POLICY_VERSION,
 }
 CONTRACT_STATUS = "provisional: unreviewed; not RFC 8785 conformance evidence"
