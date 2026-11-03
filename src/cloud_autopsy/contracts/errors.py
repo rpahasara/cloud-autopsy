@@ -45,6 +45,19 @@ RECORD_FIELD_UNKNOWN = "record_field_unknown"
 RECORD_FIELD_INVALID = "record_field_invalid"
 RECORD_INCONSISTENT = "record_inconsistent"
 
+# Source registry, observation and evidence codes (CA-P2-002c, provisional).
+REGISTRY_INVALID = "registry_invalid"
+SOURCE_UNKNOWN = "source_unknown"
+SOURCE_SCOPE_MISMATCH = "source_scope_mismatch"
+OBSERVATION_KIND_UNSUPPORTED = "observation_kind_unsupported"
+OBSERVATION_TOO_LARGE = "observation_too_large"
+ATTRIBUTE_MISSING = "attribute_missing"
+ATTRIBUTE_UNKNOWN = "attribute_unknown"
+ATTRIBUTE_INVALID = "attribute_invalid"
+ATTRIBUTE_FORBIDDEN = "attribute_forbidden"
+EVIDENCE_ID_MISMATCH = "evidence_id_mismatch"
+CONTENT_DIGEST_MISMATCH = "content_digest_mismatch"
+
 CANONICAL_CODES = frozenset({
     INPUT_NOT_BYTES, DOCUMENT_TOO_LARGE, INVALID_UTF8, BYTE_ORDER_MARK, MALFORMED_JSON,
     DUPLICATE_KEY, FLOAT_NOT_PERMITTED, NON_FINITE_NUMBER, INTEGER_OUT_OF_RANGE, LONE_SURROGATE,
@@ -59,7 +72,12 @@ TIME_CODES = frozenset({
 })
 RECORD_CODES = frozenset({RECORD_NOT_OBJECT, RECORD_FIELD_MISSING, RECORD_FIELD_UNKNOWN,
                           RECORD_FIELD_INVALID, RECORD_INCONSISTENT})
-ALL_CODES = CANONICAL_CODES | VERSION_CODES | TIME_CODES | RECORD_CODES
+EVIDENCE_CODES = frozenset({
+    REGISTRY_INVALID, SOURCE_UNKNOWN, SOURCE_SCOPE_MISMATCH, OBSERVATION_KIND_UNSUPPORTED,
+    OBSERVATION_TOO_LARGE, ATTRIBUTE_MISSING, ATTRIBUTE_UNKNOWN, ATTRIBUTE_INVALID, ATTRIBUTE_FORBIDDEN,
+    EVIDENCE_ID_MISMATCH, CONTENT_DIGEST_MISMATCH,
+})
+ALL_CODES = CANONICAL_CODES | VERSION_CODES | TIME_CODES | RECORD_CODES | EVIDENCE_CODES
 
 
 class ContractError(ValueError):
@@ -87,3 +105,7 @@ class TimeError(ContractError):
 
 class RecordError(ContractError):
     """Record that is not a strict, internally consistent instance of its contract."""
+
+
+class EvidenceError(ContractError):
+    """Rejected source registry, observation, attribute or evidence record."""

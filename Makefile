@@ -1,7 +1,11 @@
 # CA-SPIKE-001 offline prototype (Python 3.13 standard library only; no network).
 PYTHON ?= python
 
-.PHONY: demo test verify-fixtures clean-demo supply-chain contracts-test
+.PHONY: demo test verify-fixtures clean-demo supply-chain contracts-test bench-contracts
+
+# Non-gating parser timing benchmark; prints timings with the environment and never fails on speed.
+bench-contracts:
+	$(PYTHON) -I tools/benchmarks/contract_benchmark.py
 
 # CA-P2-002a provisional contract tests (src/cloud_autopsy/contracts); CI runs the same command.
 contracts-test:
