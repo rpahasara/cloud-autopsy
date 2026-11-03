@@ -1,6 +1,6 @@
 # D-DB2 — PostgreSQL driver selection and licensing evidence (proposed)
 
-Date: 2026-11-03. Status: **proposed disposition, not approved**. It is engineering evidence for the licensing reviewer, not legal advice or license clearance. Nothing was installed, no package archive was downloaded, and no lock file or inventory entry was created.
+Date: 2026-11-03. Status: **product owner confirmed the provisional choice on 2026-11-03** (pg8000 1.31.6, python-dateutil 2.9.0.post0 rather than 4.0.0, and the exact tree below). **Licensing approval, dependency installation, lock-file generation and CA-P2-003b authorization remain pending.** It is engineering evidence for the licensing reviewer, not legal advice or license clearance. Nothing was installed, no package archive was downloaded, and no lock file or inventory entry was created.
 
 **Sources:**
 - PyPI JSON API metadata for each exact version (`https://pypi.org/pypi/<name>/<version>/json`);
@@ -55,19 +55,41 @@ The first hash of each package is the pure-Python wheel and the second the sourc
 | pg8000 1.31.6 | `BSD 3-Clause License` (text field); classifier BSD | BSD 3-Clause, "Copyright Mathieu Fenniak and Contributors to pg8000" | `BSD-3-Clause` | None | Keep the copyright and license text; no endorsement use |
 | scramp 1.5.0 | `License-Expression: MIT-0` | "MIT No Attribution", "Copyright The Contributors" | `MIT-0` | None | None (no attribution required) |
 | asn1crypto 1.5.1 | `MIT` | MIT, "Copyright (c) 2015-2022 Will Bond" | `MIT` | None | Keep the copyright and license text |
-| python-dateutil 2.9.0.post0 | `Dual License` | Apache-2.0 for contributions after 2017-12-01; BSD 3-Clause for all code | `Apache-2.0 AND BSD-3-Clause` (reviewer to confirm the expression) | None (only `AUTHORS.md`) | Apache-2.0 §4: provide the license text and keep attributions. No NOTICE file to carry. BSD terms also apply |
+| python-dateutil 2.9.0.post0 | `Dual License` (classifiers: BSD and Apache) | See [python-dateutil license wording](#dateutil-license-wording): Apache-2.0 text for contributions after 2017-12-01 and re-licensed code, BSD 3-Clause text, and "The above BSD License Applies to all code, even that also covered by Apache 2.0" | **Undetermined; licensing reviewer to decide.** Candidates: `BSD-3-Clause`, `BSD-3-Clause AND (Apache-2.0 OR BSD-3-Clause)` or `Apache-2.0 AND BSD-3-Clause` | None (only `AUTHORS.md`) | At least the BSD-3-Clause conditions (keep the copyright notice and conditions; no endorsement). Whether any Apache-2.0 obligation applies depends on the reviewer's reading |
 | six 1.17.0 | `MIT` | MIT, "Copyright (c) 2010-2024 Benjamin Peterson" | `MIT` | None | Keep the copyright and license text |
 
 **Policy fit:**
 - **What the check would accept today:** pg8000 (`BSD-3-Clause`), asn1crypto and six (`MIT`) are in the dependency policy's permissive set.
 - **What it would reject until approved:**
   - scramp (`MIT-0`), because `MIT-0` isn't in the set yet. It is a public-domain-equivalent license without an attribution requirement;
-  - python-dateutil, because the check matches whole SPDX strings and `Apache-2.0 AND BSD-3-Clause` isn't one of them.
+  - python-dateutil, unless the reviewer records `BSD-3-Clause` alone. Any compound expression (with `OR` or `AND`) isn't in the set, because the check matches whole SPDX strings.
 
   Both need an approved specialist review record, or a policy amendment, before the supply-chain check passes.
 - Under the policy, every package needs `review: approved` before its scope can become `runtime-shipped`. While it is used only for local synthetic tests (`build-and-test`), a `pending` review is allowed.
 
 **No NOTICE file is needed now:** none of these packages ships one, and nothing is redistributed. If a deliverable later bundles them, it needs a third-party license file containing each license text above.
+
+## <a id="dateutil-license-wording"></a>python-dateutil license wording (re-examined)
+
+The upstream text at tag `2.9.0.post0`, quoted or summarized from the files rather than interpreted:
+
+| Source | Wording |
+|---|---|
+| `README.rst`, "License" section | "All contributions after December 1, 2017 released under dual license - either Apache 2.0 License or the BSD 3-Clause License. Contributions before December 1, 2017 - except those explicitly relicensed - are released only under the BSD 3-Clause License." |
+| `LICENSE`, first part | The Apache-2.0 notice, then: "The above license applies to all contributions after 2017-12-01, as well as all contributions that have been re-licensed (see AUTHORS file …)" |
+| `LICENSE`, second part | The full BSD 3-Clause text (copyright 2003– Niemeyer, Pieviläinen, de Leeuw, Ganssle and contributors), ending: "The above BSD License Applies to all code, even that also covered by Apache 2.0." |
+| `setup.cfg` and PyPI metadata | `license = Dual License`; classifiers for both the BSD License and the Apache Software License |
+| 4.0.0 PyPI metadata | `License-Expression: BSD-3-Clause`, with the same `LICENSE` file |
+
+**Engineering observations (not a conclusion):**
+- The README describes newer contributions as available under **either** license, which is a choice (`OR`), not both at once (`AND`). Older contributions are BSD 3-Clause only.
+- The `LICENSE` file's last sentence says the BSD license applies to **all** code. Read together with the README, that suggests a recipient can rely on BSD-3-Clause for the whole package, which would make Apache-2.0 obligations optional.
+- Possible SPDX expressions are therefore:
+  - `BSD-3-Clause`;
+  - the literal combination `BSD-3-Clause AND (Apache-2.0 OR BSD-3-Clause)`, which leaves the same BSD-only choice available;
+  - `Apache-2.0 AND BSD-3-Clause`, which an earlier revision of this record used. It isn't supported by the README's "either … or" and is withdrawn.
+
+**Which reading applies, and whether any Apache-2.0 obligation is mandatory for us, is for the licensing reviewer.** This record doesn't assume either.
 
 ## Security evidence
 
@@ -99,7 +121,7 @@ The first hash of each package is the pure-Python wheel and the second the sourc
 - **They change behavior and the dependency tree:**
   - 3.0 rewrote `tz.tzfile` (changing offsets for nonexistent times) and adds a `tzdata` dependency (Apache-2.0, 2026.6), with time-zone data that varies by installed version;
   - 4.0 requires Python 3.11 or later, removes `six`, and makes `isoparse` stricter.
-- **Their metadata disagrees with their license.** 4.0.0 declares `License-Expression: BSD-3-Clause`, but its `LICENSE` file is byte-identical to 2.9.0.post0's dual Apache-2.0 and BSD text. Taking the metadata at face value would understate the obligations. This is reported for the licensing reviewer.
+- **Their metadata is simpler than their license file.** 4.0.0 declares `License-Expression: BSD-3-Clause`, and its `LICENSE` file is byte-identical to 2.9.0.post0's. If the BSD license applies to all code, as the file's last sentence and the README say, that metadata is consistent with the file. An earlier revision of this record called it an understatement, which assumed an `AND` reading; that claim is withdrawn pending the reviewer. Either way it doesn't affect the choice of 2.9.0.post0.
 - **pg8000 barely depends on it.** pg8000 1.31.6 calls only `dateutil.parser.parse`, as a fallback in `timestamp_in` and `timestamptz_in` when `strptime` fails. It doesn't use `isoparse` or `tz`. Our contract times are stored as `bigint` epoch milliseconds (I6), so dateutil affects only volatile receipt timestamps.
 - **Recommendation:** pin 2.9.0.post0 now. Re-evaluate 4.x after a cooling-off period (at least 30 days with no advisories and no yanks) and after the pg8000 maintainers confirm compatibility. Treat a move to 4.x as an inventory change with full review.
 
@@ -127,14 +149,14 @@ The first hash of each package is the pure-Python wheel and the second the sourc
 ## Open questions for an independent licensing reviewer
 
 1. Approve `MIT-0` (scramp) for the permissive set, or record a per-package approval.
-2. Confirm the SPDX expression for python-dateutil 2.9.0.post0 (`Apache-2.0 AND BSD-3-Clause`, or another reading of the dual-license text), and record the 4.0.0 metadata-versus-file discrepancy.
-3. Confirm that BSD-3-Clause (pg8000) and Apache-2.0 attribution (dateutil) can be met by a third-party license file if the tree is ever redistributed, and that nothing is needed while it is only used in tests.
+2. Decide the license reading and SPDX expression for python-dateutil 2.9.0.post0 (see the [wording](#dateutil-license-wording)), and therefore whether any Apache-2.0 obligation applies to us. Record whether 4.0.0's `BSD-3-Clause` metadata matches that reading.
+3. Confirm that the BSD-3-Clause conditions (pg8000, and dateutil at least) and any attribution the reviewer requires can be met by a third-party license file if the tree is ever redistributed, and that nothing is needed while it is used only in tests.
 4. If psycopg 3 is reconsidered: LGPL-3.0 obligations for our distribution and service model (D2), and the licenses of every native library inside `psycopg-binary` for the exact wheel and platform.
 5. Whether the upstream move of pg8000 and scramp from GitHub to Codeberg changes any provenance requirement (the release tags and PyPI artifacts were consistent on 2026-11-03).
 
 ## Conditions before CA-P2-003b may rely on this disposition
 
-1. **Licensing:** the licensing reviewer records outcomes for all five packages (questions 1–3). Approvals for scramp (`MIT-0`) and python-dateutil (compound expression) are required for the supply-chain check to pass.
+1. **Licensing:** the licensing reviewer records outcomes for all five packages (questions 1–3). Approval for scramp (`MIT-0`) is required for the supply-chain check to pass. So is approval for python-dateutil, unless the reviewer records plain `BSD-3-Clause`.
 2. **Product:** confirmation of D-DB2 (pg8000), and of dateutil 2.9.0.post0 over 4.0.0.
 3. **Lock generation:** D5 and D-DB3 approval of the lock-file tool and one-time package-index access. The lock must reproduce exactly the hashes above, or the difference must be investigated.
 4. **Advisories:** a fresh OSV/PyPI check (or the approved D6 tool) on the day the lock is created, with no new advisories or yanks.

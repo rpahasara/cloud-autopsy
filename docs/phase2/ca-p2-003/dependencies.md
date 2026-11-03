@@ -7,7 +7,7 @@ Status: evaluation only. Nothing was downloaded, installed or pinned. License ob
 | Item | Proposal | Notes |
 |---|---|---|
 | Server line | PostgreSQL 18 (CA-DEC-002 proposal) | PostgreSQL License (permissive). The project supports each major for five years. Confirm the exact end-of-life date and the latest minor at pin time |
-| Exact version | The newest 18.x minor available when CA-P2-003b starts | Record it in the inventory with its release-notes reference |
+| Exact version | Proposed: **18.6** (2026-08-13; 18.5 never released); re-check when CA-P2-003b starts | See the [D-DB1 record](d-db1-postgresql-pin.md) |
 | Test image | Docker official image `postgres:18.<minor>-<debian codename>`, pinned by **digest** (`postgres@sha256:...`) | The image packaging repository is MIT; the image contains many Debian packages under their own licenses. Test-only and never redistributed. Inventory scope `ci-only`/test |
 | Image verification | Record the digest, the build source and the image SBOM before first use | Generating an image SBOM or vulnerability report (for example Syft or Grype) needs tool and network approval (D6) |
 
