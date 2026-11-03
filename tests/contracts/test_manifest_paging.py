@@ -184,6 +184,15 @@ class LargeManifestTests(unittest.TestCase):
             with self.subTest(mutate.__name__):
                 self.assertEqual(forged(mutate), errors.PAGE_INVALID)
 
+    def test_shifted_page_counts_with_unchanged_total_are_rejected(self):
+        root = copy.deepcopy(self.root)
+        pages = root["collections"]["evidence"]["pages"]
+        pages[0]["item_count"] -= 1
+        pages[1]["item_count"] += 1  # total and page digests unchanged; per-page counts now lie
+        root["manifest_digest"] = fi.manifest_digest({k: v for k, v in root.items() if k != "manifest_digest"})
+        fi.verify_root(root, self.plan, M.REGISTRY)
+        self.assertEqual(code_of(fi.verify_full, root, self.pages, self.plan, M.REGISTRY), errors.PAGE_INVALID)
+
     def test_malformed_commitments_are_typed(self):
         root = copy.deepcopy(self.root)
         root["collections"]["evidence"]["pages"][0]["item_count"] = fi.PAGE_MAX_ITEMS + 1
