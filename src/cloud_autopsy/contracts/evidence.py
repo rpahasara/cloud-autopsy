@@ -516,6 +516,22 @@ class EvidenceLedger:
             outcome = DUPLICATE if known else ACCEPTED_NEW
         return Admission(outcome, verified.evidence_id, verified.content_digest, self.state(verified.evidence_id))
 
+    def admit_constructed(self, evidence):
+        """Classify evidence that the caller has just built with ``observe`` in this process.
+
+        Skips the re-verification ``admit`` performs, because ``observe`` derived the ID and digest
+        from validated input and the record is immutable. Never use it for records read from
+        storage or received from elsewhere; use ``admit``.
+        """
+        if not isinstance(evidence, ObservedEvidence):
+            raise RecordError(E.RECORD_FIELD_INVALID, "admit_constructed requires an ObservedEvidence record")
+        variants = self._variants.setdefault(evidence.evidence_id, {})
+        known = evidence.content_digest in variants
+        variants.setdefault(evidence.content_digest, evidence)
+        self._deliveries[evidence.evidence_id] = self._deliveries.get(evidence.evidence_id, 0) + 1
+        outcome = CONFLICT_QUARANTINED if len(variants) > 1 else (DUPLICATE if known else ACCEPTED_NEW)
+        return Admission(outcome, evidence.evidence_id, evidence.content_digest, self.state(evidence.evidence_id))
+
     def state(self, evidence_id):
         variants = self._variants.get(evidence_id)
         if not variants:
