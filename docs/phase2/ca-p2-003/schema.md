@@ -1,6 +1,6 @@
 # Proposed PostgreSQL schema (CA-P2-003a, provisional)
 
-Status: design proposal for review. It is not a migration, it has not been run against any database, and it is not approval of CA-DEC-002. Every table, constraint and type here is provisional. Contract names refer to the CA-P2-002a–d contracts on PR #19 (`981b6cd`).
+Status: design proposal for review, revised to apply the proposed [I1–I12 dispositions](inconsistencies.md). It is not a migration, it has not been run against any database, and it is not approval of CA-DEC-002. Every table, constraint and type here is provisional. Contract names refer to the CA-P2-002a–d contracts on PR #19 (`981b6cd`).
 
 ## Principles
 
@@ -18,6 +18,17 @@ CREATE DOMAIN ca.digest AS text CHECK (VALUE ~ '^[a-z][a-z0-9-]*/[0-9]+[.][0-9]+
 CREATE DOMAIN ca.contract_version AS text CHECK (VALUE ~ '^[a-z][a-z0-9-]{0,62}/[0-9]+[.][0-9]+([.][0-9]+)?(-[a-z0-9][a-z0-9.]{0,31})?$');
 CREATE DOMAIN ca.epoch_ms AS bigint CHECK (VALUE BETWEEN -9007199254740991 AND 9007199254740991);
 CREATE TYPE ca.run_state AS ENUM ('collecting', 'sealing', 'sealed', 'failed', 'cancelled');
+
+-- I4: synthetic-only database, recorded once by the first migration and never changed.
+CREATE TABLE ca.data_classification (
+  singleton         boolean PRIMARY KEY DEFAULT true CHECK (singleton),
+  classification    text NOT NULL CHECK (classification = 'synthetic')
+);
+-- I12: pinned provisional contract versions; the adapter compares this with CONTRACT_VERSIONS.
+CREATE TABLE ca.contract_pin (
+  contract_name     text PRIMARY KEY,
+  contract_version  ca.contract_version NOT NULL CHECK (contract_version LIKE '%-provisional')
+);
 ```
 
 ## Configuration and plans (global, content-addressed, immutable)
@@ -26,7 +37,7 @@ CREATE TYPE ca.run_state AS ENUM ('collecting', 'sealing', 'sealed', 'failed', '
 CREATE TABLE ca.registry_snapshot (
   registry_digest   ca.digest PRIMARY KEY,
   registry_id       ca.ident NOT NULL,
-  contract_version  ca.contract_version NOT NULL,
+  contract_version  ca.contract_version NOT NULL CHECK (contract_version = 'ca-source-registry/0.1-provisional'),
   record_bytes      bytea NOT NULL CHECK (octet_length(record_bytes) <= 1048576)
 );
 CREATE TABLE ca.source_binding (                       -- decoded from registry_snapshot
@@ -42,7 +53,7 @@ CREATE TABLE ca.run_plan (
   plan_digest       ca.digest PRIMARY KEY,
   plan_id           ca.ident NOT NULL,
   registry_digest   ca.digest NOT NULL REFERENCES ca.registry_snapshot,
-  contract_version  ca.contract_version NOT NULL,
+  contract_version  ca.contract_version NOT NULL CHECK (contract_version = 'ca-run-plan/0.2-provisional'),
   window_start_ms   ca.epoch_ms NOT NULL,
   window_end_ms     ca.epoch_ms NOT NULL CHECK (window_end_ms > window_start_ms),
   record_bytes      bytea NOT NULL CHECK (octet_length(record_bytes) <= 1048576),
@@ -92,7 +103,7 @@ CREATE TABLE ca.acquisition_batch (
   query_id          ca.ident NOT NULL,
   batch_key         ca.ident NOT NULL,
   batch_digest      ca.digest NOT NULL,                 -- canonical digest without delivery
-  contract_version  ca.contract_version NOT NULL,
+  contract_version  ca.contract_version NOT NULL CHECK (contract_version = 'ca-acquisition-batch/0.1-provisional'),
   sequence          integer NOT NULL CHECK (sequence >= 1),
   outcome           text NOT NULL CHECK (outcome IN ('complete', 'empty', 'partial', 'failed', 'denied')),
   reason            text,
@@ -137,7 +148,7 @@ CREATE TABLE ca.evidence_identity (
 CREATE TABLE ca.evidence_version (
   evidence_id       ca.digest NOT NULL REFERENCES ca.evidence_identity,
   content_digest    ca.digest NOT NULL,
-  contract_version  ca.contract_version NOT NULL,       -- ca-evidence/0.1-provisional
+  contract_version  ca.contract_version NOT NULL CHECK (contract_version = 'ca-evidence/0.1-provisional'),
   record_bytes      bytea,                              -- NULL only after authorized payload purge
   payload_state     text NOT NULL DEFAULT 'available' CHECK (payload_state IN ('available', 'purged')),
   PRIMARY KEY (evidence_id, content_digest),
@@ -188,7 +199,7 @@ CREATE VIEW ca.run_batch_conflict AS
   FROM ca.acquisition_batch GROUP BY run_id, source_id, query_id, batch_key HAVING count(*) > 1;
 ```
 
-Quarantine is a **derived view**, not a mutable flag. Every variant stays in `evidence_version` and `run_delivered_evidence`, matching the contract (every variant retained, none authoritative). Global cross-run conflict policy is open decision I1 in [inconsistencies](inconsistencies.md#i1-conflict-scope).
+Quarantine is a **derived view**, not a mutable flag. Every variant stays in `evidence_version` and `run_delivered_evidence`, matching the contract (every variant retained, none authoritative). Versions are global and conflicts are classified per run; see the proposed disposition of [I1](inconsistencies.md#i1-conflict-scope).
 
 ## Sealed frozen input (run-scoped, written once by the sealer)
 
@@ -196,7 +207,7 @@ Quarantine is a **derived view**, not a mutable flag. Every variant stays in `ev
 CREATE TABLE ca.frozen_input (
   run_id            uuid PRIMARY KEY,
   plan_digest       ca.digest NOT NULL,
-  contract_version  ca.contract_version NOT NULL,       -- ca-frozen-input/0.2-provisional
+  contract_version  ca.contract_version NOT NULL CHECK (contract_version = 'ca-frozen-input/0.2-provisional'),
   manifest_digest   ca.digest NOT NULL,
   status            text NOT NULL CHECK (status IN ('complete', 'incomplete')),
   root_bytes        bytea NOT NULL CHECK (octet_length(root_bytes) <= 1048576),
@@ -221,14 +232,32 @@ CREATE TABLE ca.run_evidence (                          -- immutable membership,
   PRIMARY KEY (run_id, evidence_id),                    -- one authoritative version per identity per run
   FOREIGN KEY (run_id, evidence_id, content_digest) REFERENCES ca.run_delivered_evidence
 );
-CREATE TABLE ca.run_gap (
+CREATE TABLE ca.run_gap (                              -- every ca-gap-policy/0.2 gap field (I9)
   run_id uuid NOT NULL REFERENCES ca.frozen_input,
   gap_id ca.digest NOT NULL,
   subject text NOT NULL CHECK (subject IN ('coverage', 'batch', 'identity')),
   gap_type text NOT NULL CHECK (gap_type IN ('missing', 'failed', 'truncated', 'unverifiable', 'out_of_scope', 'expired')),
+  reasons text[] NOT NULL,
   source_id ca.ident, query_id ca.ident, evidence_id ca.digest,
   interval_start_ms ca.epoch_ms, interval_end_ms ca.epoch_ms,
-  PRIMARY KEY (run_id, gap_id)
+  mandatory boolean,
+  variant_count integer CHECK (variant_count IS NULL OR variant_count >= 2),
+  batch_digests text[] NOT NULL,
+  PRIMARY KEY (run_id, gap_id),
+  CHECK ((subject = 'identity') = (evidence_id IS NOT NULL)),
+  CHECK ((interval_start_ms IS NULL) = (interval_end_ms IS NULL))
+);
+CREATE TABLE ca.run_acquisition (                       -- decoded root acquisitions summary (I5)
+  run_id uuid NOT NULL, plan_digest ca.digest NOT NULL,
+  source_id ca.ident NOT NULL, query_id ca.ident NOT NULL,
+  mandatory boolean NOT NULL,
+  status text NOT NULL CHECK (status IN ('complete', 'empty', 'partial', 'failed', 'denied', 'missing', 'unverifiable')),
+  batch_count integer NOT NULL, conflicting_batch_keys integer NOT NULL,
+  observations_received integer NOT NULL, verified_ms bigint NOT NULL, gap_count integer NOT NULL,
+  PRIMARY KEY (run_id, source_id, query_id),
+  FOREIGN KEY (run_id) REFERENCES ca.frozen_input,
+  FOREIGN KEY (run_id, plan_digest) REFERENCES ca.run (run_id, plan_digest),
+  FOREIGN KEY (plan_digest, source_id, query_id) REFERENCES ca.plan_acquisition
 );
 CREATE TABLE ca.run_coverage (
   run_id uuid NOT NULL REFERENCES ca.frozen_input,
@@ -239,6 +268,46 @@ CREATE TABLE ca.run_coverage (
 ```
 
 The `run_evidence` foreign key to `run_delivered_evidence` is the **same-run isolation** guarantee: a run can only have members that were delivered to that same run. Later tables (hypothesis evidence, citations, CA-P2-005) reference `(run_id, evidence_id)` in `run_evidence`, never `evidence_identity`, so cross-run citation is impossible by construction.
+
+## Run-state integrity, ingest locking and views (I3, I7, I8, I1, I5, I6)
+
+```sql
+-- I8: a run is created collecting, at state_version 0, with no lease.
+CREATE TRIGGER run_insert_state BEFORE INSERT ON ca.run
+  FOR EACH ROW EXECUTE FUNCTION ca.check_run_created_collecting();
+-- I8: allowed transitions; each one increments state_version by exactly 1.
+--   collecting -> sealing | failed | cancelled
+--   sealing    -> sealing (lease takeover) | sealed | failed
+--   sealed, failed, cancelled are terminal
+CREATE TRIGGER run_state_transition BEFORE UPDATE ON ca.run
+  FOR EACH ROW EXECUTE FUNCTION ca.check_run_transition();
+-- I3: a manifest may be inserted only while its run is sealing ...
+CREATE TRIGGER frozen_input_requires_sealing BEFORE INSERT ON ca.frozen_input
+  FOR EACH ROW EXECUTE FUNCTION ca.check_run_is_sealing();
+-- ... and a sealed run must have exactly one manifest at commit.
+CREATE CONSTRAINT TRIGGER sealed_run_has_manifest AFTER UPDATE OF state ON ca.run
+  DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION ca.check_sealed_has_manifest();
+
+-- I7: row lock for ingestion without granting UPDATE on ca.run to ca_ingest.
+CREATE FUNCTION ca.ingest_lock_run(p_run uuid) RETURNS ca.run_state
+  LANGUAGE sql SECURITY DEFINER SET search_path = ca, pg_catalog
+  AS $$ SELECT state FROM ca.run WHERE run_id = p_run FOR UPDATE $$;
+REVOKE ALL ON FUNCTION ca.ingest_lock_run(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION ca.ingest_lock_run(uuid) TO ca_ingest;
+
+CREATE VIEW ca.global_identity_versions AS             -- I1: monitoring only
+  SELECT evidence_id, count(*) AS version_count FROM ca.evidence_version
+  GROUP BY evidence_id HAVING count(*) > 1;
+CREATE VIEW ca.live_acquisition_progress AS            -- I5: counts before sealing; never a status
+  SELECT run_id, source_id, query_id, count(*) AS batch_variants, sum(canonical_size) AS stored_bytes
+  FROM ca.acquisition_batch GROUP BY run_id, source_id, query_id;
+CREATE VIEW ca.evidence_time_utc AS                    -- I6: exact, no floating point
+  SELECT evidence_id, content_digest, timestamp_kind, clock_domain_id, parse_status,
+         timestamptz 'epoch' + epoch_ms * interval '1 millisecond' AS parsed_utc
+  FROM ca.evidence_time;
+```
+
+The trigger function bodies are left to CA-P2-003b. Their required behavior is defined by the acceptance tests CA-IT-023 and CA-IT-029.
 
 ## Lifecycle overlay (CA-P2-006, sketched only)
 
@@ -251,7 +320,7 @@ CREATE TABLE ca.lifecycle_event (
 );
 ```
 
-The manifest stays immutable, and the overlay records changed availability ([lifecycle contract](../../evidence-lifecycle.md)). Purging payload bytes conflicts with re-verifying content digests; see open decision I4.
+The manifest stays immutable, and the overlay records changed availability ([lifecycle contract](../../evidence-lifecycle.md)). Purging payload bytes conflicts with re-verifying content digests. That is deferred under I4: the database is synthetic-only (`data_classification`), and no role can purge until CA-P2-006 and a privacy review.
 
 ## Indexes beyond primary keys
 
@@ -264,12 +333,13 @@ The manifest stays immutable, and the overlay records changed availability ([lif
 | `evidence_identity (source_id, source_version)` | Source lookups |
 | `run_gap (run_id, gap_type)` | Gap reporting |
 | `run (state, lease_expires_at)` | Recovery of expired leases |
+| `frozen_input (manifest_digest)` (not unique) | Lookup by published digest; identical inputs in two runs may share it (I3) |
 | `investigation (plan_digest)`, `run (plan_digest)` | Foreign-key support |
 
 No GIN or full-text indexes. Indexes over raw text need measured justification (Phase 1C).
 
 ## Immutability enforcement
 
-- **Statement triggers:** a trigger on every append-only table (`registry_snapshot`, `source_binding`, `run_plan`, `plan_acquisition`, `acquisition_batch`, `evidence_identity`, `evidence_version` except the lifecycle purge function, `evidence_time`, `run_delivered_evidence`, `batch_evidence`, `frozen_input`, `manifest_page`, `run_evidence`, `run_gap`, `run_coverage`) raises on `UPDATE`, `DELETE` and `TRUNCATE`.
+- **Statement triggers:** a trigger on every append-only table (`registry_snapshot`, `source_binding`, `run_plan`, `plan_acquisition`, `acquisition_batch`, `evidence_identity`, `evidence_version` except the lifecycle purge function, `evidence_time`, `run_delivered_evidence`, `batch_evidence`, `frozen_input`, `manifest_page`, `run_evidence`, `run_gap`, `run_coverage`, `run_acquisition`, `data_classification`, `contract_pin`) raises on `UPDATE`, `DELETE` and `TRUNCATE`.
 - **Privileges:** runtime roles also lack those privileges (see [security design](security.md)).
 - **Limits:** triggers and grants protect against application mistakes and compromised runtime credentials. They do not protect against the database owner or a superuser (CA-DEC-002 security implications).

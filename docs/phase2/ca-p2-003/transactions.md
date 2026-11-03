@@ -1,6 +1,6 @@
 # Transaction model (CA-P2-003a, provisional)
 
-Status: design proposal. No transaction has been executed. Tables are in the [proposed schema](schema.md), and roles in the [security design](security.md).
+Status: design proposal, revised for the proposed [I1–I12 dispositions](inconsistencies.md) (notably I3, I7 and I8). No transaction has been executed. Tables are in the [proposed schema](schema.md), and roles in the [security design](security.md).
 
 ## Rules for every transaction
 
@@ -16,7 +16,7 @@ The contract's per-batch validation (`decode_batch`, `observe`) runs **before** 
 
 ```text
 BEGIN;  -- READ COMMITTED
-  SELECT state FROM ca.run WHERE run_id = $run FOR SHARE;      -- blocks while a seal holds FOR UPDATE
+  SELECT ca.ingest_lock_run($run);   -- SECURITY DEFINER: row lock FOR UPDATE, serializes ingestion per run (I7)
   -- state must be 'collecting'; otherwise ROLLBACK with run_not_collecting
   INSERT INTO ca.acquisition_batch ... ON CONFLICT DO NOTHING;  -- identical redelivery is a no-op
   INSERT INTO ca.batch_delivery (..., attempt) ON CONFLICT DO NOTHING;
@@ -26,7 +26,7 @@ BEGIN;  -- READ COMMITTED
   INSERT INTO ca.evidence_version ... ON CONFLICT (evidence_id, content_digest) DO NOTHING;
   INSERT INTO ca.run_delivered_evidence ... ON CONFLICT DO NOTHING;
   INSERT INTO ca.batch_evidence ... ON CONFLICT DO NOTHING;
-  -- plan limits checked with counts inside the same transaction (see "Limits")
+  -- plan limits checked with exact counts under the run lock (see "Limits")
 COMMIT;
 ```
 
@@ -61,6 +61,8 @@ BEGIN;
   -- require state = 'sealing', our lease and the state_version from phase A
   INSERT INTO ca.frozen_input ...; INSERT INTO ca.manifest_page ...;
   INSERT INTO ca.run_evidence ...; INSERT INTO ca.run_gap ...; INSERT INTO ca.run_coverage ...;
+  INSERT INTO ca.run_acquisition ...;   -- all decoded from the same FrozenInput object (I5, I10)
+  -- verification query: decoded rows must equal the page items, otherwise ROLLBACK (I10)
   UPDATE ca.run SET state = 'sealed', state_version = state_version + 1, lease_owner = NULL,
          lease_expires_at = NULL WHERE run_id = $run AND state_version = $expected + 1;
 COMMIT;
@@ -69,7 +71,7 @@ COMMIT;
 - **Atomicity:** phase B publishes the root, every page and the decoded membership in one transaction. Readers see either nothing or the complete sealed set.
 - **One manifest per run:** `frozen_input.run_id` is the primary key, so a second seal can never publish a second authoritative manifest.
 - **Concurrent sealers:** the compare-and-swap on `state_version` in phase A lets exactly one sealer move the run to `sealing`. The others see 0 rows and stop.
-- **Late ingestion:** after phase A, `T1` sees `state = 'sealing'` and rolls back. Late evidence goes into a new run (an attempt with `parent_run_id`), never into a sealed run.
+- **Late ingestion:** `T1` and phase A take the same run-row lock, so they never interleave. After phase A, `T1` sees `state = 'sealing'` and rolls back. Late evidence goes into a new run (an attempt with `parent_run_id`), never into a sealed run.
 - **Determinism makes recovery safe:** recomputing the seal from the same stored batches gives byte-identical output.
 
 ## T4 — Crash recovery and leases
@@ -84,9 +86,9 @@ COMMIT;
 
 Plan limits are enforced in two places:
 - **In application memory before writing:** the batch size and per-batch observation count, by the contract decoder.
-- **Inside `T1`:** counts of batch deliveries, distinct batch variants per acquisition, distinct delivered evidence and stored batch bytes for the run, read under the run's `FOR SHARE` lock. If a limit would be exceeded, the transaction rolls back with `limit_exceeded`.
+- **Inside `T1`, under the per-run `FOR UPDATE` lock:** counts of batch deliveries, distinct batch variants per acquisition, distinct delivered evidence and stored batch bytes for the run. Because ingestion for a run is serialized (I7), the counts are exact and no limit can be overshot. If a limit would be exceeded, the transaction rolls back with `limit_exceeded`.
 
-Two concurrent ingests can each pass the count check before either commits, so a limit could be overshot by one batch per concurrent worker. The seal re-checks every limit from stored rows, using the same contract code, and rejects the seal if any limit is exceeded. Whether that overshoot window is acceptable, or whether ingest should take `FOR UPDATE` on the run row and serialize per run, is open decision I7.
+The seal re-checks every limit from stored rows with the same contract code, as defense in depth. Batches for one run are written one at a time; throughput per run is unmeasured (CA-DEC-007).
 
 ## Rollback after partial failure
 
