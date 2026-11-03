@@ -41,6 +41,25 @@ def component(cid, **over):
     return c
 
 
+H1, H2 = "1" * 64, "2" * 64
+DIGEST = "d" * 64
+
+
+def package(name, version="1.2.3", hashes=(H1,), import_names=(), allowed_paths=(), **over):
+    c = component(name, type="python-package", name=name, version=version,
+                  pin={"kind": "exact-version", "value": version}, scope="build-and-test",
+                  hashes=list(hashes), import_names=list(import_names), allowed_paths=list(allowed_paths))
+    c.update(over)
+    return c
+
+
+def image(cid="postgres", value=None, **over):
+    c = component(cid, type="container-image", name="postgres", version="18.6-trixie", scope="ci-only",
+                  pin={"kind": "image-digest", "value": value or f"postgres:18.6-trixie@sha256:{DIGEST}"})
+    c.update(over)
+    return c
+
+
 def inventory():
     return {"schema": sc.INVENTORY_SCHEMA, "status": "test", "dependency_manifests": [],
             "components": [component("checkout"),
@@ -170,6 +189,7 @@ class ManifestAndImportTests(TreeCase):
 
     def test_declared_requirements_need_exact_hash_pins(self):
         self.inv["dependency_manifests"] = ["requirements.txt"]
+        self.inv["components"].append(package("pkg", hashes=("0" * 64,)))
         self.save()
         good = "pkg==1.2.3 --hash=sha256:" + "0" * 64 + "  # comment\n\n"
         self.write("requirements.txt", good)
@@ -232,6 +252,120 @@ class SecretAndSbomTests(TreeCase):
             self.assertEqual(sc.main(["--root", str(self.root), "check"]), 0)
             self.write("src/app.py", "import requests\n")
             self.assertEqual(sc.main(["--root", str(self.root), "check"]), 1)
+
+
+
+class Version02Tests(TreeCase):
+    """ca-supply-chain/0.2: digest-pinned images and hash-pinned, path-restricted Python packages."""
+
+    def add(self, *components, manifests=()):
+        self.inv["components"] += list(components)
+        self.inv["dependency_manifests"] = list(manifests)
+        self.save(sbom=not sc.check_inventory(self.inv))  # the tool only builds SBOMs for valid inventories
+
+    def test_python_package_component_validation(self):
+        cases = [
+            (package("a", pin={"kind": "exact-version", "value": "9.9"}), "exact-version pin equal to version"),
+            (package("b", hashes=()), "sha256 artifact hashes"),
+            (package("c", hashes=("xyz",)), "sha256 artifact hashes"),
+            (package("d", hashes=(H1, H1)), "sha256 artifact hashes"),
+            (package("e", import_names=("not-a-module",)), "import_names"),
+            (package("f", import_names=("f",), allowed_paths=()), "needs at least one allowed path"),
+            (package("g", import_names=("g",), allowed_paths=("../escape/",)), "allowed_paths"),
+            (package("h", import_names=("h",), allowed_paths=("src/db",)), "allowed_paths"),
+        ]
+        for comp, needle in cases:
+            with self.subTest(needle=needle, name=comp["name"]):
+                self.inv = inventory()
+                self.add(comp)
+                self.assertTrue(any(needle in p for p in self.problems("inventory")), self.problems("inventory"))
+
+    def test_manifest_must_match_inventory_versions_and_hashes(self):
+        reqs = "requirements-db.txt"
+        self.write(reqs, "PG8000==1.31.6 \\\n    --hash=sha256:" + H1 + " \\\n    --hash=sha256:" + H2 + "\n")
+        self.add(package("pg8000", "1.31.6", (H1, H2), ("pg8000",), ("src/cloud_autopsy/db/",)), manifests=[reqs])
+        self.assertEqual(self.problems("dependency-manifests"), [])
+        self.write(reqs, "pg8000==1.31.5 --hash=sha256:" + H1 + " --hash=sha256:" + H2 + "\n")
+        self.assertTrue(any("differs from inventory version" in p for p in self.problems("dependency-manifests")))
+        self.write(reqs, "pg8000==1.31.6 --hash=sha256:" + H1 + "\n")
+        self.assertTrue(any("hashes differ" in p for p in self.problems("dependency-manifests")))
+        self.write(reqs, "pg8000==1.31.6 --hash=sha256:" + H1 + " --hash=sha256:" + H2
+                   + "\nscramp==1.5.0 --hash=sha256:" + H1 + "\n")
+        self.assertTrue(any("scramp is not an inventoried" in p for p in self.problems("dependency-manifests")))
+
+    def test_inventoried_package_must_be_pinned_somewhere(self):
+        self.add(package("six", "1.17.0"))
+        self.assertTrue(any("six is not pinned" in p for p in self.problems("dependency-manifests")))
+
+    def test_third_party_import_only_inside_allowed_paths(self):
+        reqs = "requirements-db.txt"
+        self.write(reqs, "pg8000==1.31.6 --hash=sha256:" + H1 + "\n")
+        self.add(package("pg8000", "1.31.6", (H1,), ("pg8000",), ("src/cloud_autopsy/db/",)), manifests=[reqs])
+        self.write("src/cloud_autopsy/db/adapter.py", "import pg8000.native\n")
+        self.assertEqual(self.problems("imports"), [])
+        self.write("src/cloud_autopsy/contracts/leak.py", "import pg8000\n")
+        problems = self.problems("imports")
+        self.assertEqual(len(problems), 1)
+        self.assertIn("only allowed under src/cloud_autopsy/db/", problems[0])
+        self.write("src/cloud_autopsy/db/other.py", "import scramp\n")  # indirect dependency, not importable
+        self.assertTrue(any("'scramp' is not standard library" in p for p in self.problems("imports")))
+
+    def test_container_image_pins(self):
+        bad = [image(value="postgres:18.6-trixie"), image(value="postgres@sha256:" + "z" * 64),
+               image(pin={"kind": "exact-version", "value": "18.6"}),
+               component("x", pin={"kind": "image-digest", "value": f"postgres@sha256:{DIGEST}"})]
+        for comp in bad:
+            with self.subTest(pin=comp["pin"]):
+                self.inv = inventory()
+                self.add(comp)
+                self.assertTrue(self.problems("inventory"))
+
+    def test_image_references_must_be_digest_pinned_and_inventoried(self):
+        ref = f"postgres:18.6-trixie@sha256:{DIGEST}"
+        self.add(image())
+        self.assertTrue(any("nothing references it" in p for p in self.problems("images")))
+        self.write("db/test/compose.yaml", f"services:\n  postgres:\n    image: {ref}\n")
+        self.assertEqual(self.problems("images"), [])
+        cases = {
+            "services:\n  db:\n    image: postgres:18.6\n": "is not pinned",
+            "services:\n  db:\n    image: 'postgres:latest'\n": "is not pinned",
+            f"services:\n  db:\n    image: postgres@sha256:{'e' * 64}\n": "does not match the inventory",
+            f"services:\n  db:\n    image: mysql@sha256:{DIGEST}\n": "does not match the inventory",
+        }
+        for text, needle in cases.items():
+            with self.subTest(text=text):
+                self.write("db/test/other.yaml", text)
+                self.assertTrue(any(needle in p for p in self.problems("images")), self.problems("images"))
+        (self.root / "db/test/other.yaml").unlink()
+        self.write("db/Dockerfile", "FROM postgres:18.6\n")
+        self.assertTrue(any("db/Dockerfile" in p for p in self.problems("images")))
+        self.write("db/Dockerfile", f"FROM {ref}\n")
+        self.write(".github/workflows/ci.yml", GOOD_WORKFLOW + "      - uses: docker://postgres:18\n")
+        problems = self.problems("images")
+        self.assertTrue(any(".github/workflows/ci.yml" in p and "not pinned" in p for p in problems), problems)
+        self.assertEqual(self.problems("workflows"), [])  # docker:// is checked as an image, not an action
+
+    def test_sbom_carries_hashes_and_container_purl(self):
+        reqs = "requirements-db.txt"
+        self.write(reqs, "python_dateutil==2.9.0.post0 --hash=sha256:" + H2 + " --hash=sha256:" + H1 + "\n")
+        self.write("db/test/compose.yaml", f"services:\n  postgres:\n    image: postgres:18.6-trixie@sha256:{DIGEST}\n")
+        self.add(package("python-dateutil", "2.9.0.post0", (H2, H1)), image(), manifests=[reqs])
+        self.assertEqual({k: v for k, v in sc.run_checks(self.root).items() if v}, {})
+        doc = json.loads(sc.sbom_bytes(self.inv))
+        by_ref = {c["bom-ref"]: c for c in doc["components"]}
+        self.assertEqual(by_ref["python-dateutil"]["purl"], "pkg:pypi/python-dateutil@2.9.0.post0")
+        self.assertEqual([h["content"] for h in by_ref["python-dateutil"]["hashes"]], [H1, H2])
+        self.assertEqual(by_ref["postgres"]["type"], "container")
+        self.assertEqual(by_ref["postgres"]["purl"], f"pkg:docker/library/postgres@sha256%3A{DIGEST}")
+
+    def test_license_gate_still_applies_to_new_component_types(self):
+        self.add(image(license={"spdx": "PostgreSQL", "source": "https://www.postgresql.org/about/licence/",
+                                "review": "pending"}))
+        self.assertTrue(any("requires an approved specialist review" in p for p in self.problems("inventory")))
+        self.inv = inventory()
+        self.add(package("scramp", "1.5.0", license={"spdx": "MIT-0", "source": "https://codeberg.org/x",
+                                                       "review": "pending"}))
+        self.assertTrue(any("MIT-0 requires an approved" in p for p in self.problems("inventory")))
 
 
 if __name__ == "__main__":

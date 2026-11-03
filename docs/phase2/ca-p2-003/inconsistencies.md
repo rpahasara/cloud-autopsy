@@ -128,7 +128,7 @@ Under CA-DEC-008 no person is appointed to any of these yet.
    - batches for one run are written one at a time; different runs still proceed in parallel;
    - throughput per run is unmeasured (CA-DEC-007).
 3. **Constraints:**
-   - function `ca.ingest_lock_run(uuid) RETURNS ca.run_state`, declared `SECURITY DEFINER`, with `SET search_path = ca, pg_catalog` and `REVOKE ALL ... FROM PUBLIC`;
+   - function `ca.ingest_lock_run(uuid) RETURNS ca.run_state`, declared `SECURITY DEFINER`, with `SET search_path = pg_catalog, pg_temp` and a schema-qualified body, `REVOKE ALL ... FROM PUBLIC`, and default privileges revoking function `EXECUTE` from `PUBLIC` (role review R2 and R3 in the [CA-P2-003b checkpoint](ca-p2-003b-checkpoint.md));
    - `GRANT EXECUTE` to `ca_ingest` only;
    - limit checks inside T1;
    - the seal still re-checks every limit through the contract code.

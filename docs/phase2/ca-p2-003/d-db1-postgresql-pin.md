@@ -63,7 +63,7 @@ Reference it **by digest only**, for example `postgres:18.6-trixie@sha256:3a42â€
 4. **Vulnerability-scan decision (D6, D-DB8):** scan the image SBOM, or record an accepted limitation for a disposable test database holding only synthetic data.
 5. **Refresh policy:** the upgrade owner (D7) re-pins on each scheduled minor release (quarterly) or on any PostgreSQL security release, using the same evidence steps.
 
-## How to repeat this verification
+## <a id="how-to-repeat-this-verification"></a>How to repeat this verification
 
 1. Read the [versioning policy](https://www.postgresql.org/support/versioning/), the release notes and the roadmap.
 2. Read `library/postgres` in `docker-library/official-images` and note the tag's `GitCommit` and `Directory`.

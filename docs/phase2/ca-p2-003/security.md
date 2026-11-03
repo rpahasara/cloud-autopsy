@@ -18,8 +18,8 @@ Status: design proposal. No role, credential or database exists. Pending securit
 **Hardening for every role:**
 - `NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`.
 - `REVOKE ALL ON SCHEMA public FROM PUBLIC`, and `REVOKE CREATE ON DATABASE`.
-- `ALTER DEFAULT PRIVILEGES` so new objects grant nothing by default.
-- `search_path` fixed to `ca, pg_catalog` per role.
+- `ALTER DEFAULT PRIVILEGES` so new objects grant nothing by default. This explicitly includes `REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC`, because PostgreSQL otherwise grants `EXECUTE` on every new function to `PUBLIC`.
+- `search_path` fixed to `ca, pg_catalog` per runtime role. `SECURITY DEFINER` functions instead use `SET search_path = pg_catalog, pg_temp` with schema-qualified bodies, so neither a writable schema nor temporary objects can capture a name. PostgreSQL's guidance is to list `pg_temp` explicitly and last.
 - `SECURITY DEFINER` functions (`ingest_lock_run`, and the purge functions later) set their own `search_path`, are owned by `ca_owner`, revoke `EXECUTE` from `PUBLIC` and grant it to exactly one role.
 - Every role may read `data_classification` and `contract_pin`; the adapter refuses to run unless the classification is `synthetic` (I4) and the pins equal `CONTRACT_VERSIONS` (I12).
 

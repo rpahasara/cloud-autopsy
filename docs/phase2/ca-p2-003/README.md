@@ -11,6 +11,7 @@ Date: 2026-11-03. Backlog item: [CA-P2-003](../../reviews/phase1d/phase2-backlog
 | [Security design](security.md) | Least-privilege runtime roles, credentials and STRIDE coverage |
 | [Dependency evaluation](dependencies.md) | PostgreSQL 18 image pinning, driver options and licenses, lock files, SBOM, vulnerability checks and supply-chain tool changes |
 | [Migrations and integration tests](migrations-and-tests.md) | Versioned forward-only migrations, rollback limits, and 20 planned synthetic integration tests |
+| [CA-P2-003b readiness checkpoint](ca-p2-003b-checkpoint.md) | **The single go/no-go checkpoint:** container configuration, role review, supply-chain 0.2, licensing status, external access, outstanding human decisions and the first implementation slice |
 | [D-DB1 PostgreSQL pin](d-db1-postgresql-pin.md) | Proposed PostgreSQL 18.6 and `postgres:18.6-trixie` index digest, support status, provenance and verification evidence |
 | [D-DB2 driver decision](d-db2-driver-decision.md) | Proposed pg8000 tree with exact versions and SHA-256, license evidence, advisories, Python 3.13 evidence, the psycopg comparison and open licensing questions |
 | [Inconsistencies and decisions](inconsistencies.md) | Proposed dispositions for I1–I12 (resolution, compatibility, constraints, tests, owner and outstanding approval), internal consistency fixes C1–C8, and remaining decisions |
@@ -42,6 +43,8 @@ CA-P2-003b (migrations, adapter, integration tests) must not start until each it
 - [ ] Named owners for database upgrades and advisories recorded (D7 and CA-DEC-008).
 
 ## <a id="ca-p2-003b-blockers"></a>CA-P2-003b blockers (actionable)
+
+Superseded by the consolidated [CA-P2-003b readiness checkpoint](ca-p2-003b-checkpoint.md) (2026-11-03). The list below is kept for history.
 
 1. **Driver and license:** the D-DB2 disposition is proposed ([decision record](d-db2-driver-decision.md)): pg8000 1.31.6, scramp 1.5.0, asn1crypto 1.5.1, python-dateutil 2.9.0.post0 and six 1.17.0. Still needed:
    - product confirmation;

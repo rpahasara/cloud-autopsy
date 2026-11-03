@@ -290,8 +290,9 @@ CREATE CONSTRAINT TRIGGER sealed_run_has_manifest AFTER UPDATE OF state ON ca.ru
 
 -- I7: row lock for ingestion without granting UPDATE on ca.run to ca_ingest.
 CREATE FUNCTION ca.ingest_lock_run(p_run uuid) RETURNS ca.run_state
-  LANGUAGE sql SECURITY DEFINER SET search_path = ca, pg_catalog
+  LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog, pg_temp   -- body is schema-qualified
   AS $$ SELECT state FROM ca.run WHERE run_id = p_run FOR UPDATE $$;
+ALTER DEFAULT PRIVILEGES FOR ROLE ca_owner IN SCHEMA ca REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
 REVOKE ALL ON FUNCTION ca.ingest_lock_run(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION ca.ingest_lock_run(uuid) TO ca_ingest;
 
