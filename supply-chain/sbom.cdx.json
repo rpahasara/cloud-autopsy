@@ -164,13 +164,13 @@
     "tools": {
       "components": [
         {
-          "name": "ca-supply-chain/0.1",
+          "name": "ca-supply-chain/0.2",
           "type": "application"
         }
       ]
     }
   },
-  "serialNumber": "urn:uuid:c85726a9-3b29-5d8c-951d-c7284c848a48",
+  "serialNumber": "urn:uuid:e24e3d3a-df44-5322-b8f4-3877e3689aef",
   "specVersion": "1.6",
   "version": 1
 }

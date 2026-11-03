@@ -1,5 +1,5 @@
 {
-  "schema": "ca-dep-inventory/0.1",
+  "schema": "ca-dep-inventory/0.2",
   "status": "Proposed. No licensing, security or upgrade-owner review recorded. Not an approved dependency set.",
   "product_version": "unreleased",
   "policy": "docs/phase2/ca-p2-001/dependency-policy.md",

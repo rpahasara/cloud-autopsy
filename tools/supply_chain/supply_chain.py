@@ -1,4 +1,4 @@
-"""CA-P2-001 repository supply-chain checks (ca-supply-chain/0.1). Python 3.13 standard library only.
+"""CA-P2-001 repository supply-chain checks (ca-supply-chain/0.2). Python 3.13 standard library only.
 
 Offline and bounded: reads files in the repository, never contacts a network service, never
 installs anything and never modifies the repository except an explicitly requested new SBOM
@@ -6,8 +6,14 @@ file. Passing these checks is conformance evidence for review, not license clear
 security approval.
 
 Commands:
-  check                 inventory, license policy, workflow pins/permissions, dependency
-                        manifests, standard-library-only imports, secret patterns, SBOM drift
+  check                 inventory, license policy, workflow pins/permissions, container-image
+                        digest pins, hash-pinned dependency manifests matching the inventory,
+                        imports (standard library, first-party, or an inventoried package inside
+                        its allowed paths), secret patterns, SBOM drift
+
+Version 0.2 (CA-P2-003b readiness) adds container-image components pinned by digest,
+python-package components with exact versions, artifact hashes, import names and allowed
+paths, and checks that manifests, imports and image references agree with the inventory.
   sbom [--out PATH]     deterministic CycloneDX 1.6 JSON derived from the inventory
 """
 
@@ -21,16 +27,20 @@ import sys
 import uuid
 from pathlib import Path
 
-TOOL_VERSION = "ca-supply-chain/0.1"
-INVENTORY_SCHEMA = "ca-dep-inventory/0.1"
+TOOL_VERSION = "ca-supply-chain/0.2"
+INVENTORY_SCHEMA = "ca-dep-inventory/0.2"
 INVENTORY_PATH = "supply-chain/dependency-inventory.json"
 SBOM_PATH = "supply-chain/sbom.cdx.json"
 MAX_SCAN_BYTES = 2 * 1024 * 1024
 
-COMPONENT_TYPES = {"runtime", "github-action", "ci-runner", "python-package"}
+COMPONENT_TYPES = {"runtime", "github-action", "ci-runner", "python-package", "container-image"}
 SCOPES = {"build-and-test", "ci-only", "runtime-shipped"}
 REVIEW_STATES = {"pending", "approved"}
-PIN_KINDS = {"git-commit", "exact-version", "version-line", "mutable-label"}
+PIN_KINDS = {"git-commit", "exact-version", "version-line", "mutable-label", "image-digest"}
+# name[:tag]@sha256:<64 hex>; the tag is informational, the digest is the pin.
+IMAGE_REF = re.compile(r"^([a-z0-9][a-z0-9._/-]*)(?::([A-Za-z0-9._-]+))?@sha256:([0-9a-f]{64})$")
+SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
+IMPORT_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 # Licenses acceptable for non-distributed build/CI tooling pending specialist review.
 PERMISSIVE = {"MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "PSF-2.0", "0BSD"}
 # Never bundled or shipped without an approved specialist record (technology-evaluation.md).
@@ -119,6 +129,13 @@ def check_inventory(inv):
             problems.append(f"{where}: GitHub Actions must be pinned to a full commit SHA")
         if c.get("scope") == "runtime-shipped" and pin.get("kind") in {"version-line", "mutable-label"}:
             problems.append(f"{where}: shipped components need an exact or commit pin")
+        if c.get("type") == "container-image":
+            if pin.get("kind") != "image-digest" or not IMAGE_REF.match(str(pin.get("value", ""))):
+                problems.append(f"{where}: container images must be pinned as name[:tag]@sha256:<64 hex>")
+        elif pin.get("kind") == "image-digest":
+            problems.append(f"{where}: image-digest pins are only for container images")
+        if c.get("type") == "python-package":
+            problems += _python_package_problems(where, c, pin)
         lic = c.get("license") if isinstance(c.get("license"), dict) else {}
         spdx = lic.get("spdx")
         if not isinstance(spdx, str) or not spdx or spdx.upper() in {"NOASSERTION", "UNKNOWN"}:
@@ -139,6 +156,31 @@ def check_inventory(inv):
     return problems
 
 
+def normalize_package(name):
+    """PEP 503 normalized distribution name."""
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _python_package_problems(where, c, pin):
+    problems = []
+    if pin.get("kind") != "exact-version" or pin.get("value") != c.get("version"):
+        problems.append(f"{where}: python packages need an exact-version pin equal to version")
+    hashes = c.get("hashes")
+    if not isinstance(hashes, list) or not hashes or not all(isinstance(h, str) and SHA256_HEX.match(h)
+                                                             for h in hashes) or len(set(hashes)) != len(hashes):
+        problems.append(f"{where}: python packages need a non-empty list of distinct sha256 artifact hashes")
+    names = c.get("import_names")
+    if not isinstance(names, list) or not all(isinstance(n, str) and IMPORT_NAME.match(n) for n in names):
+        problems.append(f"{where}: import_names must be a list of module names (empty for indirect dependencies)")
+    paths = c.get("allowed_paths")
+    if not isinstance(paths, list) or not all(isinstance(x, str) and x.endswith("/") and not x.startswith("/")
+                                              and ".." not in x for x in paths):
+        problems.append(f"{where}: allowed_paths must be a list of repository-relative directories ending in '/'")
+    elif names and not paths:
+        problems.append(f"{where}: a directly imported package needs at least one allowed path")
+    return problems
+
+
 def _workflow_problems(rel, text, actions):
     problems, used = [], set()
     if not re.search(r"^permissions:\s*$|^permissions:\s*\S", text, re.M):
@@ -154,6 +196,8 @@ def _workflow_problems(rel, text, actions):
         if ref.startswith("./"):
             problems.append(f"{rel}: local action {ref} is not inventoried")
             continue
+        if ref.startswith("docker://"):
+            continue  # container actions are checked as image references
         name, _, sha = ref.partition("@")
         if not SHA40.match(sha):
             problems.append(f"{rel}: {ref} is not pinned to a full commit SHA")
@@ -181,8 +225,64 @@ def check_workflows(root, files, inv):
     return problems
 
 
+_IMAGE_LINE = re.compile(r"^\s*(?:-\s*)?image:\s*['\"]?([^\s'\"#]+)", re.M)
+_FROM_LINE = re.compile(r"^\s*FROM\s+(?:--platform=\S+\s+)?(\S+)", re.M | re.I)
+_DOCKER_USES = re.compile(r"^\s*(?:-\s*)?uses:\s*['\"]?docker://([^\s'\"#]+)", re.M)
+
+
+def check_images(root, files, inv):
+    """Every container image referenced by YAML ``image:``, Dockerfile ``FROM`` or ``docker://`` must be
+    digest-pinned and match an inventoried container-image component; inventoried images must be used."""
+    pinned = {}
+    for c in inv.get("components", []):
+        if isinstance(c, dict) and c.get("type") == "container-image" and isinstance(c.get("pin"), dict):
+            m = IMAGE_REF.match(str(c["pin"].get("value", "")))
+            if m:
+                pinned[(m.group(1), m.group(3))] = c.get("id")
+    problems, used = [], set()
+    for path in files:
+        rel = path.relative_to(root).as_posix()
+        refs = []
+        if path.suffix in {".yml", ".yaml"}:
+            text = path.read_text(encoding="utf-8")
+            refs = _IMAGE_LINE.findall(text) + _DOCKER_USES.findall(text)
+        elif path.name == "Dockerfile" or path.name.endswith(".Dockerfile") or path.name.startswith("Dockerfile."):
+            refs = [r for r in _FROM_LINE.findall(path.read_text(encoding="utf-8")) if r.lower() != "scratch"]
+        for ref in refs:
+            m = IMAGE_REF.match(ref)
+            if not m:
+                problems.append(f"{rel}: image {ref} is not pinned as name[:tag]@sha256:<digest>")
+            elif (m.group(1), m.group(3)) not in pinned:
+                problems.append(f"{rel}: image {m.group(1)}@sha256:{m.group(3)[:12]}... does not match the inventory")
+            else:
+                used.add(pinned[(m.group(1), m.group(3))])
+    for cid in sorted(set(pinned.values()) - used):
+        problems.append(f"inventory lists container image {cid} but nothing references it")
+    return problems
+
+
+def _requirement_entries(path):
+    """Yield (line number, name, version, hashes) from a hash-pinned requirements file (continuations joined)."""
+    logical, start = "", None
+    for n, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        line = re.sub(r"(^|\s)#.*$", "", raw).rstrip()
+        if start is None:
+            start = n
+        if line.endswith("\\"):
+            logical += line[:-1] + " "
+            continue
+        logical += line
+        text = " ".join(logical.split())
+        if text:
+            yield start, text
+        logical, start = "", None
+
+
 def check_dependency_manifests(root, files, inv):
     declared = set(inv.get("dependency_manifests", []))
+    packages = {normalize_package(c["name"]): c for c in inv.get("components", [])
+                if isinstance(c, dict) and c.get("type") == "python-package" and isinstance(c.get("name"), str)}
+    listed = set()
     problems = []
     for path in files:
         rel = path.relative_to(root).as_posix()
@@ -195,12 +295,26 @@ def check_dependency_manifests(root, files, inv):
                             "(needs CA-P2-001 approval first)")
             continue
         if name.startswith("requirements") and name.endswith(".txt"):
-            for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-                line = re.sub(r"(^|\s)#.*$", "", line).strip()
-                if line and not REQUIREMENT_LINE.match(line):
+            for n, line in _requirement_entries(path):
+                if not REQUIREMENT_LINE.match(line):
                     problems.append(f"{rel}:{n}: requirement must be name==version with --hash=sha256 pins")
+                    continue
+                spec, *hash_parts = line.split()
+                req_name, _, version = spec.partition("==")
+                hashes = {h.split(":", 1)[1] for h in hash_parts}
+                component = packages.get(normalize_package(req_name))
+                if component is None:
+                    problems.append(f"{rel}:{n}: {req_name} is not an inventoried python-package")
+                    continue
+                listed.add(normalize_package(req_name))
+                if version != component.get("version"):
+                    problems.append(f"{rel}:{n}: {req_name}=={version} differs from inventory version")
+                if isinstance(component.get("hashes"), list) and hashes != set(component["hashes"]):
+                    problems.append(f"{rel}:{n}: {req_name} hashes differ from the inventory")
     for rel in sorted(declared - {p.relative_to(root).as_posix() for p in files}):
         problems.append(f"{rel}: declared dependency manifest is missing")
+    for name in sorted(set(packages) - listed):
+        problems.append(f"inventory python-package {name} is not pinned in any declared requirements file")
     return problems
 
 
@@ -213,9 +327,14 @@ def first_party_names(root, files):
     return names
 
 
-def check_imports(root, files):
+def check_imports(root, files, inv=None):
     local = first_party_names(root, files)
     allowed = set(sys.stdlib_module_names) | local | {"__future__"}
+    third_party = {}
+    for c in (inv or {}).get("components", []):
+        if isinstance(c, dict) and c.get("type") == "python-package":
+            for module in c.get("import_names") or []:
+                third_party[module] = tuple(c.get("allowed_paths") or ())
     problems = []
     for path in files:
         rel = path.relative_to(root).as_posix()
@@ -235,9 +354,14 @@ def check_imports(root, files):
                 continue
             for mod in mods:
                 top = mod.split(".", 1)[0]
-                if top not in allowed:
+                if top in allowed:
+                    continue
+                if top not in third_party:
                     problems.append(f"{rel}:{node.lineno}: import {top!r} is not standard library "
                                     "or first-party; third-party packages need an approved inventory entry")
+                elif not any(rel.startswith(prefix) for prefix in third_party[top]):
+                    problems.append(f"{rel}:{node.lineno}: import {top!r} is only allowed under "
+                                    f"{', '.join(third_party[top])}")
     return problems
 
 
@@ -269,6 +393,7 @@ def build_sbom(inv):
     for c in sorted(inv["components"], key=lambda c: c["id"]):
         comp = {
             "type": "application" if c["type"] in {"github-action", "ci-runner"} else
+                    "container" if c["type"] == "container-image" else
                     ("platform" if c["type"] == "runtime" else "library"),
             "bom-ref": c["id"],
             "name": c["name"],
@@ -286,7 +411,12 @@ def build_sbom(inv):
         if c["type"] == "github-action":
             comp["purl"] = f"pkg:github/{c['name']}@{c['pin']['value']}"
         elif c["type"] == "python-package":
-            comp["purl"] = f"pkg:pypi/{c['name'].lower()}@{c['version']}"
+            comp["purl"] = f"pkg:pypi/{normalize_package(c['name'])}@{c['version']}"
+            comp["hashes"] = [{"alg": "SHA-256", "content": h} for h in sorted(c.get("hashes", []))]
+        elif c["type"] == "container-image":
+            m = IMAGE_REF.match(c["pin"]["value"])
+            repo = m.group(1) if "/" in m.group(1) else f"library/{m.group(1)}"
+            comp["purl"] = f"pkg:docker/{repo}@sha256%3A{m.group(3)}"
         components.append(comp)
     return {
         "bomFormat": "CycloneDX",
@@ -327,8 +457,9 @@ def run_checks(root):
     sections = {"inventory": check_inventory(inv)}
     valid = not sections["inventory"]
     sections["workflows"] = check_workflows(root, files, inv)
+    sections["images"] = check_images(root, files, inv)
     sections["dependency-manifests"] = check_dependency_manifests(root, files, inv)
-    sections["imports"] = check_imports(root, files)
+    sections["imports"] = check_imports(root, files, inv)
     sections["secrets"] = scan_secrets(root, files)
     sections["sbom"] = check_sbom(root, inv) if valid else ["skipped: inventory invalid"]
     return sections
