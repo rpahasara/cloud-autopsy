@@ -151,7 +151,9 @@ class ReasonCodeTests(unittest.TestCase):
     }
 
     def test_reason_codes_are_pinned(self):
-        self.assertEqual(set(errors.ALL_CODES), self.PINNED)
+        # CA-P2-002b added time and record families; the 002a codes are unchanged.
+        self.assertEqual(set(errors.CANONICAL_CODES | errors.VERSION_CODES), self.PINNED)
+        self.assertLessEqual(self.PINNED, set(errors.ALL_CODES))
 
     def test_unregistered_code_cannot_be_raised(self):
         with self.assertRaises(AssertionError):

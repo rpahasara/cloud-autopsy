@@ -27,6 +27,24 @@ CONTRACT_VERSION_MISMATCH = "contract_version_mismatch"
 DIGEST_MALFORMED = "digest_malformed"
 DIGEST_ALGORITHM_MISMATCH = "digest_algorithm_mismatch"
 
+# Timestamp and clock-domain codes (CA-P2-002b, provisional).
+TIMESTAMP_NOT_STRING = "timestamp_not_string"
+TIMESTAMP_TOO_LONG = "timestamp_too_long"
+TIMESTAMP_MALFORMED = "timestamp_malformed"
+FRACTION_TOO_LONG = "fraction_too_long"
+INVALID_CALENDAR_DATE = "invalid_calendar_date"
+INVALID_TIME_OF_DAY = "invalid_time_of_day"
+INVALID_UTC_OFFSET = "invalid_utc_offset"
+LEAP_SECOND_UNSUPPORTED = "leap_second_unsupported"
+PRECISION_INVALID = "precision_invalid"
+CLOCK_OFFSET_OUT_OF_RANGE = "clock_offset_out_of_range"
+# Strict record decoding codes, shared by later record contracts.
+RECORD_NOT_OBJECT = "record_not_object"
+RECORD_FIELD_MISSING = "record_field_missing"
+RECORD_FIELD_UNKNOWN = "record_field_unknown"
+RECORD_FIELD_INVALID = "record_field_invalid"
+RECORD_INCONSISTENT = "record_inconsistent"
+
 CANONICAL_CODES = frozenset({
     INPUT_NOT_BYTES, DOCUMENT_TOO_LARGE, INVALID_UTF8, BYTE_ORDER_MARK, MALFORMED_JSON,
     DUPLICATE_KEY, FLOAT_NOT_PERMITTED, NON_FINITE_NUMBER, INTEGER_OUT_OF_RANGE, LONE_SURROGATE,
@@ -34,7 +52,14 @@ CANONICAL_CODES = frozenset({
     DIGEST_MALFORMED, DIGEST_ALGORITHM_MISMATCH,
 })
 VERSION_CODES = frozenset({CONTRACT_VERSION_MISSING, CONTRACT_VERSION_MALFORMED, CONTRACT_VERSION_MISMATCH})
-ALL_CODES = CANONICAL_CODES | VERSION_CODES
+TIME_CODES = frozenset({
+    TIMESTAMP_NOT_STRING, TIMESTAMP_TOO_LONG, TIMESTAMP_MALFORMED, FRACTION_TOO_LONG,
+    INVALID_CALENDAR_DATE, INVALID_TIME_OF_DAY, INVALID_UTC_OFFSET, LEAP_SECOND_UNSUPPORTED,
+    PRECISION_INVALID, CLOCK_OFFSET_OUT_OF_RANGE,
+})
+RECORD_CODES = frozenset({RECORD_NOT_OBJECT, RECORD_FIELD_MISSING, RECORD_FIELD_UNKNOWN,
+                          RECORD_FIELD_INVALID, RECORD_INCONSISTENT})
+ALL_CODES = CANONICAL_CODES | VERSION_CODES | TIME_CODES | RECORD_CODES
 
 
 class ContractError(ValueError):
@@ -54,3 +79,11 @@ class CanonicalError(ContractError):
 
 class VersionError(ContractError):
     """Missing, malformed or incompatible contract version."""
+
+
+class TimeError(ContractError):
+    """Rejected timestamp text, precision or clock-domain declaration."""
+
+
+class RecordError(ContractError):
+    """Record that is not a strict, internally consistent instance of its contract."""
