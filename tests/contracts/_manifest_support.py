@@ -5,10 +5,10 @@ import json
 
 import _evidence_support as ES
 import _support
-from cloud_autopsy.contracts import acquisition as acq, plan as pl
+from cloud_autopsy.contracts import acquisition as acq, frozen_input as fi, plan as pl
 from cloud_autopsy.contracts import timeinterval as ti
 
-VECTORS = _support.PACKAGE / "contracts" / "vectors" / "ca-frozen-input-0.1-provisional.json"
+VECTORS = _support.PACKAGE / "contracts" / "vectors" / (fi.FROZEN_INPUT_VERSION.replace("/", "-") + ".json")
 DOC = json.loads(VECTORS.read_bytes().decode("utf-8"))
 REGISTRY = ES.REGISTRY
 

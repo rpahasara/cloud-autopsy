@@ -10,6 +10,9 @@ same for every retry of the same plan.
 Provisional ceilings follow the proposed CA-DEC-007 hard bounds (60-minute window, 100,000
 records, 250 MB) and the 1 MiB canonical-document ceiling for a single batch. A plan may
 choose lower limits, never higher ones.
+
+Version history: 0.1-provisional had no bound on delivered records (duplicates and retries
+included); 0.2-provisional adds ``max_batch_deliveries``.
 """
 
 from dataclasses import dataclass
@@ -21,13 +24,14 @@ from .errors import ManifestError, RecordError
 from .sources import IDENTIFIER, SourceRegistry
 from .versioning import check_envelope, validate_identifier
 
-RUN_PLAN_VERSION = "ca-run-plan/0.1-provisional"
+RUN_PLAN_VERSION = "ca-run-plan/0.2-provisional"
 SYNTHESIS_MODES = ("disabled",)  # local synthesis is a later, separately approved amendment
 
 # PROVISIONAL ceilings (CA-DEC-007 proposed hard bounds; unreviewed).
 LIMIT_CEILINGS = {
     "max_window_ms": 3_600_000,
     "max_batches_per_acquisition": 1_000,
+    "max_batch_deliveries": 10_000,  # every delivered record, duplicates included
     "max_observations_per_batch": 1_000,
     "max_observations_total": 100_000,
     "max_batch_bytes": canonical.CEILING_BYTES,

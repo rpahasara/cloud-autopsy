@@ -30,39 +30,46 @@ class ScenarioVectorTests(unittest.TestCase):
     def test_vector_file_targets_these_contracts(self):
         self.assertEqual(M.DOC["contract"], fi.FROZEN_INPUT_VERSION)
         self.assertEqual(set(M.DOC["related_contracts"]), {pl.RUN_PLAN_VERSION, acq.BATCH_VERSION,
-                                                           fi.GAP_POLICY_VERSION})
+                                                           fi.GAP_POLICY_VERSION, fi.PAGE_VERSION})
 
     def test_scenarios(self):
         for scenario in M.DOC["scenarios"]:
             with self.subTest(scenario["id"]):
                 plan, sealed = seal_scenario(scenario)
-                record = sealed.to_record()
-                self.assertEqual(record["status"], scenario["status"])
-                self.assertEqual(record["limitations"], scenario["limitations"])
-                self.assertEqual(record["evidence"], sorted(
-                    ({"evidence_id": ES.build(n).evidence_id, "content_digest": ES.build(n).content_digest}
-                     for n in scenario["members"]), key=lambda m: m["evidence_id"]))
-                statuses = {(a["source_id"], a["query_id"]): a["status"] for a in record["acquisitions"]}
+                root = sealed.root()
+                self.assertEqual(root["status"], scenario["status"])
+                self.assertEqual(root["limitations"], scenario["limitations"])
+                members = {m["evidence_id"]: m for m in fi.collection_items(sealed, "evidence")}
+                expected = {ES.build(n).evidence_id: (ES.build(n).content_digest, q)
+                            for n, q in scenario["members"].items()}
+                self.assertEqual({k: (m["content_digest"], m["coverage"]) for k, m in members.items()}, expected)
+                statuses = {(a["source_id"], a["query_id"]): a["status"] for a in root["acquisitions"]}
                 for name, status in scenario["acquisition_status"].items():
                     spec = M.DOC["acquisitions"][name]
                     self.assertEqual(statuses[(spec["source_id"], spec["query_id"])], status, name)
-                self.assertEqual(len(record["gaps"]), len(scenario["gaps"]))
-                for expected in scenario["gaps"]:
-                    self.assertTrue(any(self.gap_matches(g, expected, plan) for g in record["gaps"]), expected)
+                gaps = fi.collection_items(sealed, "gaps")
+                self.assertEqual(len(gaps), len(scenario["gaps"]))
+                for want in scenario["gaps"]:
+                    self.assertEqual(sum(self.gap_matches(g, want, plan) for g in gaps), 1, want)
 
     def gap_matches(self, gap, expected, plan):
-        if (gap["gap_type"], gap["reasons"]) != (expected["gap_type"], expected["reasons"]):
+        if (gap["subject"], gap["gap_type"], gap["reasons"]) != (expected["subject"], expected["gap_type"],
+                                                                 expected["reasons"]):
             return False
-        if "evidence" in expected:
-            digests = sorted(ES.build(n).content_digest for n in expected["content_digests"])
-            return gap["evidence_id"] == ES.build(expected["evidence"]).evidence_id and gap["content_digests"] == digests
+        if expected["subject"] == "identity":
+            return (gap["evidence_id"], gap["variant_count"]) == (ES.build(expected["evidence"]).evidence_id,
+                                                                  expected["variant_count"])
         spec = M.DOC["acquisitions"][expected["acquisition"]]
         if (gap["source_id"], gap["query_id"], gap["mandatory"]) != (spec["source_id"], spec["query_id"],
                                                                       spec["mandatory"]):
             return False
-        if expected.get("batch_conflict"):
-            return gap["interval_ms"] is None and len(gap["batch_digests"]) == 2
+        names = expected.get("batches") or ([expected["batch"]] if "batch" in expected else [])
+        digests = sorted(acq.batch_digest(M.batch_record(n, plan)) for n in names)
+        if gap["batch_digests"] != digests:
+            return False
         interval = expected["interval"]
+        if interval is None:
+            return gap["interval_ms"] is None
         bounds = (plan.window_start_ms, plan.window_end_ms) if interval == "window" else tuple(map(M.ms, interval))
         return gap["interval_ms"] == {"start": bounds[0], "end": bounds[1]}
 
@@ -78,7 +85,8 @@ class DeterminismTests(unittest.TestCase):
                 attempts = {n: rng.randint(1, 5) for n in scenario["batches"]}
                 with self.subTest(scenario["id"], order=order):
                     _, sealed = seal_scenario(scenario, order, attempts)
-                    self.assertEqual(sealed.canonical, reference.canonical)
+                    self.assertEqual((sealed.root_bytes, sealed.page_bytes),
+                                     (reference.root_bytes, reference.page_bytes))
 
     def test_manifest_digest_regression_pins_are_stable(self):
         digests = {s["id"]: seal_scenario(s)[1].digest for s in M.DOC["scenarios"]}
@@ -90,23 +98,24 @@ class DeterminismTests(unittest.TestCase):
     def test_no_volatile_raw_or_truth_content_in_manifest(self):
         scenario = M.DOC["scenarios"][1]
         _, sealed = seal_scenario(scenario, attempts={n: 97 for n in scenario["batches"]})
-        record = sealed.to_record()
-        self.assertIn("run_id", record["excluded_from_digest"])
-        self.assertIn("batch.delivery.attempt", record["excluded_from_digest"])
-        del record["excluded_from_digest"]
-        text = canonical.canonical_bytes(record).decode("utf-8")
+        root = sealed.root()
+        self.assertIn("run_id", root["excluded_from_digest"])
+        self.assertIn("batch.delivery.attempt", root["excluded_from_digest"])
+        del root["excluded_from_digest"]
+        text = canonical.canonical_bytes(root).decode("utf-8") + b"".join(sealed.page_bytes).decode("utf-8")
         for forbidden in ("kubectl delete", "ignore previous", "attempt", "ops-config-sync", "registry.invalid",
                           "truth", "password", "token", "run_id", "wall"):
             self.assertNotIn(forbidden, text)
 
     def test_frozen_input_is_immutable(self):
         _, sealed = seal_scenario(M.DOC["scenarios"][0])
-        record = sealed.to_record()
-        record["evidence"].clear()
-        record["status"] = "complete-forged"
-        self.assertEqual(len(sealed.to_record()["evidence"]), 2)
+        root, pages = sealed.root(), sealed.pages()
+        root["status"] = "forged"
+        pages[0]["items"].clear()
+        self.assertEqual(sealed.root()["status"], fi.COMPLETE)
+        self.assertTrue(sealed.pages()[0]["items"])
         with self.assertRaises(AttributeError):
-            sealed.canonical = b"{}"
+            sealed.root_bytes = b"{}"
 
 
 class VerificationTests(unittest.TestCase):
@@ -115,41 +124,42 @@ class VerificationTests(unittest.TestCase):
         self.plan, self.sealed = seal_scenario(self.scenario)
         self.records = [M.batch_record(n, self.plan) for n in self.scenario["batches"]]
 
-    def test_verify_and_replay(self):
-        record = self.sealed.to_record()
-        self.assertEqual(fi.verify(record, self.plan, M.REGISTRY).canonical, self.sealed.canonical)
-        self.assertEqual(fi.verify_replay(record, self.plan, M.REGISTRY, list(reversed(self.records))).canonical,
-                         self.sealed.canonical)
+    def test_verify_root_full_and_replay(self):
+        root, pages = self.sealed.root(), self.sealed.pages()
+        self.assertEqual(fi.verify_root(root, self.plan, M.REGISTRY), root)
+        self.assertEqual(fi.verify_full(root, list(reversed(pages)), self.plan, M.REGISTRY), root)
+        resealed = fi.verify_replay(root, pages, self.plan, M.REGISTRY, list(reversed(self.records)))
+        self.assertEqual(resealed.root_bytes, self.sealed.root_bytes)
 
-    def test_tampered_manifests(self):
-        record = self.sealed.to_record()
-        member = record["evidence"][0]
+    def test_tampered_roots(self):
+        root = self.sealed.root()
         cases = [
             ({"status": "complete"}, errors.MANIFEST_DIGEST_MISMATCH),
-            ({"evidence": record["evidence"][1:]}, errors.MANIFEST_DIGEST_MISMATCH),
-            ({"evidence": record["evidence"] + [member]}, errors.MANIFEST_DIGEST_MISMATCH),
-            ({"gaps": []}, errors.MANIFEST_DIGEST_MISMATCH),
+            ({"limitations": []}, errors.MANIFEST_DIGEST_MISMATCH),
+            ({"acquisitions": root["acquisitions"][1:]}, errors.MANIFEST_DIGEST_MISMATCH),
+            ({"collections": {**root["collections"], "gaps": {"item_count": 0, "pages": []}}},
+             errors.MANIFEST_DIGEST_MISMATCH),
             ({"manifest_digest": "sha256:" + "0" * 64}, errors.MANIFEST_DIGEST_MISMATCH),
-            ({"contract_version": "ca-frozen-input/0.2-provisional"}, errors.CONTRACT_VERSION_MISMATCH),
+            ({"contract_version": "ca-frozen-input/0.1-provisional"}, errors.CONTRACT_VERSION_MISMATCH),
             ({"ground_truth": {"cause": "x"}}, errors.RECORD_FIELD_UNKNOWN),
         ]
         for change, code in cases:
             with self.subTest(change=list(change)):
-                self.assertEqual(code_of(fi.verify, {**record, **change}, self.plan, M.REGISTRY), code)
-        missing = dict(record)
-        del missing["gaps"]
-        self.assertEqual(code_of(fi.verify, missing, self.plan, M.REGISTRY), errors.RECORD_FIELD_MISSING)
+                self.assertEqual(code_of(fi.verify_root, {**root, **change}, self.plan, M.REGISTRY), code)
+        missing = dict(root)
+        del missing["collections"]
+        self.assertEqual(code_of(fi.verify_root, missing, self.plan, M.REGISTRY), errors.RECORD_FIELD_MISSING)
 
     def test_wrong_plan_registry_and_replay_inputs(self):
-        record = self.sealed.to_record()
+        root, pages = self.sealed.root(), self.sealed.pages()
         other_plan = M.make_plan(self.scenario["acquisitions"], plan_id="another-plan")
-        self.assertEqual(code_of(fi.verify, record, other_plan, M.REGISTRY), errors.PLAN_MISMATCH)
+        self.assertEqual(code_of(fi.verify_root, root, other_plan, M.REGISTRY), errors.PLAN_MISMATCH)
         moved = copy.deepcopy(ES.DOC["registry"])
         moved["sources"][0]["cluster_id"] = "ca-kind-moved"
         moved_registry = sources.SourceRegistry.from_record(moved)
-        self.assertEqual(code_of(fi.verify, record, self.plan, moved_registry), errors.REGISTRY_MISMATCH)
+        self.assertEqual(code_of(fi.verify_root, root, self.plan, moved_registry), errors.REGISTRY_MISMATCH)
         self.assertEqual(code_of(fi.seal, self.plan, moved_registry, self.records), errors.REGISTRY_MISMATCH)
-        self.assertEqual(code_of(fi.verify_replay, record, self.plan, M.REGISTRY, self.records[:-1]),
+        self.assertEqual(code_of(fi.verify_replay, root, pages, self.plan, M.REGISTRY, self.records[:-1]),
                          errors.REPLAY_MISMATCH)
 
 
@@ -286,7 +296,8 @@ class BatchTests(unittest.TestCase):
     def test_manifest_codes_are_pinned(self):
         self.assertEqual(errors.MANIFEST_CODES, {"plan_invalid", "plan_mismatch", "registry_mismatch",
                                                  "batch_invalid", "limit_exceeded", "manifest_digest_mismatch",
-                                                 "replay_mismatch"})
+                                                 "replay_mismatch", "page_missing", "page_unexpected",
+                                                 "page_invalid", "page_digest_mismatch"})
 
 
 if __name__ == "__main__":
