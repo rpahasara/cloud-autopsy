@@ -1,7 +1,8 @@
 {
   "schema": "ca-contract-vectors/0.1",
-  "contract": "ca-time-interval/0.1-provisional",
+  "contract": "ca-time-interval/0.2-provisional",
   "status": "Provisional. Whole-second epoch values were computed independently with Python calendar.timegm and Node.js v22.17.0 Date.UTC (year 0000 with Node only), which agreed for every value. Fractions, offsets and interval bounds were derived by hand from those values. Not independently reviewed.",
+  "changes": "0.2-provisional (PR #17 review P1): unknown clock continuity now fails closed with basis continuity_unknown. negative-offset-correction moved from node-b (unknown continuity) to node-c (declared continuous) to keep testing offset correction; unknown-continuity-disables-same-domain renamed and re-based; four unknown-continuity vectors added. Parse vectors are unchanged.",
   "interval_note": "Bounds are inclusive integer epoch milliseconds; [lower, upper] means [lower ms, upper + 1 ms). The source is assumed to truncate to its effective precision.",
   "parse_valid": [
     {"id": "utc-whole-second", "raw": "2026-11-03T08:15:30Z", "epoch_ms": 1793693730000, "zone_offset_minutes": 0, "local_offset_unknown": false, "text_precision_ns": 1000000000, "effective_precision_ns": 1000000000, "local_lower_ms": 1793693730000, "local_upper_ms": 1793693730999},
@@ -65,8 +66,10 @@
     "ref": {"status": "declared", "offset_ms": 0, "offset_uncertainty_ms": 0, "offset_provenance": "fixture_declared", "continuity": "declared_continuous"},
     "node-a": {"status": "declared", "offset_ms": 1500, "offset_uncertainty_ms": 200, "offset_provenance": "fixture_declared", "continuity": "declared_continuous"},
     "node-b": {"status": "declared", "offset_ms": -800, "offset_uncertainty_ms": 100, "offset_provenance": "fixture_declared", "continuity": "unknown"},
+    "node-c": {"status": "declared", "offset_ms": -800, "offset_uncertainty_ms": 100, "offset_provenance": "fixture_declared", "continuity": "declared_continuous"},
     "stepped": {"status": "declared", "offset_ms": 0, "offset_uncertainty_ms": 0, "offset_provenance": "fixture_declared", "continuity": "step_declared"},
     "unknown-clock": {"status": "unknown", "offset_ms": null, "offset_uncertainty_ms": null, "offset_provenance": null, "continuity": "declared_continuous"},
+    "unknown-loose": {"status": "unknown", "offset_ms": null, "offset_uncertainty_ms": null, "offset_provenance": null, "continuity": "unknown"},
     "unbounded": {"status": "declared", "offset_ms": 0, "offset_uncertainty_ms": null, "offset_provenance": "fixture_declared", "continuity": "declared_continuous"}
   },
   "compare": [
@@ -76,8 +79,12 @@
     {"id": "offset-sign-reverses-raw-order", "a": ["node-a", "2026-11-03T08:15:31.600Z"], "b": ["ref", "2026-11-03T08:15:30.400Z"], "order": "before", "basis": "reference_interval"},
     {"id": "touching-bounds-are-unordered", "a": ["node-a", "2026-11-03T08:15:31.700Z"], "b": ["ref", "2026-11-03T08:15:30.400Z"], "order": "unordered", "basis": "reference_overlap"},
     {"id": "one-millisecond-gap-is-ordered", "a": ["node-a", "2026-11-03T08:15:31.699Z"], "b": ["ref", "2026-11-03T08:15:30.400Z"], "order": "before", "basis": "reference_interval"},
-    {"id": "negative-offset-correction", "a": ["node-b", "2026-11-03T08:15:29.000Z"], "b": ["ref", "2026-11-03T08:15:29.950Z"], "order": "before", "basis": "reference_interval"},
-    {"id": "unknown-continuity-disables-same-domain", "a": ["node-b", "2026-11-03T08:15:29.000Z"], "b": ["node-b", "2026-11-03T08:15:29.150Z"], "order": "unordered", "basis": "reference_overlap"},
+    {"id": "negative-offset-correction", "a": ["node-c", "2026-11-03T08:15:29.000Z"], "b": ["ref", "2026-11-03T08:15:29.950Z"], "order": "before", "basis": "reference_interval"},
+    {"id": "unknown-continuity-same-domain-overlapping", "a": ["node-b", "2026-11-03T08:15:29.000Z"], "b": ["node-b", "2026-11-03T08:15:29.150Z"], "order": "unordered", "basis": "continuity_unknown"},
+    {"id": "unknown-continuity-same-domain-widely-separated", "a": ["node-b", "2026-11-03T08:00:00Z"], "b": ["node-b", "2026-11-03T09:00:00Z"], "order": "unordered", "basis": "continuity_unknown"},
+    {"id": "unknown-continuity-cross-domain-widely-separated", "a": ["node-b", "2026-11-01T00:00:00Z"], "b": ["ref", "2026-11-03T08:15:30Z"], "order": "unordered", "basis": "continuity_unknown"},
+    {"id": "unknown-continuity-unknown-status-clock", "a": ["unknown-loose", "2026-11-01T00:00:00Z"], "b": ["unknown-loose", "2026-11-03T08:15:30Z"], "order": "unordered", "basis": "continuity_unknown"},
+    {"id": "declared-step-precedes-unknown-continuity", "a": ["stepped", "2026-11-01T00:00:00Z"], "b": ["node-b", "2026-11-03T08:15:30Z"], "order": "unordered", "basis": "clock_step"},
     {"id": "declared-step-same-domain", "a": ["stepped", "2026-11-03T08:00:00Z"], "b": ["stepped", "2026-11-03T09:00:00Z"], "order": "unordered", "basis": "clock_step"},
     {"id": "declared-step-cross-domain", "a": ["stepped", "2026-11-01T00:00:00Z"], "b": ["ref", "2026-11-03T08:15:30Z"], "order": "unordered", "basis": "clock_step"},
     {"id": "unknown-clock-same-domain-continuous", "a": ["unknown-clock", "2026-11-03T08:00:00Z"], "b": ["unknown-clock", "2026-11-03T09:00:00Z"], "order": "before", "basis": "same_domain"},

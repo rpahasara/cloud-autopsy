@@ -141,8 +141,14 @@ class ClockDomainTests(unittest.TestCase):
         del missing["continuity"]
         self.assertEqual(code_of(ti.ClockDomain.from_record, missing), errors.RECORD_FIELD_MISSING)
         self.assertEqual(code_of(ti.ClockDomain.from_record, [record]), errors.RECORD_NOT_OBJECT)
+        # Records from 0.1-provisional (before the continuity fix) and from any other version are
+        # rejected, never reinterpreted.
+        for other in ("ca-time-interval/0.1-provisional", "ca-time-interval/0.3-provisional"):
+            with self.subTest(other=other), self.assertRaises(VersionError):
+                ti.ClockDomain.from_record({**record, "contract_version": other})
         with self.assertRaises(VersionError):
-            ti.ClockDomain.from_record({**record, "contract_version": "ca-time-interval/0.2-provisional"})
+            ti.SourceTimestamp.from_record({**stamp(T + "Z").to_record(),
+                                            "contract_version": "ca-time-interval/0.1-provisional"})
 
 
 class TimestampRecordTests(unittest.TestCase):
@@ -203,6 +209,7 @@ class OrderingTests(unittest.TestCase):
             if ti.compare(x, y, self.domains).order == ti.BEFORE == ti.compare(y, z, self.domains).order:
                 self.assertEqual(ti.compare(x, z, self.domains).order, ti.BEFORE)
 
+
     def test_identical_intervals_in_different_evidence_stay_unordered(self):
         first, second = stamp(T + ".100Z"), stamp(T + ".100Z")
         for x, y in ((first, second), (second, first)):
@@ -225,6 +232,88 @@ class OrderingTests(unittest.TestCase):
         record = ti.compare(stamp(T + "Z"), stamp(T + ".5Z"), self.domains).to_record()
         self.assertEqual(record["contract_version"], ti.TIME_VERSION)
         canonical.canonical_bytes(record)
+
+
+class MixedDomainPropertyTests(unittest.TestCase):
+    """Wide time spreads across every kind of clock domain (strengthened after the PR #17 P1).
+
+    The original pool spanned three seconds and mostly continuous domains, so it could not show
+    that unknown continuity still produced orderings for well-separated timestamps.
+    """
+
+    DOMAINS = {
+        "ref": declared("ref"),
+        "a": declared("a", 250, 50),
+        "b": declared("b", -400, 75),
+        "far": declared("far", 86_400_000, 3_600_000),
+        "unbounded": declared("unbounded", 0, None),
+        "loose": declared("loose", 0, 0, ti.UNKNOWN),
+        "loose-wide": declared("loose-wide", -800, 100, ti.UNKNOWN),
+        "stepped": declared("stepped", 0, 0, ti.STEP_DECLARED),
+        "anon-continuous": ti.clock_domain("anon-continuous", ti.UNKNOWN, continuity=ti.CONTINUOUS),
+        "anon-loose": ti.clock_domain("anon-loose", ti.UNKNOWN, continuity=ti.UNKNOWN),
+    }
+    FAIL_CLOSED = {ti.CLOCK_STEP, ti.CONTINUITY_UNKNOWN, ti.UNKNOWN_CLOCK, ti.UNPARSED_TIMESTAMP}
+
+    @classmethod
+    def setUpClass(cls):
+        rng = random.Random(17)
+        base = ti.parse_rfc3339("2026-11-03T08:15:30Z").epoch_ns // ti.NS_PER_MS
+        spreads = [0, 1, 999, 60_000, 3_600_000, 86_400_000, 30 * 86_400_000, 400 * 86_400_000]
+        cls.stamps = []
+        for _ in range(48):
+            millis = base + rng.choice([-1, 1]) * rng.randint(0, rng.choice(spreads))
+            seconds, ms = divmod(millis, 1000)
+            days, rem = divmod(seconds, 86_400)
+            year, month, day = cls._civil(days)
+            raw = f"{year:04d}-{month:02d}-{day:02d}T{rem // 3600:02d}:{rem // 60 % 60:02d}:{rem % 60:02d}.{ms:03d}Z"
+            domain = rng.choice(sorted(cls.DOMAINS) + ["missing"])
+            cls.stamps.append(stamp(raw, domain, declared_precision_ns=rng.choice([None, 1_500_000, 10 ** 9])))
+
+    @staticmethod
+    def _civil(days):
+        # Inverse of the days-from-civil algorithm, kept independent of the module under test.
+        import datetime
+        d = datetime.date(1970, 1, 1) + datetime.timedelta(days=days)
+        return d.year, d.month, d.day
+
+    def test_unestablished_continuity_never_orders(self):
+        for x, y in itertools.product(self.stamps, repeat=2):
+            result = ti.compare(x, y, self.DOMAINS)
+            domains = [self.DOMAINS.get(s.clock_domain_id) for s in (x, y)]
+            if any(d is None or d.continuity != ti.CONTINUOUS for d in domains):
+                self.assertEqual(result.order, ti.UNORDERED)
+                self.assertIn(result.basis, self.FAIL_CLOSED)
+            self.assertIn(result.basis, ti.ORDERING_BASES)
+
+    def test_antisymmetric_with_identical_basis(self):
+        inverse = {ti.BEFORE: ti.AFTER, ti.AFTER: ti.BEFORE, ti.UNORDERED: ti.UNORDERED}
+        for x, y in itertools.product(self.stamps, repeat=2):
+            forward, backward = ti.compare(x, y, self.DOMAINS), ti.compare(y, x, self.DOMAINS)
+            self.assertEqual(backward, ti.Ordering(inverse[forward.order], forward.basis))
+
+    def test_transitive_across_mixed_domains_and_wide_spreads(self):
+        before = {(i, j) for (i, x), (j, y) in itertools.product(enumerate(self.stamps), repeat=2)
+                  if ti.compare(x, y, self.DOMAINS).order == ti.BEFORE}
+        self.assertGreater(len(before), 50)  # the pool must actually exercise ordering
+        for i, j in before:
+            for k in range(len(self.stamps)):
+                if (j, k) in before:
+                    self.assertIn((i, k), before)
+
+    def test_ordered_pairs_are_consistent_with_true_reference_instants(self):
+        # Soundness: for continuous declared domains with bounded uncertainty, an ordering must hold
+        # for every true instant permitted by the precision and declared offset bounds.
+        for x, y in itertools.product(self.stamps, repeat=2):
+            result = ti.compare(x, y, self.DOMAINS)
+            if result.basis != ti.REFERENCE_INTERVAL:
+                continue
+            dx, dy = self.DOMAINS[x.clock_domain_id], self.DOMAINS[y.clock_domain_id]
+            x_latest = ti.parse_rfc3339(x.raw).epoch_ns + x.effective_precision_ns \
+                - (dx.offset_ms - dx.offset_uncertainty_ms) * ti.NS_PER_MS
+            y_earliest = ti.parse_rfc3339(y.raw).epoch_ns - (dy.offset_ms + dy.offset_uncertainty_ms) * ti.NS_PER_MS
+            if result.order == ti.BEFORE:
+                self.assertLessEqual(x_latest, y_earliest)
 
 
 class ErrorHygieneTests(unittest.TestCase):

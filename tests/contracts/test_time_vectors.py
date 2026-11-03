@@ -7,7 +7,7 @@ import _support
 from cloud_autopsy.contracts import errors, timeinterval as ti
 from cloud_autopsy.contracts.errors import TimeError
 
-VECTORS = _support.PACKAGE / "contracts" / "vectors" / "ca-time-interval-0.1-provisional.json"
+VECTORS = _support.PACKAGE / "contracts" / "vectors" / (ti.TIME_VERSION.replace("/", "-") + ".json")
 DERIVED = ("epoch_ms", "zone_offset_minutes", "local_offset_unknown", "text_precision_ns",
            "effective_precision_ns", "local_lower_ms", "local_upper_ms")
 

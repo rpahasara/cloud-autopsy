@@ -13,7 +13,7 @@ import _support
 from cloud_autopsy.contracts import timeinterval as ti
 
 PROTOTYPE_TIME = _support.REPO / "prototype" / "ca_spike" / "timemodel.py"
-VECTORS = _support.PACKAGE / "contracts" / "vectors" / "ca-time-interval-0.1-provisional.json"
+VECTORS = _support.PACKAGE / "contracts" / "vectors" / (ti.TIME_VERSION.replace("/", "-") + ".json")
 
 
 def load_prototype():
@@ -89,6 +89,7 @@ class PrototypeDifferentialTests(unittest.TestCase):
         self.assertEqual((new.local_lower_ms, new.local_upper_ms), (1793693730000, 1793693730999))
 
     def test_d6_same_domain_order_requires_declared_continuity(self):
+        # 0.2-provisional: unknown continuity fails closed (was reference_overlap in 0.1).
         clocks = {"node": {"status": "declared", "precision_ms": 1, "offset_ms": 0, "offset_uncertainty_ms": 500}}
         entries = [{"type": "event_time", "raw": raw, "clock_domain": "node"}
                    for raw in ("2026-11-03T08:15:30.000Z", "2026-11-03T08:15:30.100Z")]
@@ -97,7 +98,7 @@ class PrototypeDifferentialTests(unittest.TestCase):
         domain = ti.clock_domain("node", ti.DECLARED, 0, 500, ti.FIXTURE_DECLARED, ti.UNKNOWN)
         new = [ti.source_timestamp(e["raw"], timestamp_kind="event_time", clock_domain_id="node")
                for e in entries]
-        self.assertEqual(ti.compare(*new, {"node": domain}), ti.Ordering(ti.UNORDERED, ti.REFERENCE_OVERLAP))
+        self.assertEqual(ti.compare(*new, {"node": domain}), ti.Ordering(ti.UNORDERED, ti.CONTINUITY_UNKNOWN))
 
     def test_d7_declared_clock_step_blocks_ordering(self):
         self.assertFalse(hasattr(self.proto, "STEP_DECLARED"))

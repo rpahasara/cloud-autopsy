@@ -1,4 +1,4 @@
-"""Timestamp provenance and clock-interval contracts ``ca-time-interval/0.1-provisional`` (CA-P2-002b).
+"""Timestamp provenance and clock-interval contracts ``ca-time-interval/0.2-provisional`` (CA-P2-002b).
 
 Every rule here is provisional until independent architecture review (CA-DEC-003, D8).
 
@@ -23,11 +23,21 @@ offsets are out of scope. Continuity is ``declared_continuous``, ``step_declared
 ``unknown``.
 
 Ordering. A precedes B only when A's upper bound is strictly below B's lower bound;
-overlap is unordered. Same-domain intervals are compared without offset only when the
-domain declares continuity. Any clock step, unparsed timestamp, unknown or missing clock,
-or unbounded uncertainty yields ``unordered`` with a reason. There is deliberately no
-tie-breaker: ingestion order, Kubernetes resourceVersion and stable-ID sorting are not
-inputs and can never establish chronology.
+overlap is unordered. Both clock domains must declare continuity before any ordering is
+established: a declared offset bound says nothing about a clock that may have stepped, so
+``step_declared`` and ``unknown`` continuity both fail closed (``clock_step`` and
+``continuity_unknown``), in the same domain and across domains. With continuity declared,
+same-domain intervals are compared without offset (valid even when the absolute offset is
+unknown), and cross-domain intervals through bounded declared offsets. An unparsed
+timestamp, unknown or missing clock, or unbounded uncertainty also yields ``unordered``.
+Basis precedence: unparsed_timestamp, unknown_clock (missing domain), clock_step,
+continuity_unknown, same-domain, unknown_clock (status), unbounded_uncertainty, reference.
+There is deliberately no tie-breaker: ingestion order, Kubernetes resourceVersion and
+stable-ID sorting are not inputs and can never establish chronology.
+
+Version history: 0.1-provisional (PR #17 at 93203c8) ordered timestamps whose domains had
+unknown continuity through reference intervals. 0.2-provisional fails closed instead; the
+exact-match version rule rejects 0.1 records rather than reinterpreting them.
 
 All record values are integers, strings, booleans or null within the canonical profile.
 Error messages carry fixed text and field names only, never source text.
@@ -40,7 +50,7 @@ from . import errors as E
 from .errors import RecordError, TimeError
 from .versioning import check_envelope
 
-TIME_VERSION = "ca-time-interval/0.1-provisional"
+TIME_VERSION = "ca-time-interval/0.2-provisional"
 
 # PROVISIONAL ceilings (unreviewed).
 MAX_TIMESTAMP_CHARS = 64      # longest text that is parsed
@@ -74,6 +84,9 @@ UNPARSED_TIMESTAMP = "unparsed_timestamp"
 UNKNOWN_CLOCK = "unknown_clock"
 UNBOUNDED_UNCERTAINTY = "unbounded_uncertainty"
 CLOCK_STEP = "clock_step"
+CONTINUITY_UNKNOWN = "continuity_unknown"
+ORDERING_BASES = (SAME_DOMAIN, SAME_DOMAIN_OVERLAP, REFERENCE_INTERVAL, REFERENCE_OVERLAP,
+                  UNPARSED_TIMESTAMP, UNKNOWN_CLOCK, UNBOUNDED_UNCERTAINTY, CLOCK_STEP, CONTINUITY_UNKNOWN)
 
 _RFC3339 = re.compile(
     r"([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.([0-9]+))?"
@@ -298,10 +311,14 @@ def source_timestamp(raw, *, timestamp_kind, clock_domain_id, declared_precision
 
 
 def reference_interval(timestamp, domain):
-    """Return ``(lower, upper)`` on the reference clock, or ``None`` when no bound exists."""
+    """Return ``(lower, upper)`` on the reference clock, or ``None`` when no bound exists.
+
+    A bound exists only for a parsed timestamp in a declared domain with bounded uncertainty
+    and declared continuity; an offset bound cannot be trusted across a possible step.
+    """
     if (timestamp.parse_status != PARSED or domain.clock_domain_id != timestamp.clock_domain_id
             or domain.status != DECLARED or domain.offset_uncertainty_ms is None
-            or domain.continuity == STEP_DECLARED):
+            or domain.continuity != CONTINUOUS):
         return None
     lower = timestamp.local_lower_ms - domain.offset_ms - domain.offset_uncertainty_ms
     upper = timestamp.local_upper_ms - domain.offset_ms + domain.offset_uncertainty_ms
@@ -342,7 +359,9 @@ def compare(a, b, domains):
         return Ordering(UNORDERED, UNKNOWN_CLOCK)
     if STEP_DECLARED in (da.continuity, db.continuity):
         return Ordering(UNORDERED, CLOCK_STEP)
-    if a.clock_domain_id == b.clock_domain_id and da.continuity == CONTINUOUS:
+    if da.continuity != CONTINUOUS or db.continuity != CONTINUOUS:
+        return Ordering(UNORDERED, CONTINUITY_UNKNOWN)
+    if a.clock_domain_id == b.clock_domain_id:
         return _order(a.local_lower_ms, a.local_upper_ms, b.local_lower_ms, b.local_upper_ms,
                       SAME_DOMAIN, SAME_DOMAIN_OVERLAP)
     if UNKNOWN in (da.status, db.status):
