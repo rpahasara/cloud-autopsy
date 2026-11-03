@@ -19,6 +19,11 @@ Status: evaluation only. Nothing was downloaded, installed or pinned. License ob
 | pg8000 | BSD-3-Clause (verify); depends on `scramp` and `python-dateutil` (licenses to verify) | Pure Python, DB-API 2.0 | Permissive and has no native code, so the SBOM is smaller. Slower, with fewer bulk-load features. Adequate for bounded synthetic runs |
 | asyncpg | Apache-2.0 (verify) | C extension, asyncio only | Fast, but forces an async architecture and native wheels; not needed for this scope |
 
+**Update 2026-11-03:** D-DB2 now has a detailed, proposed disposition with exact versions, hashes, license files, advisories and Python 3.13 evidence. See the [D-DB2 driver decision](d-db2-driver-decision.md). It confirms pg8000 1.31.6 with scramp 1.5.0, asn1crypto 1.5.1, python-dateutil 2.9.0.post0 and six 1.17.0. It corrects the table above in three places:
+- psycopg 3.3.7 metadata is `LGPL-3.0-only`;
+- scramp is `MIT-0`;
+- pg8000's tree also includes asn1crypto, and six through python-dateutil 2.x.
+
 **Recommendation (provisional, decision D-DB2 in [inconsistencies](inconsistencies.md#decisions)):**
 - **Start CA-P2-003b with pg8000** behind a narrow internal database-adapter interface. Its license class passes the current policy without a copyleft review, and it adds no native binaries.
 - **Revisit psycopg 3** if bulk-load performance (COPY) or an approved LGPL review justifies it. Because the adapter keeps SQL in the repository rather than in a driver abstraction layer, switching drivers doesn't change the schema or migrations.

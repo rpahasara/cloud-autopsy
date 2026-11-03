@@ -252,7 +252,7 @@ Under CA-DEC-008 no person is appointed to any of these yet.
 | ID | Decision | Recommendation | Decider |
 |---|---|---|---|
 | D-DB1 | PostgreSQL 18 minor and image digest | Latest 18.x when CA-P2-003b starts, digest-pinned | DB reviewer + security reviewer |
-| D-DB2 | Python driver | pg8000 behind an adapter; psycopg 3 only after LGPL review ([dependencies](dependencies.md)) | Licensing reviewer + architecture lead |
+| D-DB2 | Python driver | **Proposed disposition:** pg8000 1.31.6, scramp 1.5.0, asn1crypto 1.5.1, python-dateutil 2.9.0.post0 and six 1.17.0, behind an adapter; psycopg 3 only after LGPL review ([D-DB2 decision](d-db2-driver-decision.md)) | Licensing reviewer + architecture lead + product authority |
 | D-DB3 | Lock-file tool and one-time package-index access | pip-tools or uv | Repository maintainer + security reviewer |
 | D-DB7 | Local disposable container and CI service container | Approve for synthetic data only | Product authority + security reviewer |
 | D-DB8 | Advisory scanning service (D6) | `pip-audit` | Security reviewer |

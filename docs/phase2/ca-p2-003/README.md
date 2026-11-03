@@ -11,6 +11,7 @@ Date: 2026-11-03. Backlog item: [CA-P2-003](../../reviews/phase1d/phase2-backlog
 | [Security design](security.md) | Least-privilege runtime roles, credentials and STRIDE coverage |
 | [Dependency evaluation](dependencies.md) | PostgreSQL 18 image pinning, driver options and licenses, lock files, SBOM, vulnerability checks and supply-chain tool changes |
 | [Migrations and integration tests](migrations-and-tests.md) | Versioned forward-only migrations, rollback limits, and 20 planned synthetic integration tests |
+| [D-DB2 driver decision](d-db2-driver-decision.md) | Proposed pg8000 tree with exact versions and SHA-256, license evidence, advisories, Python 3.13 evidence, the psycopg comparison and open licensing questions |
 | [Inconsistencies and decisions](inconsistencies.md) | Proposed dispositions for I1–I12 (resolution, compatibility, constraints, tests, owner and outstanding approval), internal consistency fixes C1–C8, and remaining decisions |
 
 ## Summary of the proposal
@@ -41,7 +42,11 @@ CA-P2-003b (migrations, adapter, integration tests) must not start until each it
 
 ## <a id="ca-p2-003b-blockers"></a>CA-P2-003b blockers (actionable)
 
-1. **Driver and license:** choose the driver (recommendation: pg8000). The licensing reviewer then records outcomes for it and each transitive dependency (`scramp`, `python-dateutil`), and for psycopg 3 LGPL obligations if it is chosen instead.
+1. **Driver and license:** the D-DB2 disposition is proposed ([decision record](d-db2-driver-decision.md)): pg8000 1.31.6, scramp 1.5.0, asn1crypto 1.5.1, python-dateutil 2.9.0.post0 and six 1.17.0. Still needed:
+   - product confirmation;
+   - licensing-reviewer outcomes for all five packages, including approval of `MIT-0` (scramp) and the dual-license expression (dateutil), without which the supply-chain check rejects them;
+   - a fresh advisory check on the day the lock is created;
+   - runtime proof on Python 3.13 in CA-P2-003b.
 2. **Exact version and image pins:** select the PostgreSQL 18 minor version, and record the official image digest, its release-notes reference and its end-of-life date. Approve both for test use.
 3. **Dependencies and supply chain:**
    - approve the packaging and lock-file tool (D5, D-DB3) and one-time package-index access for hashing;
