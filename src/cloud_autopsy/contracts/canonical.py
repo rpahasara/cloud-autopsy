@@ -184,7 +184,12 @@ def loads(data, limits=DEFAULT_LIMITS):
     return value
 
 
+_NEEDS_ESCAPE = re.compile("[" + "".join(re.escape(chr(code)) for code in sorted(_ESCAPES)) + "]")
+
+
 def _string(text):
+    if _NEEDS_ESCAPE.search(text) is None:  # fast path: nothing to escape (output is identical)
+        return '"' + text + '"'
     return '"' + text.translate(_ESCAPES) + '"'
 
 

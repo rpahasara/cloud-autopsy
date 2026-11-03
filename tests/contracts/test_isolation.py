@@ -44,6 +44,13 @@ class IsolationTests(unittest.TestCase):
                     body = _strip_docstrings(code)
                     self.assertNotIn(needle, body)
 
+    def test_product_source_is_ascii_only(self):
+        # Guards against invisible or bidirectional characters in product code (Trojan Source);
+        # non-ASCII text must be written as escape sequences.
+        for path in self.python_files():
+            with self.subTest(file=path.name):
+                path.read_bytes().decode("ascii")
+
     def test_importing_the_package_loads_no_prototype_or_network_modules(self):
         script = (
             "import sys; sys.path.insert(0, sys.argv[1]);"
