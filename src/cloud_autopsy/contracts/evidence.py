@@ -36,6 +36,7 @@ Error messages name schema fields only; they never include observed values or un
 import hashlib
 import re
 from dataclasses import dataclass
+from types import MappingProxyType
 
 from . import canonical
 from . import errors as E
@@ -240,6 +241,24 @@ def _exact_fields(record, names, what):
         raise RecordError(E.RECORD_FIELD_UNKNOWN, f"{what} has an unknown field")
 
 
+def _freeze(value):
+    """Deep read-only copy: objects become read-only mappings, lists become tuples."""
+    if isinstance(value, (dict, MappingProxyType)):
+        return MappingProxyType({key: _freeze(item) for key, item in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze(item) for item in value)
+    return value
+
+
+def _thaw(value):
+    """Fresh plain dict/list copy of a frozen value, for serialization and callers."""
+    if isinstance(value, (dict, MappingProxyType)):
+        return {key: _thaw(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_thaw(item) for item in value]
+    return value
+
+
 def _sha_id(algorithm, material):
     return f"{algorithm}:{hashlib.sha256(canonical.canonical_bytes(material)).hexdigest()}"
 
@@ -281,6 +300,10 @@ def validate_delivery(delivery, source):
 
 @dataclass(frozen=True)
 class ObservedEvidence:
+    """Immutable observed evidence. ``entity`` and ``attributes`` are deep read-only views;
+    ``to_record`` and ``observation`` return fresh plain copies, so nothing a caller holds can
+    change accepted content after its digest was verified."""
+
     evidence_id: str
     origin: str
     source_id: str
@@ -298,22 +321,27 @@ class ObservedEvidence:
     attributes: dict
     content_digest: str
 
+    def __post_init__(self):
+        object.__setattr__(self, "entity", _freeze(self.entity))
+        object.__setattr__(self, "attributes", _freeze(self.attributes))
+        object.__setattr__(self, "times", tuple(self.times))
+
     def to_record(self):
         return {"contract_version": EVIDENCE_VERSION, "evidence_id": self.evidence_id, "origin": self.origin,
                 "source_id": self.source_id, "cluster_id": self.cluster_id, "namespace": self.namespace,
                 "source_binding_digest": self.source_binding_digest,
                 "kind_registry_version": self.kind_registry_version, "observation_kind": self.observation_kind,
                 "evidence_class": self.evidence_class, "source_ref": self.source_ref,
-                "source_uid": self.source_uid, "source_version": self.source_version, "entity": dict(self.entity),
-                "times": [t.to_record() for t in self.times], "attributes": self.attributes,
+                "source_uid": self.source_uid, "source_version": self.source_version, "entity": _thaw(self.entity),
+                "times": [t.to_record() for t in self.times], "attributes": _thaw(self.attributes),
                 "content_digest": self.content_digest}
 
     def observation(self):
         """The observation input this record was built from (inverse of ``observe``)."""
         return {"contract_version": OBSERVATION_VERSION, "source_ref": self.source_ref,
                 "observation_kind": self.observation_kind, "source_uid": self.source_uid,
-                "source_version": self.source_version, "entity": dict(self.entity),
-                "times": [_time_input(t) for t in self.times], "attributes": self.attributes}
+                "source_version": self.source_version, "entity": _thaw(self.entity),
+                "times": [_time_input(t) for t in self.times], "attributes": _thaw(self.attributes)}
 
     @classmethod
     def from_record(cls, record, registry):
