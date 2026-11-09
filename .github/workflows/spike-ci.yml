@@ -83,6 +83,18 @@ jobs:
           echo "CA_PG_SECRET_DIR=$secret_dir" >> "$GITHUB_ENV"
           CA_PG_SECRET_DIR="$secret_dir" docker compose -f db/test/compose.yaml up -d --wait
 
+      - name: Check the credential boundary (no secret values printed)
+        run: |
+          set -eu
+          test "$(stat -c '%a' "$CA_PG_SECRET_DIR")" = 700
+          test "$(stat -c '%a' "$CA_PG_SECRET_DIR/bootstrap_password")" = 644
+          cid="$(docker compose -f db/test/compose.yaml ps -q postgres)"
+          docker inspect "$cid" --format '{{range .Mounts}}{{if eq .Destination "/run/secrets/ca_bootstrap_password"}}{{.Type}} rw={{.RW}}{{end}}{{end}}' | tee /dev/stderr | grep -qx 'bind rw=false'
+          docker inspect "$cid" --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -q '^POSTGRES_PASSWORD_FILE=/run/secrets/ca_bootstrap_password$'
+          ! docker inspect "$cid" --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -q '^POSTGRES_PASSWORD='
+          docker inspect "$cid" --format '{{json .HostConfig.PortBindings}}' | tee /dev/stderr | grep -q '"HostIp":"127.0.0.1"'
+          echo "secret dir 0700, bootstrap file 0644 inside it, read-only bind mount, password passed by file only, loopback port"
+
       - name: Database integration tests (real PostgreSQL)
         env:
           CA_PG_REQUIRE: "1"

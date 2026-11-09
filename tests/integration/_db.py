@@ -32,10 +32,15 @@ def endpoint(database):
     return Endpoint(os.environ.get("CA_PG_HOST", "127.0.0.1"), int(os.environ.get("CA_PG_PORT", "55432")), database)
 
 
+def bootstrap_user():
+    return os.environ.get("CA_PG_BOOTSTRAP_USER", "ca_bootstrap")
+
+
 def superuser(database="cloud_autopsy_synthetic"):
+    """The container's initialization superuser: used only to create and drop roles and databases."""
     from cloud_autopsy.db.adapter import Database
     password = (Path(SECRET_DIR) / "bootstrap_password").read_text(encoding="ascii").strip()
-    return Database(endpoint(database), os.environ.get("CA_PG_BOOTSTRAP_USER", "ca_bootstrap"), password)
+    return Database(endpoint(database), bootstrap_user(), password)
 
 
 def ensure_roles():

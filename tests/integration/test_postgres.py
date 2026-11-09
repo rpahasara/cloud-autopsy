@@ -4,8 +4,10 @@ Each test maps to a planned CA-IT case (docs/phase2/ca-p2-003/migrations-and-tes
 """
 
 import copy
+import os
 import random
 import shutil
+import stat
 import tempfile
 import threading
 import unittest
@@ -17,7 +19,7 @@ if _db.AVAILABLE:
     import _evidence_support as ES
     import _manifest_support as M
     from cloud_autopsy.contracts import canonical, frozen_input as fi
-    from cloud_autopsy.db import ingest, migrate, seal
+    from cloud_autopsy.db import bootstrap, ingest, migrate, seal
     from cloud_autopsy.db.adapter import DbError
 
 ALL = ["configmaps", "deployments", "logs", "metrics", "alerts"]
@@ -306,22 +308,74 @@ class PrivilegeTests(PostgresCase):
                 self.assertEqual(sqlstate(self.as_owner, sql, e=cm.evidence_id), "42501")
         self.assertEqual(sqlstate(self.owner.run, "SELECT count(*) FROM ca.evidence_version"), "42501")
 
-    def test_runtime_roles_are_not_privileged(self):
-        rows = self.owner.run("SELECT rolname, rolsuper, rolcreaterole, rolcreatedb, rolbypassrls, rolreplication "
-                              "FROM pg_roles WHERE rolname LIKE 'ca\\_%' ORDER BY rolname")
-        self.assertEqual(len(rows), 8)
-        for row in rows:
-            self.assertEqual(tuple(row[1:]), (False,) * 5, row[0])
+    def test_runtime_roles_are_not_privileged(self):  # CA-IT-028
+        # Exactly the eight application roles, each with the designed attributes. The bootstrap
+        # superuser also has a ca_ name, so the role set is asserted by name, not counted by prefix.
+        expected = {role: (False, False, False, False, False, False, login)
+                    for role, (login, _) in bootstrap.ROLES.items()}
+        self.assertEqual(len(expected), 8)
+        rows = self.owner.run(
+            "SELECT rolname, rolsuper, rolcreaterole, rolcreatedb, rolbypassrls, rolreplication, rolinherit, "
+            "rolcanlogin FROM pg_roles WHERE rolname = ANY(CAST(:names AS text[]))", names=sorted(expected))
+        self.assertEqual({r[0]: tuple(r[1:]) for r in rows}, expected)
+
+        # The only membership involving an application role: ca_migrator may SET ROLE ca_owner, without
+        # inheriting its privileges or administering it. No role is in a predefined pg_* role.
+        members = self.owner.run(
+            "SELECT m.rolname, g.rolname, a.admin_option, a.inherit_option, a.set_option FROM pg_auth_members a "
+            "JOIN pg_roles m ON m.oid = a.member JOIN pg_roles g ON g.oid = a.roleid "
+            "WHERE m.rolname = ANY(CAST(:names AS text[])) OR g.rolname = ANY(CAST(:names AS text[]))",
+            names=sorted(expected))
+        self.assertEqual([tuple(r) for r in members], [("ca_migrator", "ca_owner", False, False, True)])
+
+        # Function EXECUTE: nothing for PUBLIC, and per role only ca_ingest may call the lock function.
         public_exec = self.owner.run(
             "SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'ca' "
             "AND has_function_privilege('public', p.oid, 'EXECUTE')")
         self.assertEqual(public_exec, [])
+        for role in expected:
+            if role == "ca_owner":
+                continue
+            with self.subTest(role=role):
+                callable_ = self.owner.run(
+                    "SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
+                    "WHERE n.nspname = 'ca' AND has_function_privilege(:r, p.oid, 'EXECUTE') ORDER BY 1", r=role)
+                self.assertEqual([r[0] for r in callable_], ["ingest_lock_run"] if role == "ca_ingest" else [])
+
+        # SECURITY DEFINER: one function, owned by the non-privileged ca_owner, with a fixed search_path.
         definer = self.owner.run(
-            "SELECT p.proname, p.proconfig FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
-            "WHERE n.nspname = 'ca' AND p.prosecdef")
+            "SELECT p.proname, p.proconfig, pg_get_userbyid(p.proowner) FROM pg_proc p "
+            "JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'ca' AND p.prosecdef")
         self.assertEqual([r[0] for r in definer], ["ingest_lock_run"])
         self.assertIn("search_path=pg_catalog, pg_temp", definer[0][1])
+        self.assertEqual(definer[0][2], "ca_owner")
 
+    def test_bootstrap_credential_is_initialization_only(self):  # CA-IT-028
+        boot = _db.bootstrap_user()
+        self.assertNotIn(boot, bootstrap.ROLES)
+        self.assertNotIn(boot, self.fx.passwords)
+        # The bootstrap superuser owns neither the database nor any object in the ca schema.
+        owner = self.owner.one("SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = current_database()")[0]
+        self.assertEqual(owner, "ca_owner")
+        foreign = self.owner.run(
+            "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE n.nspname = 'ca' AND pg_get_userbyid(c.relowner) <> 'ca_owner' "
+            "UNION ALL SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
+            "WHERE n.nspname = 'ca' AND pg_get_userbyid(p.proowner) <> 'ca_owner'")
+        self.assertEqual(foreign, [])
+        # Every runtime connection authenticated as its own role, never as the bootstrap user.
+        for db in (self.planner, self.ingester, self.sealer, self.reader, self.owner):
+            with self.subTest(role=db.user):
+                self.assertEqual(db.one("SELECT session_user")[0], db.user)
+                self.assertNotEqual(db.user, boot)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX file modes")
+    def test_secret_files_are_private(self):
+        secret_dir = Path(_db.SECRET_DIR)
+        self.assertEqual(stat.S_IMODE(secret_dir.stat().st_mode) & 0o077, 0, "secret directory open to others")
+        for role in self.fx.passwords:
+            with self.subTest(role=role):
+                self.assertEqual(stat.S_IMODE((secret_dir / f"{role}.password").stat().st_mode), 0o600)
 
 if __name__ == "__main__":
     unittest.main()
