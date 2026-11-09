@@ -9,6 +9,13 @@ import _support
 
 FORBIDDEN_MODULES = {"ca_spike", "ca_eval", "cli", "fixture_tools", "prototype", "heldout_kit", "tests"}
 FORBIDDEN_TEXT = ("prototype", "ca_spike", "ca_eval", "ground-truth", "truth-pins", "heldout")
+# The database subpackage (CA-P2-003b-1) is the only place allowed to import its driver; it also
+# reads migration files and writes per-session secret files, so the pure-I/O rule covers contracts only.
+DRIVER_IMPORTS = {"pg8000"}
+DB_PACKAGE = _support.PACKAGE / "db"
+# Exact identifiers that contain a forbidden substring but name something else: the designed
+# read-only evaluation database role is not the ca_eval evaluator package.
+ALLOWED_IDENTIFIERS = ("ca_evaluator",)
 
 
 class IsolationTests(unittest.TestCase):
@@ -20,6 +27,7 @@ class IsolationTests(unittest.TestCase):
     def test_imports_are_stdlib_relative_or_own_package(self):
         allowed = set(sys.stdlib_module_names) | {"cloud_autopsy"}
         for path in self.python_files():
+            in_db = DB_PACKAGE in path.parents
             tree = ast.parse(path.read_bytes(), filename=str(path))
             for node in ast.walk(tree):
                 if isinstance(node, ast.Import):
@@ -31,17 +39,20 @@ class IsolationTests(unittest.TestCase):
                 for name in names:
                     top = name.split(".", 1)[0]
                     with self.subTest(file=path.name, module=name):
-                        self.assertIn(top, allowed)
+                        self.assertIn(top, allowed | (DRIVER_IMPORTS if in_db else set()))
                         self.assertNotIn(top, FORBIDDEN_MODULES)
 
     def test_no_dynamic_import_or_file_access_to_prototype_or_truth(self):
         for path in self.python_files():
             text = path.read_text(encoding="utf-8")
-            for needle in ("__import__", "importlib", "open(", "Path(") + FORBIDDEN_TEXT:
+            io_needles = () if DB_PACKAGE in path.parents else ("open(", "Path(")
+            for needle in ("__import__", "importlib") + io_needles + FORBIDDEN_TEXT:
                 with self.subTest(file=path.name, needle=needle):
                     code = "\n".join(line for line in text.splitlines()
                                      if not line.lstrip().startswith("#"))
                     body = _strip_docstrings(code)
+                    for ident in ALLOWED_IDENTIFIERS:
+                        body = body.replace(ident, "")
                     self.assertNotIn(needle, body)
 
     def test_product_source_is_ascii_only(self):
