@@ -1,19 +1,28 @@
 {
   "schema": "ca-dep-inventory/0.2",
-  "status": "Proposed. No licensing, security or upgrade-owner review recorded. Not an approved dependency set.",
+  "status": "Proposed. CA-P2-003b-1 pre-gate development authorization (2026-11-09) covers local, disposable, synthetic-only use. No independent licensing, security or upgrade review recorded.",
   "product_version": "unreleased",
   "policy": "docs/phase2/ca-p2-001/dependency-policy.md",
-  "dependency_manifests": [],
+  "dependency_manifests": [
+    "requirements-db.txt"
+  ],
   "components": [
     {
       "id": "cpython",
       "type": "runtime",
       "name": "CPython",
       "version": "3.13",
-      "pin": {"kind": "version-line", "value": "3.13"},
+      "pin": {
+        "kind": "version-line",
+        "value": "3.13"
+      },
       "scope": "build-and-test",
       "purpose": "Interpreter for the prototype, repository tooling and the proposed contracts package; standard library only.",
-      "license": {"spdx": "PSF-2.0", "source": "https://docs.python.org/3.13/license.html", "review": "pending"},
+      "license": {
+        "spdx": "PSF-2.0",
+        "source": "https://docs.python.org/3.13/license.html",
+        "review": "pending"
+      },
       "upgrade_owner": "Unassigned (repository maintainer nomination pending under CA-DEC-008)",
       "notes": "CI resolves the latest 3.13 patch at run time. Exact patch pin is decision CA-P2-001-D3."
     },
@@ -22,10 +31,17 @@
       "type": "github-action",
       "name": "actions/checkout",
       "version": "v4.2.2",
-      "pin": {"kind": "git-commit", "value": "11bd71901bbe5b1630ceea73d27597364c9af683"},
+      "pin": {
+        "kind": "git-commit",
+        "value": "11bd71901bbe5b1630ceea73d27597364c9af683"
+      },
       "scope": "ci-only",
       "purpose": "Read-only checkout with persist-credentials disabled.",
-      "license": {"spdx": "MIT", "source": "https://github.com/actions/checkout/blob/11bd71901bbe5b1630ceea73d27597364c9af683/LICENSE", "review": "pending"},
+      "license": {
+        "spdx": "MIT",
+        "source": "https://github.com/actions/checkout/blob/11bd71901bbe5b1630ceea73d27597364c9af683/LICENSE",
+        "review": "pending"
+      },
       "upgrade_owner": "Unassigned (repository maintainer nomination pending under CA-DEC-008)"
     },
     {
@@ -33,10 +49,17 @@
       "type": "github-action",
       "name": "actions/setup-python",
       "version": "v5.6.0",
-      "pin": {"kind": "git-commit", "value": "a26af69be951a213d495a4c3e4e4022e16d87065"},
+      "pin": {
+        "kind": "git-commit",
+        "value": "a26af69be951a213d495a4c3e4e4022e16d87065"
+      },
       "scope": "ci-only",
       "purpose": "Installs the CI interpreter; no package installation is configured.",
-      "license": {"spdx": "MIT", "source": "https://github.com/actions/setup-python/blob/a26af69be951a213d495a4c3e4e4022e16d87065/LICENSE", "review": "pending"},
+      "license": {
+        "spdx": "MIT",
+        "source": "https://github.com/actions/setup-python/blob/a26af69be951a213d495a4c3e4e4022e16d87065/LICENSE",
+        "review": "pending"
+      },
       "upgrade_owner": "Unassigned (repository maintainer nomination pending under CA-DEC-008)"
     },
     {
@@ -44,12 +67,172 @@
       "type": "ci-runner",
       "name": "GitHub-hosted runner ubuntu-24.04",
       "version": "ubuntu-24.04",
-      "pin": {"kind": "mutable-label", "value": "ubuntu-24.04"},
+      "pin": {
+        "kind": "mutable-label",
+        "value": "ubuntu-24.04"
+      },
       "scope": "ci-only",
       "purpose": "Hosted CI virtual machine. The label is updated by GitHub and cannot be digest-pinned on hosted runners.",
-      "license": {"spdx": "MIT", "source": "https://github.com/actions/runner-images/blob/main/LICENSE", "review": "pending"},
+      "license": {
+        "spdx": "MIT",
+        "source": "https://github.com/actions/runner-images/blob/main/LICENSE",
+        "review": "pending"
+      },
       "upgrade_owner": "Unassigned (repository maintainer nomination pending under CA-DEC-008)",
       "notes": "MIT covers the image definition repository only; preinstalled software carries its own licenses and is never shipped."
+    },
+    {
+      "id": "pg8000",
+      "type": "python-package",
+      "name": "pg8000",
+      "version": "1.31.6",
+      "pin": {
+        "kind": "exact-version",
+        "value": "1.31.6"
+      },
+      "scope": "build-and-test",
+      "purpose": "PostgreSQL driver behind the database adapter (D-DB2)",
+      "license": {
+        "spdx": "BSD-3-Clause",
+        "source": "https://codeberg.org/tlocke/pg8000/raw/tag/1.31.6/LICENSE",
+        "review": "pending"
+      },
+      "upgrade_owner": "Product owner (solo founder; maintainer role, CA-P2-003b-1 pre-gate authorization)",
+      "hashes": [
+        "1ffe27af94fa5b37ce6885b98d591dc75562ff076859bf50ca7729af59345a80",
+        "553b240256d4b2d8f0ad2af28d07df1f9980247f74ac98d2c2b573762ec1ff1b"
+      ],
+      "import_names": [
+        "pg8000"
+      ],
+      "allowed_paths": [
+        "src/cloud_autopsy/db/"
+      ],
+      "license_text": "supply-chain/licenses/pg8000-1.31.6-LICENSE.txt"
+    },
+    {
+      "id": "scramp",
+      "type": "python-package",
+      "name": "scramp",
+      "version": "1.5.0",
+      "pin": {
+        "kind": "exact-version",
+        "value": "1.5.0"
+      },
+      "scope": "build-and-test",
+      "purpose": "SCRAM authentication for pg8000 (exact pin required by pg8000 1.31.6)",
+      "license": {
+        "spdx": "MIT-0",
+        "source": "https://codeberg.org/tlocke/scramp/raw/tag/1.5.0/LICENSE",
+        "review": "provisional",
+        "disposition_record": "docs/phase2/ca-p2-003/ca-p2-003b-1.md#provisional-license-dispositions"
+      },
+      "upgrade_owner": "Product owner (solo founder; maintainer role, CA-P2-003b-1 pre-gate authorization)",
+      "hashes": [
+        "8280608f568e81da9e9c9d69cac1331b836622d9b48bf5c5e400e16129c6d1fa",
+        "21b88a54bc4b656f57de9f0f6be531ca99f7efe49220bbd083b84cf88748e395"
+      ],
+      "import_names": [],
+      "allowed_paths": [],
+      "license_text": "supply-chain/licenses/scramp-1.5.0-LICENSE.txt"
+    },
+    {
+      "id": "asn1crypto",
+      "type": "python-package",
+      "name": "asn1crypto",
+      "version": "1.5.1",
+      "pin": {
+        "kind": "exact-version",
+        "value": "1.5.1"
+      },
+      "scope": "build-and-test",
+      "purpose": "Certificate parsing for scramp channel binding",
+      "license": {
+        "spdx": "MIT",
+        "source": "https://github.com/wbond/asn1crypto/blob/1.5.1/LICENSE",
+        "review": "pending"
+      },
+      "upgrade_owner": "Product owner (solo founder; maintainer role, CA-P2-003b-1 pre-gate authorization)",
+      "hashes": [
+        "db4e40728b728508912cbb3d44f19ce188f218e9eba635821bb4b68564f8fd67",
+        "13ae38502be632115abf8a24cbe5f4da52e3b5231990aff31123c805306ccb9c"
+      ],
+      "import_names": [],
+      "allowed_paths": [],
+      "license_text": "supply-chain/licenses/asn1crypto-1.5.1-LICENSE.txt"
+    },
+    {
+      "id": "python-dateutil",
+      "type": "python-package",
+      "name": "python-dateutil",
+      "version": "2.9.0.post0",
+      "pin": {
+        "kind": "exact-version",
+        "value": "2.9.0.post0"
+      },
+      "scope": "build-and-test",
+      "purpose": "Fallback timestamp parsing inside pg8000",
+      "license": {
+        "spdx": "BSD-3-Clause AND (Apache-2.0 OR BSD-3-Clause)",
+        "source": "https://github.com/dateutil/dateutil/blob/2.9.0.post0/LICENSE",
+        "review": "provisional",
+        "disposition_record": "docs/phase2/ca-p2-003/ca-p2-003b-1.md#provisional-license-dispositions"
+      },
+      "upgrade_owner": "Product owner (solo founder; maintainer role, CA-P2-003b-1 pre-gate authorization)",
+      "hashes": [
+        "a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427",
+        "37dd54208da7e1cd875388217d5e00ebd4179249f90fb72437e91a35459a0ad3"
+      ],
+      "import_names": [],
+      "allowed_paths": [],
+      "license_text": "supply-chain/licenses/python-dateutil-2.9.0.post0-LICENSE.txt",
+      "notes": "Literal reading of README and LICENSE; the licensing reviewer may record plain BSD-3-Clause instead."
+    },
+    {
+      "id": "six",
+      "type": "python-package",
+      "name": "six",
+      "version": "1.17.0",
+      "pin": {
+        "kind": "exact-version",
+        "value": "1.17.0"
+      },
+      "scope": "build-and-test",
+      "purpose": "Python 2/3 shim required by python-dateutil 2.9.0.post0",
+      "license": {
+        "spdx": "MIT",
+        "source": "https://github.com/benjaminp/six/blob/1.17.0/LICENSE",
+        "review": "pending"
+      },
+      "upgrade_owner": "Product owner (solo founder; maintainer role, CA-P2-003b-1 pre-gate authorization)",
+      "hashes": [
+        "4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274",
+        "ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81"
+      ],
+      "import_names": [],
+      "allowed_paths": [],
+      "license_text": "supply-chain/licenses/six-1.17.0-LICENSE.txt"
+    },
+    {
+      "id": "postgres-18.6-trixie",
+      "type": "container-image",
+      "name": "postgres",
+      "version": "18.6-trixie",
+      "pin": {
+        "kind": "image-digest",
+        "value": "postgres:18.6-trixie@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42"
+      },
+      "scope": "ci-only",
+      "purpose": "Disposable synthetic-only test database (D-DB1, re-checked 2026-11-09)",
+      "license": {
+        "spdx": "PostgreSQL",
+        "source": "https://www.postgresql.org/about/licence/",
+        "review": "provisional",
+        "disposition_record": "docs/phase2/ca-p2-003/ca-p2-003b-1.md#provisional-license-dispositions"
+      },
+      "upgrade_owner": "Product owner (solo founder; maintainer role, CA-P2-003b-1 pre-gate authorization)",
+      "license_text": "supply-chain/licenses/postgresql-18.6-COPYRIGHT.txt",
+      "notes": "Image also contains Debian packages under their own licenses; never redistributed."
     }
   ]
 }

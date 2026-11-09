@@ -76,6 +76,53 @@
       "version": "v5.6.0"
     },
     {
+      "bom-ref": "asn1crypto",
+      "externalReferences": [
+        {
+          "type": "license",
+          "url": "https://github.com/wbond/asn1crypto/blob/1.5.1/LICENSE"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "13ae38502be632115abf8a24cbe5f4da52e3b5231990aff31123c805306ccb9c"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "db4e40728b728508912cbb3d44f19ce188f218e9eba635821bb4b68564f8fd67"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "asn1crypto",
+      "properties": [
+        {
+          "name": "ca:pin-kind",
+          "value": "exact-version"
+        },
+        {
+          "name": "ca:pin",
+          "value": "1.5.1"
+        },
+        {
+          "name": "ca:usage-scope",
+          "value": "build-and-test"
+        },
+        {
+          "name": "ca:license-review",
+          "value": "pending"
+        }
+      ],
+      "purl": "pkg:pypi/asn1crypto@1.5.1",
+      "scope": "excluded",
+      "type": "library",
+      "version": "1.5.1"
+    },
+    {
       "bom-ref": "cpython",
       "externalReferences": [
         {
@@ -112,6 +159,137 @@
       "version": "3.13"
     },
     {
+      "bom-ref": "pg8000",
+      "externalReferences": [
+        {
+          "type": "license",
+          "url": "https://codeberg.org/tlocke/pg8000/raw/tag/1.31.6/LICENSE"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "1ffe27af94fa5b37ce6885b98d591dc75562ff076859bf50ca7729af59345a80"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "553b240256d4b2d8f0ad2af28d07df1f9980247f74ac98d2c2b573762ec1ff1b"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "BSD-3-Clause"
+        }
+      ],
+      "name": "pg8000",
+      "properties": [
+        {
+          "name": "ca:pin-kind",
+          "value": "exact-version"
+        },
+        {
+          "name": "ca:pin",
+          "value": "1.31.6"
+        },
+        {
+          "name": "ca:usage-scope",
+          "value": "build-and-test"
+        },
+        {
+          "name": "ca:license-review",
+          "value": "pending"
+        }
+      ],
+      "purl": "pkg:pypi/pg8000@1.31.6",
+      "scope": "excluded",
+      "type": "library",
+      "version": "1.31.6"
+    },
+    {
+      "bom-ref": "postgres-18.6-trixie",
+      "externalReferences": [
+        {
+          "type": "license",
+          "url": "https://www.postgresql.org/about/licence/"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "PostgreSQL"
+        }
+      ],
+      "name": "postgres",
+      "properties": [
+        {
+          "name": "ca:pin-kind",
+          "value": "image-digest"
+        },
+        {
+          "name": "ca:pin",
+          "value": "postgres:18.6-trixie@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42"
+        },
+        {
+          "name": "ca:usage-scope",
+          "value": "ci-only"
+        },
+        {
+          "name": "ca:license-review",
+          "value": "provisional"
+        }
+      ],
+      "purl": "pkg:docker/library/postgres@sha256%3Ae3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42",
+      "scope": "excluded",
+      "type": "container",
+      "version": "18.6-trixie"
+    },
+    {
+      "bom-ref": "python-dateutil",
+      "externalReferences": [
+        {
+          "type": "license",
+          "url": "https://github.com/dateutil/dateutil/blob/2.9.0.post0/LICENSE"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "37dd54208da7e1cd875388217d5e00ebd4179249f90fb72437e91a35459a0ad3"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "BSD-3-Clause AND (Apache-2.0 OR BSD-3-Clause)"
+        }
+      ],
+      "name": "python-dateutil",
+      "properties": [
+        {
+          "name": "ca:pin-kind",
+          "value": "exact-version"
+        },
+        {
+          "name": "ca:pin",
+          "value": "2.9.0.post0"
+        },
+        {
+          "name": "ca:usage-scope",
+          "value": "build-and-test"
+        },
+        {
+          "name": "ca:license-review",
+          "value": "provisional"
+        }
+      ],
+      "purl": "pkg:pypi/python-dateutil@2.9.0.post0",
+      "scope": "excluded",
+      "type": "library",
+      "version": "2.9.0.post0"
+    },
+    {
       "bom-ref": "runner-ubuntu-24-04",
       "externalReferences": [
         {
@@ -146,6 +324,100 @@
       "scope": "excluded",
       "type": "application",
       "version": "ubuntu-24.04"
+    },
+    {
+      "bom-ref": "scramp",
+      "externalReferences": [
+        {
+          "type": "license",
+          "url": "https://codeberg.org/tlocke/scramp/raw/tag/1.5.0/LICENSE"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "21b88a54bc4b656f57de9f0f6be531ca99f7efe49220bbd083b84cf88748e395"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "8280608f568e81da9e9c9d69cac1331b836622d9b48bf5c5e400e16129c6d1fa"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT-0"
+        }
+      ],
+      "name": "scramp",
+      "properties": [
+        {
+          "name": "ca:pin-kind",
+          "value": "exact-version"
+        },
+        {
+          "name": "ca:pin",
+          "value": "1.5.0"
+        },
+        {
+          "name": "ca:usage-scope",
+          "value": "build-and-test"
+        },
+        {
+          "name": "ca:license-review",
+          "value": "provisional"
+        }
+      ],
+      "purl": "pkg:pypi/scramp@1.5.0",
+      "scope": "excluded",
+      "type": "library",
+      "version": "1.5.0"
+    },
+    {
+      "bom-ref": "six",
+      "externalReferences": [
+        {
+          "type": "license",
+          "url": "https://github.com/benjaminp/six/blob/1.17.0/LICENSE"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "six",
+      "properties": [
+        {
+          "name": "ca:pin-kind",
+          "value": "exact-version"
+        },
+        {
+          "name": "ca:pin",
+          "value": "1.17.0"
+        },
+        {
+          "name": "ca:usage-scope",
+          "value": "build-and-test"
+        },
+        {
+          "name": "ca:license-review",
+          "value": "pending"
+        }
+      ],
+      "purl": "pkg:pypi/six@1.17.0",
+      "scope": "excluded",
+      "type": "library",
+      "version": "1.17.0"
     }
   ],
   "metadata": {
@@ -158,7 +430,7 @@
     "properties": [
       {
         "name": "ca:inventory-status",
-        "value": "Proposed. No licensing, security or upgrade-owner review recorded. Not an approved dependency set."
+        "value": "Proposed. CA-P2-003b-1 pre-gate development authorization (2026-11-09) covers local, disposable, synthetic-only use. No independent licensing, security or upgrade review recorded."
       }
     ],
     "tools": {
@@ -170,7 +442,7 @@
       ]
     }
   },
-  "serialNumber": "urn:uuid:e24e3d3a-df44-5322-b8f4-3877e3689aef",
+  "serialNumber": "urn:uuid:b67901b3-9d9d-5994-ab0b-022f8ba0f736",
   "specVersion": "1.6",
   "version": 1
 }

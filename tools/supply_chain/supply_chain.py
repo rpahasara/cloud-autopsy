@@ -35,7 +35,9 @@ MAX_SCAN_BYTES = 2 * 1024 * 1024
 
 COMPONENT_TYPES = {"runtime", "github-action", "ci-runner", "python-package", "container-image"}
 SCOPES = {"build-and-test", "ci-only", "runtime-shipped"}
-REVIEW_STATES = {"pending", "approved"}
+# "provisional": a recorded product-owner disposition for test-only scope. It is not licensing
+# clearance, never applies to shipped components and never covers GPL-family licenses.
+REVIEW_STATES = {"pending", "approved", "provisional"}
 PIN_KINDS = {"git-commit", "exact-version", "version-line", "mutable-label", "image-digest"}
 # name[:tag]@sha256:<64 hex>; the tag is informational, the digest is the pin.
 IMAGE_REF = re.compile(r"^([a-z0-9][a-z0-9._/-]*)(?::([A-Za-z0-9._-]+))?@sha256:([0-9a-f]{64})$")
@@ -148,8 +150,15 @@ def check_inventory(inv):
             problems.append(f"{where}: license.review must be one of {sorted(REVIEW_STATES)}")
         if review == "approved" and not lic.get("approval_record"):
             problems.append(f"{where}: approved license review needs approval_record")
-        needs_specialist = bool(REVIEW_REQUIRED.match(spdx)) or (spdx and spdx not in PERMISSIVE)
-        if needs_specialist and review != "approved":
+        if review == "provisional":
+            if not lic.get("disposition_record"):
+                problems.append(f"{where}: provisional license disposition needs disposition_record")
+            if c.get("scope") == "runtime-shipped":
+                problems.append(f"{where}: shipped components cannot rely on a provisional disposition")
+        copyleft = bool(REVIEW_REQUIRED.match(spdx))
+        needs_specialist = copyleft or (spdx and spdx not in PERMISSIVE)
+        provisional_ok = review == "provisional" and not copyleft and c.get("scope") != "runtime-shipped"
+        if needs_specialist and review != "approved" and not provisional_ok:
             problems.append(f"{where}: license {spdx} requires an approved specialist review record")
         if c.get("scope") == "runtime-shipped" and review != "approved":
             problems.append(f"{where}: shipped component without approved license review")
@@ -189,7 +198,7 @@ def _workflow_problems(rel, text, actions):
         problems.append(f"{rel}: write permission is not allowed ({m.group(0).strip()})")
     if re.search(r"^\s*pull_request_target\s*:", text, re.M):
         problems.append(f"{rel}: pull_request_target is not allowed")
-    if "secrets." in text:
+    if re.search(r"\$\{\{[^}]*\bsecrets\b", text):  # GitHub Actions secret contexts
         problems.append(f"{rel}: workflow must not reference secrets")
     for m in re.finditer(r"^\s*(?:-\s*)?uses:\s*([^\s#]+)", text, re.M):
         ref = m.group(1).strip("'\"")

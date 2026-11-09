@@ -166,6 +166,15 @@ class WorkflowTests(TreeCase):
         for needle in ("write permission", "pull_request_target", "secrets"):
             self.assertIn(needle, problems)
 
+    def test_secret_contexts_rejected_but_python_secrets_module_allowed(self):
+        nl = chr(10)
+        ok = GOOD_WORKFLOW + '      - run: python -c "import secrets; print(secrets.token_urlsafe(32))"' + nl
+        self.assertEqual(self.rewrite(ok), [])
+        for bad in ("${{ secrets.TOKEN }}", "${{secrets['TOKEN']}}", "${{ toJSON(secrets) }}"):
+            with self.subTest(bad=bad):
+                problems = self.rewrite(GOOD_WORKFLOW + "      - run: echo " + bad + nl)
+                self.assertTrue(any("secrets" in p for p in problems))
+
     def test_missing_permissions_and_persisted_credentials_rejected(self):
         text = GOOD_WORKFLOW.replace("permissions:\n  contents: read\n", "") \
             .replace("persist-credentials: false", "persist-credentials: true")
@@ -366,6 +375,34 @@ class Version02Tests(TreeCase):
         self.add(package("scramp", "1.5.0", license={"spdx": "MIT-0", "source": "https://codeberg.org/x",
                                                        "review": "pending"}))
         self.assertTrue(any("MIT-0 requires an approved" in p for p in self.problems("inventory")))
+
+
+
+class ProvisionalDispositionTests(TreeCase):
+    """A recorded product-owner disposition admits non-permissive licenses for test-only scope only."""
+
+    def lic(self, spdx, review="provisional", **extra):
+        return {"spdx": spdx, "source": "https://example.invalid/LICENSE", "review": review, **extra}
+
+    def problems_for(self, comp):
+        self.inv = inventory()
+        self.inv["components"].append(comp)
+        self.save(sbom=False)
+        return self.problems("inventory")
+
+    def test_provisional_admits_test_only_non_permissive_licenses(self):
+        comp = image(license=self.lic("PostgreSQL", disposition_record="docs/x.md"))
+        self.assertEqual(self.problems_for(comp), [])
+
+    def test_provisional_needs_a_record(self):
+        comp = image(license=self.lic("PostgreSQL"))
+        self.assertTrue(any("disposition_record" in p for p in self.problems_for(comp)))
+
+    def test_provisional_never_covers_shipped_components_or_copyleft(self):
+        shipped = package("x", scope="runtime-shipped", license=self.lic("MIT-0", disposition_record="d"))
+        self.assertTrue(any("shipped" in p for p in self.problems_for(shipped)))
+        lgpl = package("psycopg", license=self.lic("LGPL-3.0-only", disposition_record="d"))
+        self.assertTrue(any("requires an approved specialist review" in p for p in self.problems_for(lgpl)))
 
 
 if __name__ == "__main__":
