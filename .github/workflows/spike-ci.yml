@@ -50,3 +50,46 @@ jobs:
 
       - name: Demo self-checks
         run: python -I prototype/cli.py demo
+
+  # CA-P2-003b-1: integration tests against a real, disposable, synthetic-only PostgreSQL 18.6.
+  # Pre-gate development authorization only. The database listens on loopback, uses temporary
+  # storage, runs without capabilities and is removed after the job. Credentials are random per
+  # run and never leave the runner. Network use: PyPI (hash-locked install) and Docker Hub (digest pull).
+  db-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.13"
+
+      - name: Install the hash-locked database driver tree
+        run: |
+          python -m venv .venv-db
+          .venv-db/bin/python -m pip install --disable-pip-version-check --require-hashes --no-deps \
+            --only-binary=:all: -r requirements-db.txt
+          .venv-db/bin/python -W error::DeprecationWarning -c "import pg8000.native, scramp, asn1crypto.x509, dateutil.parser"
+
+      - name: Start disposable PostgreSQL (digest-pinned, loopback only)
+        run: |
+          umask 077
+          secret_dir="$(mktemp -d)"
+          python -c "import secrets; print(secrets.token_urlsafe(32), end='')" > "$secret_dir/bootstrap_password"
+          chmod 0644 "$secret_dir/bootstrap_password"
+          echo "CA_PG_SECRET_DIR=$secret_dir" >> "$GITHUB_ENV"
+          CA_PG_SECRET_DIR="$secret_dir" docker compose -f db/test/compose.yaml up -d --wait
+
+      - name: Database integration tests (real PostgreSQL)
+        env:
+          CA_PG_REQUIRE: "1"
+        run: .venv-db/bin/python -I -m unittest discover -s tests/integration -t tests/integration -v
+
+      - name: Remove the disposable database
+        if: always()
+        run: |
+          CA_PG_SECRET_DIR="${CA_PG_SECRET_DIR:-/nonexistent}" docker compose -f db/test/compose.yaml down -v --remove-orphans || true
+          rm -rf "${CA_PG_SECRET_DIR:-/nonexistent}"

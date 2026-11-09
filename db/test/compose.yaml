@@ -1,0 +1,39 @@
+# Disposable, synthetic-only PostgreSQL for CA-P2-003b-1 integration tests (local and CI).
+# Pre-gate development scope only: not for shared, production or customer data.
+# Usage and credential handling: db/README.md. The image digest is inventoried and checked by
+# tools/supply_chain (D-DB1, re-verified 2026-11-09).
+services:
+  postgres:
+    image: postgres:18.6-trixie@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42
+    user: "999:999"
+    read_only: true
+    tmpfs:
+      - /var/lib/postgresql:uid=999,gid=999,mode=0700,size=1g
+      - /var/run/postgresql:uid=999,gid=999,mode=0775,size=16m
+      - /tmp:uid=999,gid=999,mode=1777,size=64m
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    privileged: false
+    pids_limit: 256
+    mem_limit: 1g
+    cpus: 2
+    shm_size: 128m
+    ports:
+      - "127.0.0.1:${CA_PG_PORT:-55432}:5432"
+    environment:
+      POSTGRES_USER: ca_bootstrap
+      POSTGRES_PASSWORD_FILE: /run/secrets/ca_bootstrap_password
+      POSTGRES_DB: cloud_autopsy_synthetic
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+      POSTGRES_INITDB_ARGS: "--auth-local=scram-sha-256 --auth-host=scram-sha-256 --data-checksums --encoding=UTF8 --locale=C.UTF-8"
+    command: ["postgres", "-c", "max_connections=40", "-c", "shared_buffers=128MB", "-c", "ssl=off",
+              "-c", "log_statement=none", "-c", "log_min_error_statement=error"]
+    secrets: [ca_bootstrap_password]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "ca_bootstrap", "-d", "cloud_autopsy_synthetic"]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+secrets:
+  ca_bootstrap_password:
+    file: ${CA_PG_SECRET_DIR:?set CA_PG_SECRET_DIR to a private per-session directory}/bootstrap_password
