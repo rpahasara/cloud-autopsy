@@ -78,7 +78,8 @@ class PostgresCase(unittest.TestCase):
 
 class MigrationTests(PostgresCase):
     def test_migrations_applied_once_and_environment_checked(self):  # CA-IT-001, CA-IT-025, CA-IT-031
-        self.assertEqual(self.fx.applied, ["0001_core.sql"])
+        self.assertEqual(self.fx.applied, [m.filename for m in migrate.discover()])
+        self.assertEqual(len(self.fx.applied), 2)
         self.assertEqual(migrate.apply(self.owner), [])
         ingest.check_environment(self.reader)
         self.assertEqual(sqlstate(self.owner.run, "UPDATE ca.data_classification SET classification = 'x'"),
@@ -87,9 +88,10 @@ class MigrationTests(PostgresCase):
     def test_changed_migration_is_refused(self):  # CA-IT-002
         tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
-        source = migrate.MIGRATIONS_DIR / "0001_core.sql"
-        (tmp / "0001_core.sql").write_bytes(source.read_bytes() + b"\n-- edited\n")
-        with self.assertRaises(migrate.MigrationError):
+        for m in migrate.discover():  # every file present and only 0001 edited: the checksum is the reason
+            (tmp / m.filename).write_bytes((migrate.MIGRATIONS_DIR / m.filename).read_bytes())
+        (tmp / "0001_core.sql").write_bytes((tmp / "0001_core.sql").read_bytes() + b"\n-- edited\n")
+        with self.assertRaisesRegex(migrate.MigrationError, "checksum"):
             migrate.apply(self.owner, tmp)
 
     def test_non_pinned_contract_version_rejected(self):  # CA-IT-031
@@ -270,6 +272,60 @@ class SealTests(PostgresCase):
         self.assertEqual(code, "23514")
 
 
+class ReviewRegressionTests(PostgresCase):
+    def test_direct_ingest_rows_rejected_once_run_left_collecting(self):  # review finding R1
+        # ca_ingest holds INSERT on these tables. Skipping ca.ingest_lock_run must not let it add rows
+        # to a sealed run. Each insert reuses an existing row's keys, so only the state guard (a
+        # BEFORE trigger, evaluated before key constraints) can refuse it with check_violation.
+        plan = self.plan(["configmaps"])
+        run_id, _ = self.run_with(plan, ["cm-1"])
+        seal.seal_run(self.sealer, run_id, plan, M.REGISTRY)
+        b = self.ingester.one(
+            "SELECT source_id, query_id, batch_key, batch_digest, plan_digest, contract_version, sequence, outcome, "
+            "coverage_start_ms, coverage_end_ms, truncated, observation_count, canonical_size "
+            "FROM ca.acquisition_batch WHERE run_id = CAST(:r AS uuid)", r=run_id)
+        e = self.ingester.one("SELECT evidence_id, content_digest FROM ca.run_delivered_evidence "
+                              "WHERE run_id = CAST(:r AS uuid)", r=run_id)
+        attempts = {
+            "acquisition_batch": (
+                "INSERT INTO ca.acquisition_batch (run_id, plan_digest, source_id, query_id, batch_key, batch_digest, "
+                "contract_version, sequence, outcome, coverage_start_ms, coverage_end_ms, truncated, observation_count, "
+                "canonical_size, record_bytes) VALUES (CAST(:r AS uuid), :p, :s, :q, 'late-batch', :d, :v, :n, :o, "
+                ":cs, :ce, :t, :c, :z, :b)",
+                dict(p=b[4], s=b[0], q=b[1], d=b[3], v=b[5], n=b[6], o=b[7], cs=b[8], ce=b[9], t=b[10], c=b[11],
+                     z=b[12], b=b"{}")),
+            "batch_delivery": (
+                "INSERT INTO ca.batch_delivery (run_id, source_id, query_id, batch_key, batch_digest, delivery_no, "
+                "attempt) VALUES (CAST(:r AS uuid), :s, :q, :k, :d, 999, 1)", dict(s=b[0], q=b[1], k=b[2], d=b[3])),
+            "run_delivered_evidence": (
+                "INSERT INTO ca.run_delivered_evidence (run_id, evidence_id, content_digest) "
+                "VALUES (CAST(:r AS uuid), :e, :c)", dict(e=e[0], c=e[1])),
+            "batch_evidence": (
+                "INSERT INTO ca.batch_evidence (run_id, source_id, query_id, batch_key, batch_digest, evidence_id, "
+                "content_digest) VALUES (CAST(:r AS uuid), :s, :q, :k, :d, :e, :c)",
+                dict(s=b[0], q=b[1], k=b[2], d=b[3], e=e[0], c=e[1])),
+        }
+        for table, (sql, params) in attempts.items():
+            with self.subTest(table=table):
+                self.assertEqual(sqlstate(self.ingester.run, sql, r=run_id, **params), "23514")
+        self.assertEqual(self.count("acquisition_batch", run_id), 1)
+        self.assertEqual(self.count("batch_delivery", run_id), 1)
+
+    def test_swallowed_error_is_never_reported_as_commit(self):  # review finding R2
+        plan = self.plan(["configmaps"])
+        marker = "swallowed-" + plan.digest[-8:]
+        with self.assertRaises(DbError) as caught:
+            with self.planner.transaction():
+                self.planner.run("INSERT INTO ca.investigation (investigation_id, scenario_id, plan_digest) "
+                                 "VALUES (gen_random_uuid(), :s, :p)", s=marker, p=plan.digest)
+                self.assertEqual(sqlstate(self.planner.run, "SELECT 1 / 0"), "22012")  # caught by the caller
+        self.assertEqual(caught.exception.sqlstate, "25P02")
+        self.assertEqual(self.planner.one("SELECT count(*) FROM ca.investigation WHERE scenario_id = :s",
+                                          s=marker)[0], 0)
+        with self.planner.transaction():  # the connection stays usable
+            self.assertEqual(self.planner.one("SELECT 1")[0], 1)
+
+
 class PrivilegeTests(PostgresCase):
     def test_runtime_roles_cannot_write_outside_their_grants(self):  # CA-IT-003, CA-IT-014, CA-IT-028
         plan = self.plan(["configmaps"])
@@ -342,13 +398,16 @@ class PrivilegeTests(PostgresCase):
                     "WHERE n.nspname = 'ca' AND has_function_privilege(:r, p.oid, 'EXECUTE') ORDER BY 1", r=role)
                 self.assertEqual([r[0] for r in callable_], ["ingest_lock_run"] if role == "ca_ingest" else [])
 
-        # SECURITY DEFINER: one function, owned by the non-privileged ca_owner, with a fixed search_path.
+        # SECURITY DEFINER: only the lock function and the intake-freeze trigger function, each owned by
+        # the non-privileged ca_owner with a fixed search_path.
         definer = self.owner.run(
             "SELECT p.proname, p.proconfig, pg_get_userbyid(p.proowner) FROM pg_proc p "
-            "JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'ca' AND p.prosecdef")
-        self.assertEqual([r[0] for r in definer], ["ingest_lock_run"])
-        self.assertIn("search_path=pg_catalog, pg_temp", definer[0][1])
-        self.assertEqual(definer[0][2], "ca_owner")
+            "JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'ca' AND p.prosecdef ORDER BY 1")
+        self.assertEqual([r[0] for r in definer], ["check_ingest_run_collecting", "ingest_lock_run"])
+        for name, config, owner in definer:
+            with self.subTest(function=name):
+                self.assertIn("search_path=pg_catalog, pg_temp", config)
+                self.assertEqual(owner, "ca_owner")
 
     def test_bootstrap_credential_is_initialization_only(self):  # CA-IT-028
         boot = _db.bootstrap_user()

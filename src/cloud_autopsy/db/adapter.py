@@ -1,7 +1,9 @@
 """Narrow database adapter: the only module that imports pg8000.
 
 Connections use server-side parameter binding for every value (never ``pg8000.native.literal``).
-Transactions are explicit. Driver errors are mapped to ``DbError`` with the SQLSTATE code, and
+Transactions are explicit, and a transaction in which any statement failed is never reported as
+committed, even if the caller caught the error (PostgreSQL silently turns that COMMIT into a
+rollback). Driver errors are mapped to ``DbError`` with the SQLSTATE code, and
 only serialization failures, deadlocks and lock timeouts are retried, a bounded number of times.
 """
 
@@ -55,12 +57,15 @@ class Database:
             raise _map(exc) from None
         self.user = user
         self._in_transaction = False
+        self._failed_in_transaction = False
 
     def run(self, sql, **params):
         """Run one statement with bound parameters; with no parameters, a script may hold several."""
         try:
             return self._con.run(sql, **params)
         except (DatabaseError, InterfaceError) as exc:
+            if self._in_transaction:
+                self._failed_in_transaction = True
             raise _map(exc) from None
 
     def one(self, sql, **params):
@@ -75,8 +80,11 @@ class Database:
             raise ValueError("unsupported isolation level")
         self.run(f"BEGIN ISOLATION LEVEL {isolation}{' READ ONLY' if read_only else ''}")
         self._in_transaction = True
+        self._failed_in_transaction = False
         try:
             yield self
+            if self._failed_in_transaction:
+                raise DbError("25P02", "a statement failed inside the transaction; it was rolled back, not committed")
         except BaseException:
             try:
                 self._con.run("ROLLBACK")
@@ -87,6 +95,7 @@ class Database:
             self.run("COMMIT")
         finally:
             self._in_transaction = False
+            self._failed_in_transaction = False
 
     def close(self):
         try:

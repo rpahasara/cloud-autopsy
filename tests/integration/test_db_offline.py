@@ -43,9 +43,10 @@ class ScramVerifierTests(unittest.TestCase):
 class MigrationDiscoveryTests(unittest.TestCase):
     def test_discovery_and_contiguity(self):
         found = migrate.discover()
-        self.assertEqual([m.filename for m in found], ["0001_core.sql"])
-        self.assertEqual(len(found[0].sha256), 64)
-        self.assertTrue(found[0].sql.isascii())
+        self.assertEqual([m.filename for m in found], ["0001_core.sql", "0002_ingest_requires_collecting.sql"])
+        for m in found:
+            self.assertEqual(len(m.sha256), 64)
+            self.assertTrue(m.sql.isascii())
         tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         shutil.copy(migrate.MIGRATIONS_DIR / "0001_core.sql", tmp / "0001_core.sql")
