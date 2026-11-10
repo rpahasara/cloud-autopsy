@@ -88,12 +88,20 @@ class EndToEndTests(unittest.TestCase):
                       "registry_snapshot", "run_evidence", "investigation"):
             with self.subTest(table=table):
                 self.assertEqual(sqlstate(self.engine.run, f"SELECT 1 FROM ca.{table} LIMIT 1"), "42501")
+        # No write privilege on any view it can read (checked directly, independent of updatability).
+        writable = self.engine.run(
+            "SELECT c.relname, p.priv FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "CROSS JOIN (VALUES ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE')) AS p(priv) "
+            "WHERE n.nspname = 'ca' AND has_table_privilege('ca_engine', c.oid, p.priv)")
+        self.assertEqual(writable, [])
+        # Attempts are refused: insufficient privilege, read-only transaction, or (for join views)
+        # not insertable at all (55000) -- each is a refusal before any row is written.
         for sql in ("INSERT INTO ca.sealed_evidence_record (run_id, evidence_id, content_digest, record_bytes) "
                     "VALUES (gen_random_uuid(), 'x', 'x', 'x')",
                     "SET ROLE ca_owner", "CREATE TABLE ca.rogue (x int)", "CREATE TEMP TABLE rogue (x int)",
                     "SELECT ca.ingest_lock_run(gen_random_uuid())"):
             with self.subTest(sql=sql[:40]):
-                self.assertIn(sqlstate(self.engine.run, sql), {"42501", "25006"})
+                self.assertIn(sqlstate(self.engine.run, sql), {"42501", "25006", "55000"})
 
 
 if __name__ == "__main__":
