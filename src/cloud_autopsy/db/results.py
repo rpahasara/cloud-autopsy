@@ -4,7 +4,10 @@
                            assumptions (``ca-clock-declaration/0.1-provisional``).
 ``investigate``            ca_engine, read-only: sealed run + its stored declaration -> engine
                            -> verified result bytes. The caller cannot supply clock domains.
-``store_result``           ca_result_writer: write the result once.
+``store_result``           the only supported write path: the submitted bytes are first
+                           re-verified against the sealed run as ``ca_engine`` (exact
+                           replay), and only then written once as ``ca_result_writer``.
+``record_investigation``   investigate + store_result, for the application.
 ``load_verified_result``   ca_engine, read-only: a stored result is returned only after it has
                            been re-verified against the sealed run and replayed byte for byte.
 
@@ -20,6 +23,17 @@ append-only triggers):
 Concurrent writers: ``INSERT ... ON CONFLICT DO NOTHING`` (no arbiter column, so any unique
 constraint counts) waits for the first writer's transaction and then inserts nothing; the
 follower re-reads the committed row and compares bytes. Exactly one writer reports ``STORED``.
+Fail-closed writes (PR #23 review, first-write poisoning): because the first stored result is
+permanent, a wrong first write would block the correct result for that run forever. So
+``store_result`` never trusts caller JSON: it loads the sealed run and its clock declaration
+read-only, rebuilds the engine input and requires ``result.verify_result`` (digest, citations,
+outcome, byte-identical replay) to pass before any insert. The investigation ID is taken from
+the sealed run, not the caller. A rejected submission writes nothing, so the correct result
+remains storable. ``ca_result_writer`` itself still cannot read evidence; verification uses
+the separate read-only ``ca_engine`` connection.
+Residual risk: anyone holding ``ca_result_writer`` credentials can bypass this module with
+direct SQL and insert a database-shape-valid forgery first. Reads still refuse it
+(``load_verified_result``), but the run's result slot stays blocked; see the 006a record.
 Every value is bound as a parameter.
 """
 
@@ -116,15 +130,16 @@ def investigate(engine_db, run_id):
     return Investigation(run_id, sealed.investigation_id, result.verify_result(raw, inp), raw)
 
 
-INSERT_RESULT = (
+_INSERT_RESULT = (
     "INSERT INTO ca.investigation_result (run_id, investigation_id, plan_digest, manifest_digest, "
     "clock_declaration_digest, contract_version, result_digest, engine_version, catalog_version, "
     "timeline_rules_version, outcome_status, result_bytes, result_bytes_sha256) VALUES (CAST(:r AS uuid), "
     "CAST(:i AS uuid), :p, :m, :c, :v, :d, :e, :k, :t, :o, :b, :h) ON CONFLICT DO NOTHING RETURNING 1")
 
 
-def result_row(run_id, investigation_id, result_bytes):
-    """Bound parameters for ``INSERT_RESULT``; every column is taken from the bytes themselves."""
+def _result_row(run_id, investigation_id, result_bytes):
+    """Bound parameters for ``_INSERT_RESULT``; every column is taken from the bytes themselves.
+    Internal: callers must use ``store_result``, which verifies first."""
     raw = bytes(result_bytes)
     doc = canonical.loads(raw)
     if canonical.canonical_bytes(doc) != raw or not isinstance(doc, dict):
@@ -136,15 +151,49 @@ def result_row(run_id, investigation_id, result_bytes):
                 o=doc["outcome"]["status"], b=raw, h=hashlib.sha256(raw).hexdigest())
 
 
-def store_result(writer_db, run_id, investigation_id, result_bytes):
-    """Write the result once; return STORED or IDENTICAL; raise ResultConflict on different bytes."""
-    row = result_row(run_id, investigation_id, result_bytes)
+def _verify_submission(engine_db, run_id, raw):
+    """Re-verify submitted bytes against the sealed run; return the sealed run's investigation ID."""
+    try:
+        with engine_db.transaction(isolation="REPEATABLE READ", read_only=True):
+            sealed = read_sealed_run(engine_db, run_id)
+    except SealedRunUnavailable:
+        raise StoredResultInvalid("run_not_sealed", "results can only be submitted for a sealed run") from None
+    try:
+        canonical_form = canonical.canonical_bytes(canonical.loads(raw))
+    except ContractError:
+        canonical_form = None
+    if canonical_form != raw:
+        raise StoredResultInvalid("result_not_canonical", "submitted bytes are not canonical JSON")
+    try:
+        result.verify_result(raw, _input_for(sealed))  # digest, citations, outcome, exact replay
+    except inputs.InputError as exc:
+        raise StoredResultInvalid(exc.code, "submitted result failed verification; nothing was stored") from None
+    except (ContractError, KeyError, TypeError):
+        raise StoredResultInvalid("result_invalid", "submitted result failed verification; nothing was stored")             from None
+    return sealed.investigation_id
+
+
+def store_result(engine_db, writer_db, run_id, result_bytes):
+    """Verify, then write once. Return STORED or IDENTICAL.
+
+    Raises ``StoredResultInvalid`` (nothing written) if the bytes do not replay exactly from the
+    sealed run, and ``ResultConflict`` if a different result is already stored.
+    """
+    raw = bytes(result_bytes)
+    investigation_id = _verify_submission(engine_db, run_id, raw)
+    row = _result_row(run_id, investigation_id, raw)
     return with_retry(lambda: _store_once(writer_db, row))
+
+
+def record_investigation(engine_db, writer_db, run_id):
+    """Investigate a sealed run and store its result through the verifying write path."""
+    investigation = investigate(engine_db, run_id)
+    return store_result(engine_db, writer_db, run_id, investigation.result_bytes), investigation
 
 
 def _store_once(db, row):
     with db.transaction():
-        inserted = db.run(INSERT_RESULT, **row)
+        inserted = db.run(_INSERT_RESULT, **row)
         if inserted:
             return STORED
         existing = db.one("SELECT result_digest, result_bytes FROM ca.investigation_result "

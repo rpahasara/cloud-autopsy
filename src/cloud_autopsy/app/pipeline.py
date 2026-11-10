@@ -5,7 +5,7 @@
 ``investigate_run``   load the sealed run and its own frozen clock declaration as ``ca_engine``
                       -> verify -> timeline -> ledger -> result -> verify the result (citations
                       and byte-identical replay). Callers cannot supply clock assumptions.
-``record_result``     store the result once as ``ca_result_writer`` (CA-P2-006a).
+``record_result``     verify, then store the result once as ``ca_result_writer`` (CA-P2-006a).
 ``replay_stored``     load a stored result as ``ca_engine`` and re-verify it completely.
 ``offline_result``    the same engine on an in-memory seal of the same batches, with no
                       database, used to show the database path adds and loses nothing.
@@ -52,10 +52,8 @@ def investigate_run(engine_db, run_id):
 
 
 def record_result(engine_db, writer_db, run_id):
-    """Investigate as ``ca_engine`` and store the bytes once as ``ca_result_writer``."""
-    investigation = results.investigate(engine_db, run_id)
-    outcome = results.store_result(writer_db, run_id, investigation.investigation_id, investigation.result_bytes)
-    return outcome, investigation
+    """Investigate as ``ca_engine``; store through the verifying write path as ``ca_result_writer``."""
+    return results.record_investigation(engine_db, writer_db, run_id)
 
 
 def replay_stored(engine_db, run_id):

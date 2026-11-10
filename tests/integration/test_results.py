@@ -107,33 +107,103 @@ class ResultStorageTests(unittest.TestCase):
     def test_identical_retry_is_idempotent(self):
         run_id = self.sealed()
         first, investigation = pipeline.record_result(self.engine, self.writer, run_id)
-        again = results.store_result(self.writer, run_id, investigation.investigation_id, investigation.result_bytes)
+        again = results.store_result(self.engine, self.writer, run_id, investigation.result_bytes)
         self.assertEqual((first, again), (results.STORED, results.IDENTICAL))
         self.assertEqual(self.stored_count(run_id), 1)
+
+    def run_writers(self, run_id, submissions):
+        """Store each submission concurrently, each writer with its own engine and writer connections."""
+        pairs = [(self.fx.connect("ca_engine"), self.fx.connect("ca_result_writer")) for _ in submissions]
+        barrier, outcomes, errors = threading.Barrier(len(submissions)), [], []
+
+        def write(engine, writer, raw):
+            try:
+                barrier.wait()
+                outcomes.append(results.store_result(engine, writer, run_id, raw))
+            except Exception as exc:  # noqa: BLE001 -- returned to the test
+                errors.append(exc)
+
+        threads = [threading.Thread(target=write, args=(e, w, raw)) for (e, w), raw in zip(pairs, submissions)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(60)
+        return outcomes, errors
 
     def test_concurrent_writers_store_exactly_once(self):
         run_id = self.sealed()
         investigation = results.investigate(self.engine, run_id)
-        writers = [self.fx.connect("ca_result_writer") for _ in range(WRITERS)]
-        barrier, outcomes, errors = threading.Barrier(WRITERS), [], []
-
-        def write(db):
-            try:
-                barrier.wait()
-                outcomes.append(results.store_result(db, run_id, investigation.investigation_id,
-                                                     investigation.result_bytes))
-            except Exception as exc:  # noqa: BLE001 -- surfaced by the assertion below
-                errors.append(exc)
-
-        threads = [threading.Thread(target=write, args=(db,)) for db in writers]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(30)
+        outcomes, errors = self.run_writers(run_id, [investigation.result_bytes] * WRITERS)
         self.assertEqual(errors, [])
         self.assertEqual(sorted(outcomes), sorted([results.STORED] + [results.IDENTICAL] * (WRITERS - 1)))
         self.assertEqual(self.stored_count(run_id), 1)
         self.assertEqual(results.load_verified_result(self.engine, run_id).result_bytes, investigation.result_bytes)
+
+    # --- first-write poisoning (PR #23 review) ------------------------------------------------
+
+    def test_forged_first_submission_is_rejected_and_does_not_block_the_valid_result(self):
+        run_id = self.sealed()
+        investigation = results.investigate(self.engine, run_id)
+        forged = forge(investigation.result_bytes, add_reason)
+        substituted = forge(investigation.result_bytes, lambda b: b["outcome"].update(
+            status="resolved", mechanism="rollout_limit_reduction"))
+        for bad, code in ((forged, "replay_mismatch"), (substituted, "outcome_invalid"),
+                          (investigation.result_bytes + b" ", "result_not_canonical")):
+            with self.subTest(code=code):
+                with self.assertRaises(results.StoredResultInvalid) as caught:
+                    results.store_result(self.engine, self.writer, run_id, bad)
+                self.assertEqual(caught.exception.code, code)
+                self.assertEqual(self.stored_count(run_id), 0)  # nothing was written
+        # Retrying the forgery changes nothing; the valid result is still storable, then idempotent.
+        with self.assertRaises(results.StoredResultInvalid):
+            results.store_result(self.engine, self.writer, run_id, forged)
+        self.assertEqual(results.store_result(self.engine, self.writer, run_id, investigation.result_bytes),
+                         results.STORED)
+        self.assertEqual(results.store_result(self.engine, self.writer, run_id, investigation.result_bytes),
+                         results.IDENTICAL)
+        with self.assertRaises(results.StoredResultInvalid):  # a later forgery is still refused
+            results.store_result(self.engine, self.writer, run_id, forged)
+        self.assertEqual(results.load_verified_result(self.engine, run_id).result_bytes, investigation.result_bytes)
+
+    def test_another_runs_valid_result_is_rejected_by_the_write_path(self):
+        run_a, run_b = self.sealed("config-cause"), self.sealed("no-symptom")
+        inv_b = results.investigate(self.engine, run_b)
+        with self.assertRaises(results.StoredResultInvalid):
+            results.store_result(self.engine, self.writer, run_a, inv_b.result_bytes)
+        self.assertEqual(self.stored_count(run_a), 0)
+        self.assertEqual(pipeline.record_result(self.engine, self.writer, run_a)[0], results.STORED)
+
+    def test_concurrent_forged_and_valid_writers_store_only_the_valid_result(self):
+        run_id = self.sealed()
+        investigation = results.investigate(self.engine, run_id)
+        forged = forge(investigation.result_bytes, add_reason)
+        outcomes, errors = self.run_writers(run_id, [forged, investigation.result_bytes] * (WRITERS // 2))
+        self.assertEqual(len(errors), WRITERS // 2)
+        self.assertTrue(all(isinstance(e, results.StoredResultInvalid) and e.code == "replay_mismatch"
+                            for e in errors))
+        self.assertEqual(sorted(outcomes), sorted([results.STORED] + [results.IDENTICAL] * (WRITERS // 2 - 1)))
+        self.assertEqual(results.load_verified_result(self.engine, run_id).result_bytes, investigation.result_bytes)
+
+    def test_submission_for_an_unsealed_run_is_rejected(self):
+        plan = scenario.plan("config-cause")
+        run_id = ingest.create_run(self.roles["ca_planner"], plan)
+        donor = results.investigate(self.engine, self.sealed())
+        with self.assertRaises(results.StoredResultInvalid) as caught:
+            results.store_result(self.engine, self.writer, run_id, donor.result_bytes)
+        self.assertEqual(caught.exception.code, "run_not_sealed")
+
+    def test_residual_risk_direct_sql_with_writer_credentials_can_still_poison_a_run(self):
+        # Documented residual risk, reproduced: bypassing the module with the writer's own
+        # credentials, a database-shape-valid forgery can be inserted first. Reads refuse it,
+        # and the correct result can no longer be stored for this run (availability impact).
+        run_id = self.sealed()
+        investigation = results.investigate(self.engine, run_id)
+        forged = forge(investigation.result_bytes, add_reason)
+        row = results._result_row(run_id, investigation.investigation_id, forged)
+        self.assertTrue(self.writer.run(results._INSERT_RESULT, **row))
+        self.assert_invalid_on_read(run_id, "replay_mismatch")
+        with self.assertRaises(results.ResultConflict):
+            results.store_result(self.engine, self.writer, run_id, investigation.result_bytes)
 
     def test_concurrent_clock_declarations_bind_exactly_once(self):
         plan, registry = scenario.plan("config-cause"), scenario.registry()
@@ -157,51 +227,33 @@ class ResultStorageTests(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertEqual(sorted(outcomes), sorted([results.STORED] + [results.IDENTICAL] * (WRITERS - 1)))
 
-    def test_conflicting_result_is_refused_and_the_first_stays_authoritative(self):
-        run_id = self.sealed()
-        _, investigation = pipeline.record_result(self.engine, self.writer, run_id)
-        forged = forge(investigation.result_bytes, add_reason)
-        with self.assertRaises(results.ResultConflict):
-            results.store_result(self.writer, run_id, investigation.investigation_id, forged)
-        self.assertEqual(results.load_verified_result(self.engine, run_id).result_bytes, investigation.result_bytes)
-
-    def test_a_forged_first_result_is_stored_but_never_trusted(self):
-        # The database checks bindings, not the reasoning: only re-execution can. A self-consistent
-        # forgery written first is refused on every read.
-        run_id = self.sealed()
-        investigation = results.investigate(self.engine, run_id)
-        forged = forge(investigation.result_bytes, add_reason)
-        self.assertEqual(results.store_result(self.writer, run_id, investigation.investigation_id, forged),
-                         results.STORED)
-        self.assert_invalid_on_read(run_id, "replay_mismatch")
-
     def test_transaction_rollback_leaves_no_result(self):
         run_id = self.sealed()
         investigation = results.investigate(self.engine, run_id)
-        row = results.result_row(run_id, investigation.investigation_id, investigation.result_bytes)
+        row = results._result_row(run_id, investigation.investigation_id, investigation.result_bytes)
         with self.assertRaises(RuntimeError):
             with self.writer.transaction():
-                self.assertTrue(self.writer.run(results.INSERT_RESULT, **row))
+                self.assertTrue(self.writer.run(results._INSERT_RESULT, **row))
                 raise RuntimeError("abort after the insert, before commit")
         self.assertEqual(self.stored_count(run_id), 0)
-        self.assertEqual(results.store_result(self.writer, run_id, investigation.investigation_id,
-                                              investigation.result_bytes), results.STORED)
+        self.assertEqual(results.store_result(self.engine, self.writer, run_id, investigation.result_bytes),
+                         results.STORED)
 
     # --- same-run bindings ------------------------------------------------------------------
 
     def test_cross_run_references_are_refused_by_the_database(self):
         run_a, run_b = self.sealed("config-cause"), self.sealed("no-symptom")
         inv_a, inv_b = results.investigate(self.engine, run_a), results.investigate(self.engine, run_b)
-        # B's result (B's plan, manifest and clock declaration) stored under run A.
-        self.assertEqual(sqlstate(results.store_result, self.writer, run_a, inv_a.investigation_id,
-                                  inv_b.result_bytes), "23503")
-        # A's own result with another run's investigation ID.
-        self.assertEqual(sqlstate(results.store_result, self.writer, run_a, inv_b.investigation_id,
-                                  inv_a.result_bytes), "23503")
-        # Columns that disagree with the bytes they describe.
-        row = results.result_row(run_a, inv_a.investigation_id, inv_a.result_bytes)
-        row["m"] = inv_b.result["inputs"]["manifest_digest"]
-        self.assertEqual(sqlstate(self.writer.run, results.INSERT_RESULT, **row), "23514")
+        # Direct SQL with the writer's credentials (bypassing the verifying write path): the
+        # database itself still refuses cross-run references.
+        def direct(run_id, investigation_id, raw, **override):
+            row = {**results._result_row(run_id, investigation_id, raw), **override}
+            return sqlstate(self.writer.run, results._INSERT_RESULT, **row)
+
+        self.assertEqual(direct(run_a, inv_a.investigation_id, inv_b.result_bytes), "23503")  # B's result
+        self.assertEqual(direct(run_a, inv_b.investigation_id, inv_a.result_bytes), "23503")  # B's investigation
+        self.assertEqual(direct(run_a, inv_a.investigation_id, inv_a.result_bytes,             # lying columns
+                                m=inv_b.result["inputs"]["manifest_digest"]), "23514")
         self.assertEqual(self.stored_count(run_a), 0)
 
     def test_results_only_for_sealed_runs(self):
@@ -210,10 +262,10 @@ class ResultStorageTests(unittest.TestCase):
         results.declare_clocks(self.roles["ca_planner"], run_id, plan, registry,
                                scenario.clock_domain_records("config-cause"))
         donor = results.investigate(self.engine, self.sealed())
-        row = results.result_row(run_id, None, donor.result_bytes)
+        row = results._result_row(run_id, None, donor.result_bytes)
         row["i"] = self.roles["ca_planner"].one("SELECT CAST(investigation_id AS text) FROM ca.run "
                                                 "WHERE run_id = CAST(:r AS uuid)", r=run_id)[0]
-        self.assertEqual(sqlstate(self.writer.run, results.INSERT_RESULT, **row), "23514")
+        self.assertEqual(sqlstate(self.writer.run, results._INSERT_RESULT, **row), "23514")
 
     # --- clock declarations -----------------------------------------------------------------
 
