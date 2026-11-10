@@ -26,16 +26,11 @@ REPO = Path(__file__).resolve().parents[1]
 COMPOSE = REPO / "db" / "test" / "compose.yaml"
 
 
-def main():
-    parser = argparse.ArgumentParser(description="CA-P2-005a one-command synthetic demonstration")
-    parser.add_argument("--out", default=str(REPO / "out" / "ca-p2-006a"))
-    parser.add_argument("--port", default=os.environ.get("CA_PG_DEMO_PORT", "55442"))
-    parser.add_argument("--json", action="store_true")
-    args = parser.parse_args()
-
+def with_disposable_postgres(port, callback):
+    """Start the disposable container, run ``callback()`` with the environment set, always tear down."""
     secret_dir = Path(tempfile.mkdtemp(prefix="ca-demo-"))  # created 0700 by mkdtemp
     project = f"ca-demo-{secrets.token_hex(4)}"
-    env = {**os.environ, "CA_PG_SECRET_DIR": str(secret_dir), "CA_PG_PORT": str(args.port)}
+    env = {**os.environ, "CA_PG_SECRET_DIR": str(secret_dir), "CA_PG_PORT": str(port)}
     compose = ["docker", "compose", "-p", project, "-f", str(COMPOSE)]
     try:
         password_file = secret_dir / "bootstrap_password"
@@ -44,14 +39,27 @@ def main():
             fh.write(secrets.token_urlsafe(32))
         os.chmod(password_file, 0o644)  # readable by the container's postgres user; the directory stays 0700
         subprocess.run(compose + ["up", "-d", "--wait"], env=env, check=True)
-        os.environ.update({"CA_PG_SECRET_DIR": str(secret_dir), "CA_PG_PORT": str(args.port)})
+        os.environ.update({"CA_PG_SECRET_DIR": str(secret_dir), "CA_PG_PORT": str(port)})
         sys.path.insert(0, str(REPO / "src"))
-        from cloud_autopsy.app import demo
-        return demo.main(["--out", args.out] + (["--json"] if args.json else []))
+        return callback()
     finally:
         subprocess.run(compose + ["down", "-v", "--remove-orphans"], env=env, check=False,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         shutil.rmtree(secret_dir, ignore_errors=True)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="CA-P2-005a/006a one-command synthetic demonstration")
+    parser.add_argument("--out", default=str(REPO / "out" / "ca-p2-006a"))
+    parser.add_argument("--port", default=os.environ.get("CA_PG_DEMO_PORT", "55442"))
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args()
+
+    def run():
+        from cloud_autopsy.app import demo
+        return demo.main(["--out", args.out] + (["--json"] if args.json else []))
+
+    return with_disposable_postgres(args.port, run)
 
 
 if __name__ == "__main__":

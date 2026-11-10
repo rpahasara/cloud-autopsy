@@ -51,6 +51,9 @@ jobs:
       - name: Engine tests (CA-P2-005a, pure, no database)
         run: python -I -m unittest discover -s tests/engine -t tests/engine -v
 
+      - name: Local API tests (CA-P2-006b, no database; HTTP on 127.0.0.1 only)
+        run: python -I -m unittest discover -s tests/api -t tests/api -v
+
       - name: Demo self-checks
         run: python -I prototype/cli.py demo
 
@@ -107,6 +110,11 @@ jobs:
         env:
           CA_PG_DEMO_PORT: "55442"
         run: .venv-db/bin/python -I tools/investigation_demo.py --out "$RUNNER_TEMP/ca-p2-006a"
+
+      - name: One-command local API demo (CA-P2-006b, its own disposable database, 127.0.0.1 only)
+        env:
+          CA_PG_DEMO_PORT: "55443"
+        run: .venv-db/bin/python -I tools/api_demo.py --out "$RUNNER_TEMP/ca-p2-006b"
 
       - name: Remove the disposable database
         if: always()

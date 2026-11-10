@@ -15,7 +15,9 @@ DRIVER_IMPORTS = {"pg8000"}
 DB_PACKAGE = _support.PACKAGE / "db"
 # The local application layer (CA-P2-005a) reads the per-session secret file and writes result
 # files; it may not import the driver. The engine and synthetic inputs stay pure.
-IO_PACKAGES = (DB_PACKAGE, _support.PACKAGE / "app")
+# The local read-only API (CA-P2-006b) reads its grants file and the ca_engine secret file; it
+# reaches the database only through the db subpackage and may not import the driver either.
+IO_PACKAGES = (DB_PACKAGE, _support.PACKAGE / "app", _support.PACKAGE / "api")
 # Exact identifiers that contain a forbidden substring but name something else: the designed
 # read-only evaluation database role is not the ca_eval evaluator package.
 ALLOWED_IDENTIFIERS = ("ca_evaluator",)

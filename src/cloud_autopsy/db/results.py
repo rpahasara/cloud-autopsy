@@ -212,6 +212,7 @@ class VerifiedResult:
     result_digest: str
     result: dict
     result_bytes: bytes
+    evidence: dict = None  # evidence_id -> {"coverage", "record"}: the run's sealed members, re-derived
 
 
 def _invalid(code, message):
@@ -272,4 +273,6 @@ def load_verified_result(engine_db, run_id):
         _invalid(exc.code, "stored result failed re-verification")
     except ContractError:
         _invalid("sealed_input_invalid", "the sealed run failed re-verification")
-    return VerifiedResult(run_id, investigation_id, digest, verified, raw)
+    evidence = {m.evidence.evidence_id: {"coverage": m.coverage, "record": m.evidence.to_record()}
+                for m in inp.members}
+    return VerifiedResult(run_id, investigation_id, digest, verified, raw, evidence)

@@ -59,6 +59,14 @@ One command starts its own disposable database, runs the whole synthetic investi
 .venv-db/bin/python -I tools/investigation_demo.py
 ```
 
+## Local read-only API demo (CA-P2-006b)
+
+One command serves the stored, verified results on `127.0.0.1` with run-scoped tokens, retrieves all six results and their citations, checks the refusals, and then removes the database ([record](../docs/phase2/ca-p2-006/ca-p2-006b.md)):
+
+```bash
+.venv-db/bin/python -I tools/api_demo.py
+```
+
 ## End the session
 
 ```bash
