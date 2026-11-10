@@ -14,7 +14,7 @@ from pathlib import Path
 from ..db import bootstrap, ingest, migrate
 from ..db.adapter import Database, Endpoint
 
-RUNTIME_ROLES = ("ca_planner", "ca_ingest", "ca_sealer", "ca_engine")
+RUNTIME_ROLES = ("ca_planner", "ca_ingest", "ca_sealer", "ca_engine", "ca_result_writer")
 
 
 class DisposableDatabase:

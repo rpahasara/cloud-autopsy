@@ -1,7 +1,8 @@
-"""Investigation result ``ca-investigation-result/0.1-provisional`` and its verification.
+"""Investigation result ``ca-investigation-result/0.2-provisional`` and its verification.
 
 The result is one canonical JSON document. It records what it was derived from (plan, registry,
-manifest digest and status, declared clock domains, rule versions), the timeline, every
+manifest digest and status, the frozen clock declaration and its digest, rule versions), the
+timeline, every
 hypothesis with its prerequisites, citations, orderings, contradictions and limiting gaps, every
 manifest gap with the mechanisms it affects, and an outcome that is either ``resolved`` (exactly
 one supported hypothesis and no unresolved competitor) or ``abstained`` with machine-readable
@@ -52,6 +53,7 @@ def build(inp):
             "manifest_limitations": list(inp.manifest_limitations),
             "window": {"start": plan.window_start, "end": plan.window_end},
             "clock_domains": list(inp.clock_domain_records),
+            "clock_declaration_digest": inp.clock_declaration.digest,
             "evidence_count": len(inp.members),
             "unverified_evidence_ids": sorted(m.evidence.evidence_id for m in inp.members
                                               if m.coverage != "verified"),

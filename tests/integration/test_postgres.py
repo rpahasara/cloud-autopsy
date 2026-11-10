@@ -79,7 +79,7 @@ class PostgresCase(unittest.TestCase):
 class MigrationTests(PostgresCase):
     def test_migrations_applied_once_and_environment_checked(self):  # CA-IT-001, CA-IT-025, CA-IT-031
         self.assertEqual(self.fx.applied, [m.filename for m in migrate.discover()])
-        self.assertEqual(len(self.fx.applied), 3)
+        self.assertEqual(len(self.fx.applied), 4)
         self.assertEqual(migrate.apply(self.owner), [])
         ingest.check_environment(self.reader)
         self.assertEqual(sqlstate(self.owner.run, "UPDATE ca.data_classification SET classification = 'x'"),
@@ -365,11 +365,11 @@ class PrivilegeTests(PostgresCase):
         self.assertEqual(sqlstate(self.owner.run, "SELECT count(*) FROM ca.evidence_version"), "42501")
 
     def test_runtime_roles_are_not_privileged(self):  # CA-IT-028
-        # Exactly the nine application roles, each with the designed attributes. The bootstrap
+        # Exactly the ten application roles, each with the designed attributes. The bootstrap
         # superuser also has a ca_ name, so the role set is asserted by name, not counted by prefix.
         expected = {role: (False, False, False, False, False, False, login)
                     for role, (login, _) in bootstrap.ROLES.items()}
-        self.assertEqual(len(expected), 9)
+        self.assertEqual(len(expected), 10)
         rows = self.owner.run(
             "SELECT rolname, rolsuper, rolcreaterole, rolcreatedb, rolbypassrls, rolreplication, rolinherit, "
             "rolcanlogin FROM pg_roles WHERE rolname = ANY(CAST(:names AS text[]))", names=sorted(expected))
@@ -398,12 +398,13 @@ class PrivilegeTests(PostgresCase):
                     "WHERE n.nspname = 'ca' AND has_function_privilege(:r, p.oid, 'EXECUTE') ORDER BY 1", r=role)
                 self.assertEqual([r[0] for r in callable_], ["ingest_lock_run"] if role == "ca_ingest" else [])
 
-        # SECURITY DEFINER: only the lock function and the intake-freeze trigger function, each owned by
-        # the non-privileged ca_owner with a fixed search_path.
+        # SECURITY DEFINER: only the lock function, the intake-freeze trigger function and the result-binding
+        # trigger function (CA-P2-006a), each owned by the non-privileged ca_owner with a fixed search_path.
         definer = self.owner.run(
             "SELECT p.proname, p.proconfig, pg_get_userbyid(p.proowner) FROM pg_proc p "
             "JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'ca' AND p.prosecdef ORDER BY 1")
-        self.assertEqual([r[0] for r in definer], ["check_ingest_run_collecting", "ingest_lock_run"])
+        self.assertEqual([r[0] for r in definer],
+                         ["check_ingest_run_collecting", "check_investigation_result", "ingest_lock_run"])
         for name, config, owner in definer:
             with self.subTest(function=name):
                 self.assertIn("search_path=pg_catalog, pg_temp", config)

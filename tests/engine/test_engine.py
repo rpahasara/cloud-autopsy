@@ -127,9 +127,11 @@ class DeterminismTests(unittest.TestCase):
                                                                list(reversed(domains)))), reference)
 
     def test_result_is_versioned_and_excludes_run_identity(self):
-        _, res, raw = run("config-cause")
+        inp, res, raw = run("config-cause")
         self.assertEqual(res["rule_versions"], required_rule_versions())
-        self.assertTrue(res["result_digest"].startswith("ca-investigation-result-sha256/0.1-provisional:"))
+        self.assertEqual(res["contract_version"], "ca-investigation-result/0.2-provisional")
+        self.assertTrue(res["result_digest"].startswith("ca-investigation-result-sha256/0.2-provisional:"))
+        self.assertEqual(res["inputs"]["clock_declaration_digest"], inp.clock_declaration.digest)
         self.assertIn("run_id", res["excluded_from_digest"])
         self.assertNotIn(b"run_id\":\"", raw.replace(b'"excluded_from_digest"', b""))
         self.assertEqual(res["synthesis"]["status"], "unavailable")
@@ -220,7 +222,7 @@ class ResultVerificationTests(unittest.TestCase):
             mutate(doc)
             body = {k: v for k, v in doc.items() if k != "result_digest"}
             import hashlib
-            doc["result_digest"] = ("ca-investigation-result-sha256/0.1-provisional:"
+            doc["result_digest"] = ("ca-investigation-result-sha256/0.2-provisional:"
                                     + hashlib.sha256(canonical.canonical_bytes(body)).hexdigest())
             return canonical.canonical_bytes(doc)
 

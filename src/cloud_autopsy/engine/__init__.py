@@ -13,12 +13,17 @@ traced to the exact rules that produced it, and a plan that pins other versions 
 """
 
 ENGINE_VERSION = "ca-engine/0.1-provisional"
-RESULT_VERSION = "ca-investigation-result/0.1-provisional"
-RESULT_DIGEST_ALGORITHM = "ca-investigation-result-sha256/0.1-provisional"
+# 0.2 (CA-P2-006a): ``inputs.clock_declaration_digest`` binds the result to the run's frozen
+# clock-domain declaration. A 0.1 result never carried it; 0.1 is not produced or accepted.
+RESULT_VERSION = "ca-investigation-result/0.2-provisional"
+RESULT_DIGEST_ALGORITHM = "ca-investigation-result-sha256/0.2-provisional"
+CLOCK_DECLARATION_VERSION = "ca-clock-declaration/0.1-provisional"
+CLOCK_DECLARATION_ALGORITHM = "ca-clock-declaration-sha256/0.1-provisional"
 TIMELINE_RULES_VERSION = "ca-timeline-rules/0.1-provisional"
 CATALOG_VERSION = "ca-mechanism-catalog/0.1-provisional"
 
 RULE_VERSIONS = {
+    "clock-declaration": CLOCK_DECLARATION_VERSION,
     "investigation-engine": ENGINE_VERSION,
     "investigation-result": RESULT_VERSION,
     "mechanism-catalog": CATALOG_VERSION,

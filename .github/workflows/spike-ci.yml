@@ -103,10 +103,10 @@ jobs:
           CA_PG_REQUIRE: "1"
         run: .venv-db/bin/python -I -m unittest discover -s tests/integration -t tests/integration -v
 
-      - name: One-command investigation demo (CA-P2-005a, its own disposable database)
+      - name: One-command investigation demo (CA-P2-005a/006a, its own disposable database)
         env:
           CA_PG_DEMO_PORT: "55442"
-        run: .venv-db/bin/python -I tools/investigation_demo.py --out "$RUNNER_TEMP/ca-p2-005a"
+        run: .venv-db/bin/python -I tools/investigation_demo.py --out "$RUNNER_TEMP/ca-p2-006a"
 
       - name: Remove the disposable database
         if: always()

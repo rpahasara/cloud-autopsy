@@ -1,13 +1,14 @@
-"""One command for the CA-P2-005a demonstration: disposable database up, full flow, database down.
+"""One command for the CA-P2-005a/006a demonstration: disposable database up, full flow, database down.
 
-  python -I tools/investigation_demo.py [--out out/ca-p2-005a] [--port 55442]
+  python -I tools/investigation_demo.py [--out out/ca-p2-006a] [--port 55442]
 
 Run it with the interpreter that has the hash-locked driver tree (requirements-db.txt), for
 example ``.venv-db/bin/python``. It:
   1. creates a private per-session secret directory (mode 0700) and a random bootstrap password;
   2. starts the digest-pinned, loopback-only PostgreSQL from db/test/compose.yaml under a unique
      Compose project name, waiting for its health check;
-  3. runs cloud_autopsy.app.demo (persist, seal, read as ca_engine, investigate, verify, replay);
+  3. runs cloud_autopsy.app.demo (persist, declare clocks, seal, investigate as ca_engine, store
+     once as ca_result_writer, verify on read from a new connection, replay);
   4. always removes the container, its temporary storage and the secret directory.
 Synthetic data only. Needs Docker with Compose v2; no other network access after the image pull.
 """
@@ -27,7 +28,7 @@ COMPOSE = REPO / "db" / "test" / "compose.yaml"
 
 def main():
     parser = argparse.ArgumentParser(description="CA-P2-005a one-command synthetic demonstration")
-    parser.add_argument("--out", default=str(REPO / "out" / "ca-p2-005a"))
+    parser.add_argument("--out", default=str(REPO / "out" / "ca-p2-006a"))
     parser.add_argument("--port", default=os.environ.get("CA_PG_DEMO_PORT", "55442"))
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()

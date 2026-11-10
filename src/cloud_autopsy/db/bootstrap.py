@@ -1,6 +1,6 @@
 """Development and test bootstrap for a disposable synthetic database (never for shared databases).
 
-Run once per session as the container's bootstrap superuser. It creates the nine roles with
+Run once per session as the container's bootstrap superuser. It creates the ten roles with
 random per-session passwords written to a private directory outside Git, and creates a database
 owned by ``ca_owner``. Passwords are sent to the server only as SCRAM-SHA-256 verifiers computed
 here, so no plaintext password appears in any SQL statement or server log.
@@ -25,6 +25,7 @@ ROLES = {
     "ca_evaluator": (True, False),
     "ca_lifecycle": (True, False),
     "ca_engine": (True, False),  # CA-P2-005a: reads sealed runs only, through views
+    "ca_result_writer": (True, False),  # CA-P2-006a: inserts investigation results only
 }
 RUNTIME_SETTINGS = {"search_path": "ca, pg_catalog", "statement_timeout": "30s", "lock_timeout": "5s",
                     "idle_in_transaction_session_timeout": "60s"}
@@ -54,7 +55,7 @@ def _write_secret(directory, name, value):
 
 
 def bootstrap_roles(superuser_db, secret_dir):
-    """Create or reset the eight roles; return {role: password} (also written to ``secret_dir``)."""
+    """Create or reset the roles in ``ROLES``; return {role: password} (also written to ``secret_dir``)."""
     passwords = {}
     for role, (login, owner_member) in ROLES.items():
         exists = superuser_db.one("SELECT 1 FROM pg_roles WHERE rolname = :r", r=role)

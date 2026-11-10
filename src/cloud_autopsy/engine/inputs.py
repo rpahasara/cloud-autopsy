@@ -7,7 +7,9 @@ The engine never trusts its caller's bytes:
 - every evidence record is strictly decoded with ``ObservedEvidence.from_record``, which
   re-derives its identity, content digest and time fields;
 - the decoded set must equal the manifest's evidence membership exactly: nothing missing,
-  nothing extra, no second copy, and each content digest equal to the sealed one.
+  nothing extra, no second copy, and each content digest equal to the sealed one;
+- the clock assumptions are one frozen ``ca-clock-declaration`` for this registry, covering
+  exactly the registered clock domains (``engine.clocks``).
 Conflicted identities are not members (the seal quarantines them as identity gaps), so they
 can never be cited as support.
 """
@@ -16,14 +18,13 @@ from dataclasses import dataclass
 
 from ..contracts import canonical
 from ..contracts import frozen_input as fi
-from ..contracts import timeinterval as ti
 from ..contracts.evidence import ObservedEvidence
 from ..contracts.plan import RunPlan
 from ..contracts.sources import SourceRegistry
 from . import required_rule_versions
+from .clocks import ClockDeclaration, ClockDeclarationError, declare
 
 MAX_EVIDENCE = 5_000            # PROVISIONAL engine bound (unreviewed)
-MAX_CLOCK_DOMAINS = 64
 
 
 class InputError(RuntimeError):
@@ -51,6 +52,7 @@ class InvestigationInput:
     gaps: tuple             # frozen-input gap items, sorted by gap_id
     clock_domains: dict     # clock_domain_id -> ti.ClockDomain
     clock_domain_records: tuple
+    clock_declaration: ClockDeclaration
 
     def evidence(self, evidence_id):
         for member in self.members:
@@ -67,7 +69,8 @@ def _record(item):
     raise InputError("evidence_record_invalid", "evidence records must be canonical bytes or objects")
 
 
-def build_input(frozen, plan, registry, evidence_records, clock_domain_records, expected_manifest_digest=None):
+def build_input(frozen, plan, registry, evidence_records, clock_declaration, expected_manifest_digest=None):
+    """``clock_declaration``: a verified ``ClockDeclaration``, or clock-domain records to declare."""
     if not isinstance(frozen, fi.FrozenInput) or not isinstance(plan, RunPlan) \
             or not isinstance(registry, SourceRegistry):
         raise InputError("input_invalid", "a FrozenInput, RunPlan and SourceRegistry are required")
@@ -94,24 +97,19 @@ def build_input(frozen, plan, registry, evidence_records, clock_domain_records, 
     if set(members) != set(sealed):
         raise InputError("evidence_missing", "a sealed evidence member has no record")
 
-    domain_records = list(clock_domain_records)
-    if len(domain_records) > MAX_CLOCK_DOMAINS:
-        raise InputError("limit_exceeded", f"more than {MAX_CLOCK_DOMAINS} clock domains")
-    registered = {d for source in registry.sources for d in source.clock_domain_ids}
-    domains = {}
-    for record in domain_records:
-        domain = ti.ClockDomain.from_record(record)
-        if domain.clock_domain_id in domains:
-            raise InputError("clock_domain_duplicated", "a clock domain was declared twice")
-        if domain.clock_domain_id not in registered:
-            raise InputError("clock_domain_unregistered", "a clock domain is not bound to any registered source")
-        domains[domain.clock_domain_id] = domain
+    try:
+        if not isinstance(clock_declaration, ClockDeclaration):
+            clock_declaration = declare(registry, list(clock_declaration))
+        elif clock_declaration.registry_digest != registry.digest:
+            raise ClockDeclarationError("clock_declaration_registry_mismatch",
+                                        "declaration was made for a different source registry")
+    except ClockDeclarationError as exc:
+        raise InputError(exc.code, "clock declaration refused") from None
 
     return InvestigationInput(
         plan=plan, registry=registry, manifest_digest=root["manifest_digest"], manifest_status=root["status"],
         manifest_limitations=tuple(root["limitations"]),
         members=tuple(members[k] for k in sorted(members)),
         gaps=tuple(sorted(fi.collection_items(frozen, "gaps"), key=lambda g: g["gap_id"])),
-        clock_domains=domains,
-        clock_domain_records=tuple(sorted((d.to_record() for d in domains.values()),
-                                          key=lambda r: r["clock_domain_id"])))
+        clock_domains=dict(clock_declaration.domains),
+        clock_domain_records=clock_declaration.records, clock_declaration=clock_declaration)

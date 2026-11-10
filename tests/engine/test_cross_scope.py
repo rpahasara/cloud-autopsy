@@ -13,6 +13,7 @@ Expectations are developer-authored regression expectations, not independent eva
 import unittest
 
 import _cross_scope as X
+import _semantic
 import _support as S
 from cloud_autopsy.engine import RESULT_DIGEST_ALGORITHM, mechanisms, result
 
@@ -153,23 +154,44 @@ class CrossScopeTests(unittest.TestCase):
                 self.assertIn("pod_identity_ambiguous", res["outcome"]["reasons"])
 
 
-# Result digests of the six scenario-001 variants as produced before the scope fix (commit
-# dc26aa8). The fix must not change a single byte of any of them: same outcomes, citations,
-# contradictions, gaps and clock-uncertainty orderings.
-PRE_FIX_DIGESTS = {
-    "config-cause": "bb9dd800be371798efaa67535ec5e30fd2d16fc26562b8e7b0d1269929a7dbdf",
-    "configmap-unavailable": "62fda618cb68f1214e40314d90a2d19fdb9b3f704637bb01e06a40d8b1183c12",
-    "configmap-conflict": "46eb56718f5bf009473964086e555fbab777acd09173fe44e5d0ba61678115af",
-    "clock-unknown": "cf432725ee9f8dbb4bae2b516e91294908004e1e5630035589bf4ec7072cc0b3",
-    "symptom-before-change": "0d3df824154903d32f439d47229481f25360abd7b82c33bd0d3546e880791faa",
-    "no-symptom": "a63d17c126833833ac4da8cba902f4dbbb0646338000876cdd6fafaf3bdad1c4",
+# Six-variant preservation (CA-P2-005a review fix, then CA-P2-006a).
+#
+# SEMANTIC_VIEWS: digests of ``_semantic.view`` (timeline, hypotheses, citations, orderings,
+# contradictions, gaps and outcome, with no version, plan, manifest or gap-ID digests) as
+# produced by commit 3cba5d3 under ca-investigation-result/0.1-provisional, whose own result
+# bytes were in turn identical to dc26aa8 (before the scope fix). CA-P2-006a moves the result to
+# 0.2-provisional, which changes the bytes but must not change any conclusion.
+SEMANTIC_VIEWS = {
+    "config-cause": "28d02490352a0adc3cc8d09ee676eea05b65e2b45a9b45d94355a74d659cb247",
+    "configmap-unavailable": "7e73c3bd1f20a361375c04b859934adcae07a1b7b51186808064ce256ea0f7dd",
+    "configmap-conflict": "080278138f7e04185664821c47d8d022fa93b237123c3f60184251502f33f1d2",
+    "clock-unknown": "4358007d8f3f89337422d9da5bc0c76950b71ab5bc64b6c2b5154fc67f738c1c",
+    "symptom-before-change": "8903df118b124086f1da856d15ba7433c6fff62ef15507a9516cdd2a99a595aa",
+    "no-symptom": "023f1e3fe655c5c2238a4356b5eee06127bddb632b233ba1482d3d786e9bed2b",
+}
+# RESULT_DIGESTS: the exact ca-investigation-result/0.2-provisional digests, pinned so any later
+# byte change is deliberate.
+RESULT_DIGESTS = {
+    "config-cause": "c95ad8038fada020162fa4add60429e500eabe1ced7687bf9b50e8b0868f58a5",
+    "configmap-unavailable": "080a1cd3f47a11d1ce853e641a2d37cdd712c9ac554faf0eb2d456ebc158ecac",
+    "configmap-conflict": "c9277c489fdd345455671ce8be5ddd49ffc332eddc0fe7ae3afbba22bea6d9b4",
+    "clock-unknown": "f9934a8b3a8ce443c3bb4207127e505550f753f09f582f58b772910c98be46e7",
+    "symptom-before-change": "98229e03cb56d1cbcaa3862cf0b234075c9a207b3883bd11d8d8919d980e1ae4",
+    "no-symptom": "58e15e48f5dfc9067742bffb3bd5cdd29d30f7fd886898d175b223af1004c980",
 }
 
 
 class PreservationTests(unittest.TestCase):
-    def test_single_scope_variants_are_byte_identical_to_before_the_fix(self):
-        self.assertEqual(set(PRE_FIX_DIGESTS), set(X.scenario.VARIANTS))
-        for variant, digest in PRE_FIX_DIGESTS.items():
+    def test_six_variant_conclusions_are_unchanged(self):
+        self.assertEqual(set(SEMANTIC_VIEWS), set(X.scenario.VARIANTS))
+        for variant, digest in SEMANTIC_VIEWS.items():
+            with self.subTest(variant=variant):
+                res, _ = result.build(S.build(variant))
+                self.assertEqual(_semantic.view_digest(res).split(":")[1], digest)
+
+    def test_six_variant_result_bytes_are_pinned(self):
+        self.assertEqual(set(RESULT_DIGESTS), set(X.scenario.VARIANTS))
+        for variant, digest in RESULT_DIGESTS.items():
             with self.subTest(variant=variant):
                 res, _ = result.build(S.build(variant))
                 self.assertEqual(res["result_digest"], f"{RESULT_DIGEST_ALGORITHM}:{digest}")

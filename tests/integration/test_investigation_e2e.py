@@ -14,7 +14,7 @@ if _db.AVAILABLE:
     sys.path.append(str(_db.REPO / "tests" / "engine"))  # appended: tests/contracts/_support keeps priority
     import _cross_scope as X
     from cloud_autopsy.app import pipeline
-    from cloud_autopsy.db import ingest, read, seal
+    from cloud_autopsy.db import ingest, read, results, seal
     from cloud_autopsy.db.adapter import DbError
     from cloud_autopsy.engine import result
     from cloud_autopsy.synthetic import scenario_001 as scenario
@@ -48,13 +48,12 @@ class EndToEndTests(unittest.TestCase):
     def test_every_variant_end_to_end_is_permutation_and_replay_stable(self):
         for variant, (status, mechanism) in EXPECTED.items():
             with self.subTest(variant=variant):
-                domains = scenario.clock_domain_records(variant)
                 run_a, manifest_a, _ = pipeline.persist_and_seal(self.roles, variant)
                 run_b, manifest_b, outcomes_b = pipeline.persist_and_seal(self.roles, variant, seed=7)
                 self.assertIn(ingest.DUPLICATE, outcomes_b)  # redeliveries were exercised
-                res, bytes_a = pipeline.investigate_run(self.engine, run_a, domains)
-                _, bytes_b = pipeline.investigate_run(self.engine, run_b, domains)
-                _, replay = pipeline.investigate_run(self.engine, run_a, domains)
+                res, bytes_a = pipeline.investigate_run(self.engine, run_a)
+                _, bytes_b = pipeline.investigate_run(self.engine, run_b)
+                _, replay = pipeline.investigate_run(self.engine, run_a)
                 _, offline = pipeline.offline_result(variant)
                 self.assertEqual(manifest_a, manifest_b)
                 self.assertEqual(bytes_a, bytes_b)
@@ -66,7 +65,7 @@ class EndToEndTests(unittest.TestCase):
     def test_conflicting_redelivery_is_retained_and_reported(self):
         run_id, _, outcomes = pipeline.persist_and_seal(self.roles, "configmap-conflict")
         self.assertIn(ingest.CONFLICTING_VARIANT, outcomes)
-        res, _ = pipeline.investigate_run(self.engine, run_id, scenario.clock_domain_records("configmap-conflict"))
+        res, _ = pipeline.investigate_run(self.engine, run_id)
         self.assertIn("batch_conflict", {r for g in res["gaps"] for r in g["reasons"]})
         self.assertEqual(res["outcome"]["status"], "abstained")
 
@@ -86,10 +85,12 @@ class EndToEndTests(unittest.TestCase):
                                 foreign={tag: (foreign_pods, foreign_logs)})
             with self.subTest(scope=tag):
                 run_id = ingest.create_run(self.roles["ca_planner"], plan, scenario_id=f"scenario-001-cross-{tag}")
+                results.declare_clocks(self.roles["ca_planner"], run_id, plan, registry,
+                                       scenario.clock_domain_records("config-cause"))
                 for record in reversed(records):
                     ingest.ingest_batch(self.roles["ca_ingest"], run_id, record, plan, registry)
                 seal.seal_run(self.roles["ca_sealer"], run_id, plan, registry)
-                res, raw = pipeline.investigate_run(self.engine, run_id, scenario.clock_domain_records("config-cause"))
+                res, raw = pipeline.investigate_run(self.engine, run_id)
                 self.assertEqual(res["outcome"]["status"], "abstained")
                 config = [h for h in res["hypotheses"]
                           if h["mechanism"] == "config_limit_reduction" and h["change_evidence_id"]][0]
@@ -115,7 +116,8 @@ class EndToEndTests(unittest.TestCase):
     def test_engine_role_has_no_base_table_or_write_access(self):
         self.assertEqual(self.engine.one("SHOW default_transaction_read_only")[0], "on")
         for table in ("run", "evidence_version", "acquisition_batch", "frozen_input", "manifest_page", "run_plan",
-                      "registry_snapshot", "run_evidence", "investigation"):
+                      "registry_snapshot", "run_evidence", "investigation", "run_clock_declaration",
+                      "investigation_result"):
             with self.subTest(table=table):
                 self.assertEqual(sqlstate(self.engine.run, f"SELECT 1 FROM ca.{table} LIMIT 1"), "42501")
         # No write privilege on any view it can read (checked directly, independent of updatability).
