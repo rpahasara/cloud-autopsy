@@ -48,6 +48,9 @@ jobs:
       - name: Contract tests (CA-P2-002a-d)
         run: python -I -m unittest discover -s tests/contracts -t tests/contracts -v
 
+      - name: Engine tests (CA-P2-005a, pure, no database)
+        run: python -I -m unittest discover -s tests/engine -t tests/engine -v
+
       - name: Demo self-checks
         run: python -I prototype/cli.py demo
 
@@ -99,6 +102,11 @@ jobs:
         env:
           CA_PG_REQUIRE: "1"
         run: .venv-db/bin/python -I -m unittest discover -s tests/integration -t tests/integration -v
+
+      - name: One-command investigation demo (CA-P2-005a, its own disposable database)
+        env:
+          CA_PG_DEMO_PORT: "55442"
+        run: .venv-db/bin/python -I tools/investigation_demo.py --out "$RUNNER_TEMP/ca-p2-005a"
 
       - name: Remove the disposable database
         if: always()

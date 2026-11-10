@@ -13,6 +13,9 @@ FORBIDDEN_TEXT = ("prototype", "ca_spike", "ca_eval", "ground-truth", "truth-pin
 # reads migration files and writes per-session secret files, so the pure-I/O rule covers contracts only.
 DRIVER_IMPORTS = {"pg8000"}
 DB_PACKAGE = _support.PACKAGE / "db"
+# The local application layer (CA-P2-005a) reads the per-session secret file and writes result
+# files; it may not import the driver. The engine and synthetic inputs stay pure.
+IO_PACKAGES = (DB_PACKAGE, _support.PACKAGE / "app")
 # Exact identifiers that contain a forbidden substring but name something else: the designed
 # read-only evaluation database role is not the ca_eval evaluator package.
 ALLOWED_IDENTIFIERS = ("ca_evaluator",)
@@ -45,7 +48,7 @@ class IsolationTests(unittest.TestCase):
     def test_no_dynamic_import_or_file_access_to_prototype_or_truth(self):
         for path in self.python_files():
             text = path.read_text(encoding="utf-8")
-            io_needles = () if DB_PACKAGE in path.parents else ("open(", "Path(")
+            io_needles = () if any(pkg in path.parents for pkg in IO_PACKAGES) else ("open(", "Path(")
             for needle in ("__import__", "importlib") + io_needles + FORBIDDEN_TEXT:
                 with self.subTest(file=path.name, needle=needle):
                     code = "\n".join(line for line in text.splitlines()
