@@ -51,9 +51,9 @@ class ApiIntegrationTests(unittest.TestCase):
         G.write_private(grants_path, json.dumps(record).encode("utf-8"))
         cls.grants_path = grants_path
         endpoint = _db.endpoint(cls.fx.name)
-        cls.connect = server.engine_connector(endpoint.host, endpoint.port, endpoint.database,
-                                              cls.fx.passwords["ca_engine"])
-        cls.server = server.build(grants_path, cls.connect, quiet=True)
+        connect = server.engine_connector(endpoint.host, endpoint.port, endpoint.database, cls.fx.passwords["ca_engine"])
+        cls.connect = staticmethod(connect)  # a plain function stored on the class must not bind ``self``
+        cls.server = server.build(grants_path, connect, quiet=True)
         threading.Thread(target=cls.server.serve_forever, daemon=True).start()
 
     @classmethod
