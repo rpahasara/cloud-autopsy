@@ -11,7 +11,7 @@ import unittest
 import _db
 
 if _db.AVAILABLE:
-    sys.path.insert(0, str(_db.REPO / "tests" / "engine"))
+    sys.path.append(str(_db.REPO / "tests" / "engine"))  # appended: tests/contracts/_support keeps priority
     import _cross_scope as X
     from cloud_autopsy.app import pipeline
     from cloud_autopsy.db import ingest, read, seal

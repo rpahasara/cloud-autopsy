@@ -8,8 +8,14 @@ scopes are different objects, and the engine must never join them.
 
 import copy
 import hashlib
+import sys
+from pathlib import Path
 
-import _support  # noqa: F401  (sets up the src path first)
+# Self-contained path setup: this module is also imported by the integration tests, where a
+# different ``_support`` module (tests/contracts) must keep its name.
+_SRC = Path(__file__).resolve().parents[2] / "src"
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
 from cloud_autopsy.contracts import acquisition as acq
 from cloud_autopsy.contracts import frozen_input as fi
 from cloud_autopsy.contracts import plan as pl
