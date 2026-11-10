@@ -13,6 +13,15 @@ limit, and a pod of the new ReplicaSet logs the mapped symptom strictly after th
 An image-only rollout maps to no mechanism and can never be supported. Contradiction: a
 mapped symptom on any pod strictly before the rollout.
 
+Scope. Pods, ConfigMaps and ReplicaSets are namespaced: every join (a pod mounting a
+ConfigMap, a pod owned by a ReplicaSet, a log line from a pod) is made only inside one
+registry-bound ``(cluster_id, namespace)``, which the evidence contract takes from the source
+binding, never from the observation. A same-named object in another namespace or cluster is
+a different object and is never joined. Log lines carry only a pod *name*, so a log is tied to
+a pod only when exactly one pod instance (one ``source_uid``) of that name was observed in that
+scope and all its records agree on the property in question; otherwise the association is
+``unknown`` (``pod_identity_ambiguous``), never assumed.
+
 Rules:
 - Support needs every prerequisite ``satisfied`` with cited evidence. Closeness in time is
   never support: orderings come only from ``timeinterval.compare`` and an unknown order is
@@ -59,6 +68,15 @@ def _decimal(text):
         return None
 
 
+def _scope(evidence):
+    """The registry-bound scope of a piece of evidence."""
+    return (evidence.cluster_id, evidence.namespace)
+
+
+def _pod_key(evidence, name):
+    return (evidence.cluster_id, evidence.namespace, name)
+
+
 class _Context:
     def __init__(self, inp):
         self.inp = inp
@@ -66,10 +84,14 @@ class _Context:
         self.by_kind = {}
         for member in inp.members:
             self.by_kind.setdefault(member.evidence.observation_kind, []).append(member.evidence)
-        self.pods = {p.entity["name"]: p for p in self.by_kind.get("pod", [])}
-        self.logs_by_pod = {}
+        for items in self.by_kind.values():
+            items.sort(key=lambda e: e.evidence_id)
+        self.pods_by_key = {}  # (cluster_id, namespace, pod name) -> every pod record of that name
+        for pod in self.by_kind.get("pod", []):
+            self.pods_by_key.setdefault(_pod_key(pod, pod.entity["name"]), []).append(pod)
+        self.logs_by_key = {}
         for log in self.by_kind.get("log_line", []):
-            self.logs_by_pod.setdefault(log.attributes["pod"], []).append(log)
+            self.logs_by_key.setdefault(_pod_key(log, log.attributes["pod"]), []).append(log)
         kinds_by_source_kind = {}
         for spec in KINDS.values():
             kinds_by_source_kind.setdefault(spec.source_kind, set()).add(spec.observation_kind)
@@ -79,8 +101,25 @@ class _Context:
     def order(self, a, b):
         return event_order(a, b, self.domains)
 
-    def logs(self, pod_name, templates):
-        return [log for log in self.logs_by_pod.get(pod_name, []) if log.attributes["template"] in templates]
+    def logs(self, key, templates):
+        return [log for log in self.logs_by_key.get(key, []) if log.attributes["template"] in templates]
+
+    def pods_where(self, anchor, predicate):
+        """Pod keys in ``anchor``'s scope with a pod satisfying ``predicate``, split into
+        (trusted, ambiguous). Trusted: one pod instance of that name, every record agreeing."""
+        trusted, ambiguous = [], []
+        for key in sorted(self.pods_by_key):
+            if key[:2] != _scope(anchor):
+                continue
+            pods = self.pods_by_key[key]
+            hits = [predicate(p) for p in pods]
+            if not any(hits):
+                continue
+            if all(hits) and len({p.source_uid for p in pods}) == 1:
+                trusted.append(key)
+            else:
+                ambiguous.append(key)
+        return trusted, ambiguous
 
     def limiting_gaps(self, mechanism):
         needed = set(MECHANISMS[mechanism]["needs_kinds"])
@@ -148,14 +187,28 @@ def _ordered_chain(ctx, first, second):
     return ordered, unknown
 
 
-def _chain_prereq(key, ordered, unknown, missing_reason, extra=()):
+def _chain_prereq(key, ordered, unknown, missing_reason, extra=(), ambiguous=()):
+    """``ambiguous``: evidence that would bear on this prerequisite but is tied to a pod whose
+    identity is not trustworthy; it can only make the prerequisite unknown, never satisfied."""
     if ordered:
         return _prereq(key, SATISFIED, [x for a, b, _ in ordered for x in (a, b)] + list(extra),
                        orderings=[_ordering(a, b, o) for a, b, o in ordered])
     if unknown:
         return _prereq(key, UNKNOWN, [x for a, b, _ in unknown for x in (a, b)] + list(extra),
                        reason="ordering_unknown", orderings=[_ordering(a, b, o) for a, b, o in unknown])
+    if ambiguous:
+        return _prereq(key, UNKNOWN, list(ambiguous) + list(extra), reason="pod_identity_ambiguous")
     return _prereq(key, UNSATISFIED, list(extra), reason=missing_reason)
+
+
+def _not_before(ctx, anchor, logs):
+    """Logs not provably before ``anchor`` (they could still follow it)."""
+    return [log for log in logs if ctx.order(anchor, log).order in (ti.BEFORE, ti.UNORDERED)]
+
+
+def _with_pods(ctx, logs):
+    """The logs plus every pod record of the (ambiguous) name each was attributed to."""
+    return list(logs) + [p for log in logs for p in ctx.pods_by_key[_pod_key(log, log.attributes["pod"])]]
 
 
 def evaluate_config_change(ctx, change):
@@ -164,15 +217,21 @@ def evaluate_config_change(ctx, change):
     key = attrs["data_key"]
     mapped, template = _limit_reduction("limit_reduced", [(key, attrs["before_value"], attrs["after_value"])],
                                         change, "unmapped_config_key")
-    mounting = [ctx.pods[name] for name in sorted(ctx.pods)
-                if any(v["configmap"] == change.entity["name"] for v in ctx.pods[name].attributes["configmap_volumes"])]
-    loads = [log for pod in mounting for log in ctx.logs(pod.entity["name"], CONSUMPTION_TEMPLATES)
-             if log.attributes["fields"].get("config_key") == key
-             and log.attributes["fields"].get("value_sha256") == attrs["after_value_sha256"]]
-    consumed_ordered, consumed_unknown = _ordered_chain(ctx, [change], loads)
+    # Only pods in the change's own cluster and namespace can mount that ConfigMap.
+    mounting, mounting_ambiguous = ctx.pods_where(
+        change, lambda p: any(v["configmap"] == change.entity["name"] for v in p.attributes["configmap_volumes"]))
+
+    def loads_on(keys):
+        return [log for k in keys for log in ctx.logs(k, CONSUMPTION_TEMPLATES)
+                if log.attributes["fields"].get("config_key") == key
+                and log.attributes["fields"].get("value_sha256") == attrs["after_value_sha256"]]
+
+    consumed_ordered, consumed_unknown = _ordered_chain(ctx, [change], loads_on(mounting))
+    loaded_keys = sorted({_pod_key(b, b.attributes["pod"]) for _, b, _ in consumed_ordered + consumed_unknown})
     consumed = _chain_prereq("loaded_by_mounting_pod_after_change", consumed_ordered, consumed_unknown,
                              "no_load_of_new_value_observed",
-                             extra=[ctx.pods[b.attributes["pod"]] for _, b, _ in consumed_ordered + consumed_unknown])
+                             extra=[p for k in loaded_keys for p in ctx.pods_by_key[k]],
+                             ambiguous=_with_pods(ctx, _not_before(ctx, change, loads_on(mounting_ambiguous))))
 
     symptoms = []
     if template is None:
@@ -180,14 +239,16 @@ def evaluate_config_change(ctx, change):
     else:
         pairs_ok, pairs_unknown = [], []
         for _, load, load_order in consumed_ordered + consumed_unknown:
-            for sym in ctx.logs(load.attributes["pod"], (template,)):
+            for sym in ctx.logs(_pod_key(load, load.attributes["pod"]), (template,)):
                 o = ctx.order(load, sym)
                 if o.order == ti.BEFORE and load_order.order == ti.BEFORE:
                     pairs_ok.append((load, sym, o))
                 elif o.order in (ti.BEFORE, ti.UNORDERED):
                     pairs_unknown.append((load, sym, o))
-        symptom = _chain_prereq("symptom_after_load", pairs_ok, pairs_unknown, "no_symptom_after_load")
-        symptoms = [s for pod in mounting for s in ctx.logs(pod.entity["name"], (template,))]
+        ambiguous = [s for k in mounting_ambiguous for s in ctx.logs(k, (template,))]
+        symptom = _chain_prereq("symptom_after_load", pairs_ok, pairs_unknown, "no_symptom_after_load",
+                                ambiguous=_with_pods(ctx, _not_before(ctx, change, ambiguous)))
+        symptoms = [s for k in mounting for s in ctx.logs(k, (template,))]
 
     contradictions = []
     for sym in symptoms:
@@ -207,15 +268,18 @@ def evaluate_rollout(ctx, rollout):
     mapped, template = _limit_reduction("changed_field_lowers_mapped_limit", changes, rollout,
                                         "no_mechanism_maps_changed_fields")
     templates = (template,) if template else ctx.symptom_templates()
-    new_pods = [ctx.pods[n] for n in sorted(ctx.pods)
-                if ctx.pods[n].attributes["owner_replicaset"] == attrs["new_replicaset"]]
-    new_symptoms = [s for pod in new_pods for s in ctx.logs(pod.entity["name"], templates)]
+    # Only pods in the rollout's own cluster and namespace can belong to its new ReplicaSet.
+    new_pods, new_ambiguous = ctx.pods_where(
+        rollout, lambda p: p.attributes["owner_replicaset"] == attrs["new_replicaset"])
+    new_symptoms = [s for k in new_pods for s in ctx.logs(k, templates)]
     ordered, unknown = _ordered_chain(ctx, [rollout], new_symptoms)
+    ambiguous = [s for k in new_ambiguous for s in ctx.logs(k, templates)]
     symptom = _chain_prereq("symptom_on_new_revision_after_rollout", ordered, unknown,
-                            "no_symptom_on_new_revision")
+                            "no_symptom_on_new_revision",
+                            ambiguous=_with_pods(ctx, _not_before(ctx, rollout, ambiguous)))
     contradictions = []
-    for name in sorted(ctx.pods):
-        for sym in ctx.logs(name, templates):
+    for k in sorted(k for k in ctx.pods_by_key if k[:2] == _scope(rollout)):  # any observed pod in scope
+        for sym in ctx.logs(k, templates):
             o = ctx.order(sym, rollout)
             if o.order == ti.BEFORE:
                 contradictions.append({"key": "symptom_precedes_rollout",
@@ -258,8 +322,9 @@ def evaluate(inp):
                 "unresolved_competing_hypotheses" if supported else "no_supported_hypothesis")
     if unresolved:
         reasons.add("unresolved_hypotheses_present")
-    if any(p["reason"] == "ordering_unknown" for h in hypotheses for p in h["prerequisites"]):
-        reasons.add("ordering_unknown")
+    for reason in ("ordering_unknown", "pod_identity_ambiguous"):
+        if any(p["reason"] == reason for h in hypotheses for p in h["prerequisites"]):
+            reasons.add(reason)
     if any(h["contradictions"] for h in hypotheses):
         reasons.add("contradicting_evidence_present")
     gap_ids = sorted({g for h in hypotheses for g in h["limiting_gap_ids"]})
