@@ -52,8 +52,7 @@ CREATE TABLE ca.investigation_result (
   FOREIGN KEY (run_id, investigation_id) REFERENCES ca.run (run_id, investigation_id),
   FOREIGN KEY (run_id, plan_digest) REFERENCES ca.run (run_id, plan_digest),
   FOREIGN KEY (run_id, manifest_digest) REFERENCES ca.frozen_input (run_id, manifest_digest),
-  FOREIGN KEY (run_id, clock_declaration_digest) REFERENCES ca.run_clock_declaration (run_id, declaration_digest),
-  UNIQUE (run_id, result_digest)
+  FOREIGN KEY (run_id, clock_declaration_digest) REFERENCES ca.run_clock_declaration (run_id, declaration_digest)
 );
 
 -- Declaration content: the document's own version and registry equal the columns, and it declares

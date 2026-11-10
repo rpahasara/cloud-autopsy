@@ -135,6 +135,28 @@ class ResultStorageTests(unittest.TestCase):
         self.assertEqual(self.stored_count(run_id), 1)
         self.assertEqual(results.load_verified_result(self.engine, run_id).result_bytes, investigation.result_bytes)
 
+    def test_concurrent_clock_declarations_bind_exactly_once(self):
+        plan, registry = scenario.plan("config-cause"), scenario.registry()
+        run_id = ingest.create_run(self.roles["ca_planner"], plan)
+        domains = scenario.clock_domain_records("config-cause")
+        planners = [self.fx.connect("ca_planner") for _ in range(WRITERS)]
+        barrier, outcomes, errors = threading.Barrier(WRITERS), [], []
+
+        def declare(db):
+            try:
+                barrier.wait()
+                outcomes.append(results.declare_clocks(db, run_id, plan, registry, domains)[0])
+            except Exception as exc:  # noqa: BLE001 -- surfaced by the assertion below
+                errors.append(exc)
+
+        threads = [threading.Thread(target=declare, args=(db,)) for db in planners]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(30)
+        self.assertEqual(errors, [])
+        self.assertEqual(sorted(outcomes), sorted([results.STORED] + [results.IDENTICAL] * (WRITERS - 1)))
+
     def test_conflicting_result_is_refused_and_the_first_stays_authoritative(self):
         run_id = self.sealed()
         _, investigation = pipeline.record_result(self.engine, self.writer, run_id)
@@ -342,7 +364,8 @@ class ResultStorageTests(unittest.TestCase):
                           ("ca_reader", "SELECT 1 FROM ca.investigation_result"),
                           ("ca_engine", "DELETE FROM ca.sealed_investigation_result")):
             with self.subTest(role=role, sql=sql[:40]):
-                self.assertIn(sqlstate(self.roles[role].run, sql), {"42501", "25006"})
+                # No privilege, a read-only transaction, or (a join view) not writable at all.
+                self.assertIn(sqlstate(self.roles[role].run, sql), {"42501", "25006", "55000"})
         # Even the schema owner cannot rewrite or remove a stored result or declaration.
         for sql in ("UPDATE ca.investigation_result SET outcome_status = outcome_status WHERE run_id = CAST(:r AS uuid)",
                     "DELETE FROM ca.investigation_result WHERE run_id = CAST(:r AS uuid)",

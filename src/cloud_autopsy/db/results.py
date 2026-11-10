@@ -17,6 +17,9 @@ append-only triggers):
   Nothing is overwritten and nothing is quarantined: the deterministic engine cannot produce
   two results for one sealed input, so a second, different result is either a defect or
   tampering, and the first stored result stays authoritative. The refusal is the signal.
+Concurrent writers: ``INSERT ... ON CONFLICT DO NOTHING`` (no arbiter column, so any unique
+constraint counts) waits for the first writer's transaction and then inserts nothing; the
+follower re-reads the committed row and compares bytes. Exactly one writer reports ``STORED``.
 Every value is bound as a parameter.
 """
 
@@ -70,7 +73,7 @@ def _declare_once(db, run_id, plan, declaration):
             inserted = db.run(
                 "INSERT INTO ca.run_clock_declaration (run_id, plan_digest, registry_digest, contract_version, "
                 "declaration_digest, declaration_bytes) VALUES (CAST(:r AS uuid), :p, :g, :v, :d, :b) "
-                "ON CONFLICT (run_id) DO NOTHING RETURNING 1",
+                "ON CONFLICT DO NOTHING RETURNING 1",
                 r=run_id, p=plan.digest, g=declaration.registry_digest, v=clocks.CLOCK_DECLARATION_VERSION,
                 d=declaration.digest, b=declaration.raw)
             if inserted:
@@ -117,7 +120,7 @@ INSERT_RESULT = (
     "INSERT INTO ca.investigation_result (run_id, investigation_id, plan_digest, manifest_digest, "
     "clock_declaration_digest, contract_version, result_digest, engine_version, catalog_version, "
     "timeline_rules_version, outcome_status, result_bytes, result_bytes_sha256) VALUES (CAST(:r AS uuid), "
-    "CAST(:i AS uuid), :p, :m, :c, :v, :d, :e, :k, :t, :o, :b, :h) ON CONFLICT (run_id) DO NOTHING RETURNING 1")
+    "CAST(:i AS uuid), :p, :m, :c, :v, :d, :e, :k, :t, :o, :b, :h) ON CONFLICT DO NOTHING RETURNING 1")
 
 
 def result_row(run_id, investigation_id, result_bytes):
