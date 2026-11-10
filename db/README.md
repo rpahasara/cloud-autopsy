@@ -45,11 +45,19 @@ CA_PG_REQUIRE=1 .venv-db/bin/python -I -m unittest discover -s tests/integration
 ```
 
 **What the tests do:**
-- connect as the bootstrap user only to create the eight roles with fresh random passwords (written as `<role>.password` into `CA_PG_SECRET_DIR`);
+- connect as the bootstrap user only to create the nine roles with fresh random passwords (written as `<role>.password` into `CA_PG_SECRET_DIR`);
 - send the server only SCRAM verifiers, never plaintext passwords;
 - create a fresh database per test class, apply the migrations as `ca_migrator`, and run everything else under the least-privileged runtime roles.
 
 Without `CA_PG_SECRET_DIR` the database tests are reported as **skipped**. With `CA_PG_REQUIRE=1` and no database, the run **fails** rather than reporting skips as a pass.
+
+## Investigation demo (CA-P2-005a)
+
+One command starts its own disposable database, runs the whole synthetic investigation flow and removes the database afterwards ([record](../docs/phase2/ca-p2-005/ca-p2-005a.md)):
+
+```bash
+.venv-db/bin/python -I tools/investigation_demo.py
+```
 
 ## End the session
 

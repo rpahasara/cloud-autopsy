@@ -79,7 +79,7 @@ class PostgresCase(unittest.TestCase):
 class MigrationTests(PostgresCase):
     def test_migrations_applied_once_and_environment_checked(self):  # CA-IT-001, CA-IT-025, CA-IT-031
         self.assertEqual(self.fx.applied, [m.filename for m in migrate.discover()])
-        self.assertEqual(len(self.fx.applied), 2)
+        self.assertEqual(len(self.fx.applied), 3)
         self.assertEqual(migrate.apply(self.owner), [])
         ingest.check_environment(self.reader)
         self.assertEqual(sqlstate(self.owner.run, "UPDATE ca.data_classification SET classification = 'x'"),
@@ -365,11 +365,11 @@ class PrivilegeTests(PostgresCase):
         self.assertEqual(sqlstate(self.owner.run, "SELECT count(*) FROM ca.evidence_version"), "42501")
 
     def test_runtime_roles_are_not_privileged(self):  # CA-IT-028
-        # Exactly the eight application roles, each with the designed attributes. The bootstrap
+        # Exactly the nine application roles, each with the designed attributes. The bootstrap
         # superuser also has a ca_ name, so the role set is asserted by name, not counted by prefix.
         expected = {role: (False, False, False, False, False, False, login)
                     for role, (login, _) in bootstrap.ROLES.items()}
-        self.assertEqual(len(expected), 8)
+        self.assertEqual(len(expected), 9)
         rows = self.owner.run(
             "SELECT rolname, rolsuper, rolcreaterole, rolcreatedb, rolbypassrls, rolreplication, rolinherit, "
             "rolcanlogin FROM pg_roles WHERE rolname = ANY(CAST(:names AS text[]))", names=sorted(expected))

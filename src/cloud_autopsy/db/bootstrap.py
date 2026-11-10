@@ -1,6 +1,6 @@
 """Development and test bootstrap for a disposable synthetic database (never for shared databases).
 
-Run once per session as the container's bootstrap superuser. It creates the eight roles with
+Run once per session as the container's bootstrap superuser. It creates the nine roles with
 random per-session passwords written to a private directory outside Git, and creates a database
 owned by ``ca_owner``. Passwords are sent to the server only as SCRAM-SHA-256 verifiers computed
 here, so no plaintext password appears in any SQL statement or server log.
@@ -24,9 +24,11 @@ ROLES = {
     "ca_reader": (True, False),
     "ca_evaluator": (True, False),
     "ca_lifecycle": (True, False),
+    "ca_engine": (True, False),  # CA-P2-005a: reads sealed runs only, through views
 }
 RUNTIME_SETTINGS = {"search_path": "ca, pg_catalog", "statement_timeout": "30s", "lock_timeout": "5s",
                     "idle_in_transaction_session_timeout": "60s"}
+ROLE_SETTINGS = {"ca_engine": {"default_transaction_read_only": "on"}}
 _VERIFIER = re.compile(r"SCRAM-SHA-256\$[0-9]+:[A-Za-z0-9+/=]+\$[A-Za-z0-9+/=]+:[A-Za-z0-9+/=]+")
 _DB_NAME = re.compile(r"[a-z][a-z0-9_]{0,62}")
 SCRAM_ITERATIONS = 4096
@@ -81,7 +83,7 @@ def create_database(superuser_db, name):
     runtime = [r for r, (login, _) in ROLES.items() if login]
     superuser_db.run(f"GRANT CONNECT ON DATABASE {name} TO {', '.join(runtime)}")
     for role in runtime:
-        for key, value in RUNTIME_SETTINGS.items():
+        for key, value in {**RUNTIME_SETTINGS, **ROLE_SETTINGS.get(role, {})}.items():
             superuser_db.run(f"ALTER ROLE {role} IN DATABASE {name} SET {key} = '{value}'")
 
 

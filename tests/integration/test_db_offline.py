@@ -43,7 +43,8 @@ class ScramVerifierTests(unittest.TestCase):
 class MigrationDiscoveryTests(unittest.TestCase):
     def test_discovery_and_contiguity(self):
         found = migrate.discover()
-        self.assertEqual([m.filename for m in found], ["0001_core.sql", "0002_ingest_requires_collecting.sql"])
+        self.assertEqual([m.filename for m in found], ["0001_core.sql", "0002_ingest_requires_collecting.sql",
+                                                      "0003_engine_read_views.sql"])
         for m in found:
             self.assertEqual(len(m.sha256), 64)
             self.assertTrue(m.sql.isascii())
