@@ -5,14 +5,18 @@ canonical and permuted delivery order, compared byte for byte with the database-
 Expected outcomes are developer-authored regression expectations, not independent evaluation.
 """
 
+import sys
 import unittest
 
 import _db
 
 if _db.AVAILABLE:
+    sys.path.insert(0, str(_db.REPO / "tests" / "engine"))
+    import _cross_scope as X
     from cloud_autopsy.app import pipeline
     from cloud_autopsy.db import ingest, read, seal
     from cloud_autopsy.db.adapter import DbError
+    from cloud_autopsy.engine import result
     from cloud_autopsy.synthetic import scenario_001 as scenario
 
 EXPECTED = {"config-cause": ("resolved", "config_limit_reduction"),
@@ -65,6 +69,32 @@ class EndToEndTests(unittest.TestCase):
         res, _ = pipeline.investigate_run(self.engine, run_id, scenario.clock_domain_records("configmap-conflict"))
         self.assertIn("batch_conflict", {r for g in res["gaps"] for r in g["reasons"]})
         self.assertEqual(res["outcome"]["status"], "abstained")
+
+    def test_cross_scope_runs_never_join_same_named_objects(self):
+        # PR #22 review: identical Pod/ConfigMap/ReplicaSet names in another namespace and in
+        # another cluster, persisted, sealed and read back as ca_engine.
+        plan, registry = X.plan(), X.registry()
+        ingest.register_registry(self.roles["ca_planner"], registry)
+        ingest.register_plan(self.roles["ca_planner"], plan)
+        a1, a2 = "checkout-api-6d4b5-a1", "checkout-api-6d4b5-a2"
+        for tag, (_, namespace) in X.SCOPES.items():
+            foreign_pods = [X.pod(a1, "node-a", namespace=namespace), X.pod(a2, "node-b", namespace=namespace)]
+            foreign_logs = [X.reload(a1, "node-a", 41, "2026-10-15T08:10:21.500Z", namespace),
+                            X.exhausted(a1, "node-a", 57, "2026-10-15T08:10:51.500Z", namespace)]
+            records = X.records(configmaps=[scenario._configmap_change()], deployments=[scenario._rollout()],
+                                pods=[X.pod(a1, "node-a"), X.pod(a2, "node-b")], logs=[],
+                                foreign={tag: (foreign_pods, foreign_logs)})
+            with self.subTest(scope=tag):
+                run_id = ingest.create_run(self.roles["ca_planner"], plan, scenario_id=f"scenario-001-cross-{tag}")
+                for record in reversed(records):
+                    ingest.ingest_batch(self.roles["ca_ingest"], run_id, record, plan, registry)
+                seal.seal_run(self.roles["ca_sealer"], run_id, plan, registry)
+                res, raw = pipeline.investigate_run(self.engine, run_id, scenario.clock_domain_records("config-cause"))
+                self.assertEqual(res["outcome"]["status"], "abstained")
+                config = [h for h in res["hypotheses"]
+                          if h["mechanism"] == "config_limit_reduction" and h["change_evidence_id"]][0]
+                self.assertEqual(config["status"], "not_supported")
+                self.assertEqual(raw, result.build(X.build(records))[1])  # database path == offline path
 
     def test_engine_reads_only_sealed_runs(self):
         plan = scenario.plan("config-cause")
