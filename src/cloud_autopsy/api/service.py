@@ -19,9 +19,19 @@ A run that is not granted is refused (403) before the database is touched, so th
 not reveal whether the run exists. A granted run is served only after
 ``load_verified_result`` succeeds: a verification failure is reported as an error code and
 never falls back to database rows. Errors carry a stable code and nothing else.
+
+Concurrency (PR #24 review, H1): work that reaches the database (a database connection, a
+full reload of the sealed run and an engine replay) is admitted through two non-blocking
+gates: at most ``max_in_flight`` verified reads (default 4) and, separately, at most
+``READY_MAX_IN_FLIGHT`` readiness probes (1), so an unauthenticated readiness flood cannot
+starve verified reads. A request that finds its gate full is answered at once with
+``503 {"error": "overloaded"}`` and ``Retry-After: 1``; nothing queues. Refusals that need no
+backend (400/401/403/404/405/413/414/431) are answered without taking a slot. Together the
+gates bound the API's database connections to ``max_in_flight + READY_MAX_IN_FLIGHT``.
 """
 
 import re
+import threading
 from dataclasses import dataclass, field
 
 from ..contracts import canonical
@@ -32,6 +42,9 @@ from .grants import UUID
 MAX_PATH = 256
 MAX_HEADER_BYTES = 8_192
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+DEFAULT_MAX_IN_FLIGHT = 4      # PROVISIONAL
+READY_MAX_IN_FLIGHT = 1
+OVERLOADED_HEADERS = (("Retry-After", "1"),)
 EVIDENCE_ID_PREFIX = "ca-evidence-id-sha256/0.1-provisional:"
 EVIDENCE_HEX = re.compile(r"[0-9a-f]{64}", re.ASCII)
 _RUN_ROUTE = re.compile(r"/v1/runs/([^/]+)/(result|timeline|hypotheses|citations)", re.ASCII)
@@ -107,8 +120,35 @@ class ApiService:
     document) and ``evidence`` ({evidence_id: {"coverage", "record"}}), or raises ``Unavailable``,
     ``Unverifiable`` or ``BackendDown``. ``check_ready()`` returns or raises ``BackendDown``."""
 
-    def __init__(self, grants, load_verified, check_ready):
+    def __init__(self, grants, load_verified, check_ready, max_in_flight=DEFAULT_MAX_IN_FLIGHT):
+        if not 1 <= int(max_in_flight) <= 64:
+            raise ValueError("max_in_flight must be between 1 and 64")
         self.grants, self.load_verified, self.check_ready = grants, load_verified, check_ready
+        self._work = threading.BoundedSemaphore(int(max_in_flight))
+        self._ready = threading.BoundedSemaphore(READY_MAX_IN_FLIGHT)
+
+    @staticmethod
+    def _admitted(gate, operation):
+        """Run ``operation()`` if ``gate`` has a free slot; otherwise answer 503 overloaded at once."""
+        if not gate.acquire(blocking=False):
+            return None, _error(503, "overloaded", OVERLOADED_HEADERS)
+        try:
+            return operation(), None
+        finally:
+            gate.release()
+
+    def route_template(self, method, path):
+        """A loggable form of the request: a fixed route template, never user-supplied values."""
+        if method not in ("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE"):
+            return "-", "<rejected>"
+        if path in ("/healthz", "/readyz"):
+            return method, path
+        if len(path) <= MAX_PATH and _PATH_CHARS.fullmatch(path):
+            if _RUN_ROUTE.fullmatch(path):
+                return method, "/v1/runs/{run_id}/" + _RUN_ROUTE.fullmatch(path).group(2)
+            if _EVIDENCE_ROUTE.fullmatch(path):
+                return method, "/v1/runs/{run_id}/evidence/{evidence_hex}"
+        return method, "<rejected>"
 
     def handle(self, method, path, headers, header_bytes=0):
         """``headers``: case-insensitive mapping of request headers."""
@@ -128,11 +168,14 @@ class ApiService:
         if path == "/healthz":
             return _json(200, {"api_version": API_VERSION, "status": "ok"})
         if path == "/readyz":
-            try:
-                self.check_ready()
-            except BackendDown:
-                return _error(503, "not_ready")
-            return _json(200, {"api_version": API_VERSION, "status": "ready"})
+            def probe():
+                try:
+                    self.check_ready()
+                except BackendDown:
+                    return _error(503, "not_ready")
+                return _json(200, {"api_version": API_VERSION, "status": "ready"})
+            response, overloaded = self._admitted(self._ready, probe)
+            return overloaded or response
 
         match = _RUN_ROUTE.fullmatch(path)
         evidence_match = _EVIDENCE_ROUTE.fullmatch(path)
@@ -153,14 +196,22 @@ class ApiService:
         if not grant.authorizes(run_id):
             return _error(403, "run_not_authorized")
 
-        try:
-            verified = self.load_verified(run_id)
-        except Unavailable:
-            return _error(404, "run_not_found")
-        except Unverifiable as exc:
-            return _json(409, {"error": "result_unverifiable", "reason": exc.code})
-        except BackendDown:
-            return _error(503, "database_unavailable")
+        def load():
+            try:
+                return self.load_verified(run_id), None
+            except Unavailable:
+                return None, _error(404, "run_not_found")
+            except Unverifiable as exc:
+                return None, _json(409, {"error": "result_unverifiable", "reason": exc.code})
+            except BackendDown:
+                return None, _error(503, "database_unavailable")
+
+        loaded, overloaded = self._admitted(self._work, load)
+        if overloaded:
+            return overloaded
+        verified, failure = loaded
+        if failure:
+            return failure
 
         envelope = {"api_version": API_VERSION, "run_id": run_id, "result_digest": verified.result_digest,
                     "verified": True,

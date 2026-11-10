@@ -11,6 +11,7 @@ import json
 import shutil
 import tempfile
 import threading
+import time
 import unittest
 import uuid
 from pathlib import Path
@@ -36,11 +37,11 @@ class ApiIntegrationTests(unittest.TestCase):
                                                 "ca_result_writer")}
         cls.engine = roles["ca_engine"]
         cls.runs, cls.stored = {}, {}
-        for variant in scenario.VARIANTS + ("config-cause",):
+        extra = [("to-tamper", "config-cause"), ("to-malform", "config-cause"), ("to-misshape", "no-symptom")]
+        for key, variant in [(v, v) for v in scenario.VARIANTS] + extra:
             run_id, _, _ = pipeline.persist_and_seal(roles, variant)
             outcome, investigation = pipeline.record_result(roles["ca_engine"], roles["ca_result_writer"], run_id)
             assert outcome == results.STORED
-            key = variant if variant not in cls.runs else "to-tamper"
             cls.runs[key], cls.stored[key] = run_id, investigation
         cls.unknown = str(uuid.uuid4())
         cls.secret_dir = Path(tempfile.mkdtemp(prefix="ca-api-it-"))
@@ -48,9 +49,11 @@ class ApiIntegrationTests(unittest.TestCase):
                                       "one": [cls.runs["config-cause"]]})
         grants_path = cls.secret_dir / "grants.json"
         G.write_private(grants_path, json.dumps(record).encode("utf-8"))
+        cls.grants_path = grants_path
         endpoint = _db.endpoint(cls.fx.name)
-        connect = server.engine_connector(endpoint.host, endpoint.port, endpoint.database, cls.fx.passwords["ca_engine"])
-        cls.server = server.build(grants_path, connect, quiet=True)
+        cls.connect = server.engine_connector(endpoint.host, endpoint.port, endpoint.database,
+                                              cls.fx.passwords["ca_engine"])
+        cls.server = server.build(grants_path, cls.connect, quiet=True)
         threading.Thread(target=cls.server.serve_forever, daemon=True).start()
 
     @classmethod
@@ -60,8 +63,8 @@ class ApiIntegrationTests(unittest.TestCase):
         shutil.rmtree(cls.secret_dir, ignore_errors=True)
         cls.fx.close()
 
-    def get(self, path, token="all", method="GET"):
-        con = http.client.HTTPConnection("127.0.0.1", self.server.port, timeout=30)
+    def get(self, path, token="all", method="GET", port=None):
+        con = http.client.HTTPConnection("127.0.0.1", port or self.server.port, timeout=30)
         con.request(method, path, headers={"Authorization": f"Bearer {self.tokens[token]}"} if token else {})
         response = con.getresponse()
         body = json.loads(response.read())
@@ -110,6 +113,84 @@ class ApiIntegrationTests(unittest.TestCase):
         foreign = next(e["evidence_id"] for e in early if e["evidence_id"] not in mine)
         self.assertEqual(self.get(f"/v1/runs/{allowed}/evidence/{foreign.split(':')[1]}"),
                          (404, {"error": "evidence_not_found"}))
+
+    def rewrite_stored(self, key, mutate):
+        """Self-consistently rewrite a stored result (digest and SHA-256 recomputed), bypassing triggers."""
+        doc = canonical.loads(self.stored[key].result_bytes)
+        body = {k: v for k, v in doc.items() if k != "result_digest"}
+        mutate(body)
+        body["result_digest"] = f"{RESULT_DIGEST_ALGORITHM}:{hashlib.sha256(canonical.canonical_bytes(body)).hexdigest()}"
+        raw = canonical.canonical_bytes(body)
+        admin = _db.superuser(self.fx.name)
+        try:
+            with admin.transaction():
+                admin.run("SET LOCAL session_replication_role = replica")
+                admin.run("UPDATE ca.investigation_result SET result_bytes = :b, result_bytes_sha256 = :h, "
+                          "result_digest = :d WHERE run_id = CAST(:r AS uuid)", b=raw,
+                          h=hashlib.sha256(raw).hexdigest(), d=body["result_digest"], r=self.runs[key])
+        finally:
+            admin.close()
+
+    def test_malformed_stored_results_get_a_stable_409_without_data(self):  # PR #24 review H2
+        cases = (("to-malform", lambda b: b.update(rule_versions=[])),
+                 ("to-misshape", lambda b: b["outcome"].update(reasons=None)))
+        for key, mutate in cases:
+            with self.subTest(case=key):
+                run_id = self.runs[key]
+                self.assertEqual(self.get(f"/v1/runs/{run_id}/result")[0], 200)
+                self.rewrite_stored(key, mutate)
+                for route in ("result", "timeline", "hypotheses", "citations"):
+                    status, body = self.get(f"/v1/runs/{run_id}/{route}")
+                    self.assertEqual((status, body), (409, {"error": "result_unverifiable",
+                                                            "reason": "result_malformed"}))
+                self.assertEqual(self.get("/healthz", None)[0], 200)  # the server keeps serving
+
+    def test_concurrent_requests_are_bounded_by_open_database_connections(self):  # PR #24 review H1
+        entered, release = threading.Semaphore(0), threading.Event()
+
+        def gated_connect():
+            db = self.connect()
+            entered.release()
+            release.wait(30)
+            return db
+
+        gated = server.build(self.grants_path, gated_connect, quiet=True)
+        threading.Thread(target=gated.serve_forever, daemon=True).start()
+        admin = _db.superuser(self.fx.name)
+        try:
+            for path, token, slots in ((f"/v1/runs/{self.runs['config-cause']}/result", "all", 4),
+                                       ("/readyz", None, 1)):
+                with self.subTest(path=path):
+                    statuses, threads = [], []
+                    for _ in range(12):
+                        threads.append(threading.Thread(
+                            target=lambda: statuses.append(self.get(path, token, port=gated.port))))
+                        threads[-1].start()
+                    for _ in range(slots):
+                        self.assertTrue(entered.acquire(timeout=30))
+                    open_now = admin.one("SELECT count(*) FROM pg_stat_activity WHERE datname = :d "
+                                         "AND application_name = 'cloud-autopsy-api'", d=self.fx.name)[0]
+                    self.assertEqual(open_now, slots)
+                    for _ in range(300):  # the refused requests are answered without waiting for a slot
+                        if len(statuses) >= 12 - slots:
+                            break
+                        time.sleep(0.05)
+                    overloaded = [b for st, b in statuses if st == 503]
+                    self.assertEqual(overloaded, [{"error": "overloaded"}] * (12 - slots))
+                    release.set()
+                    for t in threads:
+                        t.join(30)
+                    release.clear()
+                    admitted = [b for st, b in statuses if st == 200]
+                    self.assertEqual(len(admitted), slots)
+                    if token:
+                        self.assertTrue(all(b["verified"] and b["result_digest"] ==
+                                            self.stored["config-cause"].result["result_digest"] for b in admitted))
+        finally:
+            release.set()
+            admin.close()
+            gated.shutdown()
+            gated.server_close()
 
     def test_tampered_result_is_never_served(self):
         run_id = self.runs["to-tamper"]

@@ -252,6 +252,10 @@ def load_verified_result(engine_db, run_id):
         _invalid("result_not_canonical", "stored bytes are not canonical JSON")
     if canonical_form != raw or not isinstance(doc, dict):
         _invalid("result_not_canonical", "stored bytes are not canonical")
+    try:
+        result.check_shape(doc)  # before any field access below
+    except inputs.InputError as exc:
+        _invalid(exc.code, "stored result has an unexpected structure")
     if doc.get("contract_version") != result.RESULT_VERSION or version != result.RESULT_VERSION:
         _invalid("result_version_unsupported", "stored result has an unsupported contract version")
     fields = (doc.get("result_digest"), doc.get("engine_version"), doc.get("rule_versions", {}).get("mechanism-catalog"),

@@ -78,9 +78,59 @@ def _fail(code, message):
     raise InputError(code, message)
 
 
+def _is_str(value, nullable=False):
+    return isinstance(value, str) or (nullable and value is None)
+
+
+def _str_list(value):
+    return isinstance(value, list) and all(isinstance(v, str) for v in value)
+
+
+def _dict_with(value, keys):
+    return isinstance(value, dict) and all(k in value for k in keys)
+
+
+def check_shape(result):
+    """Refuse a document whose structure verification relies on is wrong (``result_malformed``).
+
+    This runs before any other check, so a corrupt or deliberately reshaped document (for
+    example ``"rule_versions": []``) fails closed with one stable code instead of an arbitrary
+    TypeError deep inside verification. It checks types only; content is checked afterwards.
+    """
+    ok = (_dict_with(result, ("result_digest", "contract_version", "engine_version", "rule_versions", "inputs",
+                              "hypotheses", "outcome"))
+          and _is_str(result["result_digest"]) and _is_str(result["contract_version"])
+          and _is_str(result["engine_version"])
+          and isinstance(result["rule_versions"], dict) and all(_is_str(v) for v in result["rule_versions"].values())
+          and _dict_with(result["inputs"], ("plan_digest", "manifest_digest", "clock_declaration_digest"))
+          and all(_is_str(result["inputs"][k]) for k in ("plan_digest", "manifest_digest", "clock_declaration_digest"))
+          and _dict_with(result["outcome"], ("status", "hypothesis_id", "mechanism", "evidence_ids", "reasons",
+                                             "gap_ids"))
+          and _is_str(result["outcome"]["status"]) and _is_str(result["outcome"]["hypothesis_id"], True)
+          and _is_str(result["outcome"]["mechanism"], True)
+          and all(_str_list(result["outcome"][k]) for k in ("evidence_ids", "reasons", "gap_ids"))
+          and isinstance(result["hypotheses"], list))
+    for h in result["hypotheses"] if ok else ():
+        ok = (_dict_with(h, ("hypothesis_id", "status", "prerequisites", "contradictions", "limiting_gap_ids"))
+              and _is_str(h["hypothesis_id"]) and _is_str(h["status"]) and _str_list(h["limiting_gap_ids"])
+              and isinstance(h["prerequisites"], list) and isinstance(h["contradictions"], list)
+              and all(_dict_with(p, ("result", "evidence_ids", "orderings", "gap_ids")) and _is_str(p["result"])
+                      and _str_list(p["evidence_ids"]) and _str_list(p["gap_ids"])
+                      and isinstance(p["orderings"], list)
+                      and all(_dict_with(o, ("a", "b")) and _is_str(o["a"]) and _is_str(o["b"])
+                              for o in p["orderings"])
+                      for p in h["prerequisites"])
+              and all(_dict_with(c, ("evidence_ids",)) and _str_list(c["evidence_ids"]) for c in h["contradictions"]))
+        if not ok:
+            break
+    if not ok:
+        _fail("result_malformed", "result document does not have the expected structure")
+
+
 def verify_result(result_bytes, inp):
     """Verify a stored or received result against its input; return the decoded result."""
     result = canonical.loads(bytes(result_bytes))
+    check_shape(result)
     body = {k: v for k, v in result.items() if k != "result_digest"}
     expected = f"{RESULT_DIGEST_ALGORITHM}:{hashlib.sha256(canonical.canonical_bytes(body)).hexdigest()}"
     if result.get("result_digest") != expected:
