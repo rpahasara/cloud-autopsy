@@ -54,6 +54,16 @@ jobs:
       - name: Local API tests (CA-P2-006b, no database; HTTP on 127.0.0.1 only)
         run: python -I -m unittest discover -s tests/api -t tests/api -v
 
+      # CA-P2-006c: the read-only dashboard in the runner's preinstalled Chrome (headless, temporary
+      # profile, DevTools on 127.0.0.1), served by the real API with the labelled synthetic preview.
+      # The sandbox is disabled only because hosted runners may forbid its user namespaces; the
+      # browser loads nothing but the loopback page under test.
+      - name: Dashboard browser tests (CA-P2-006c, headless Chrome, 127.0.0.1 only)
+        env:
+          CA_BROWSER_REQUIRE: "1"
+          CA_BROWSER_NO_SANDBOX: "1"
+        run: python -I -m unittest discover -s tests/browser -t tests/browser -v
+
       - name: Demo self-checks
         run: python -I prototype/cli.py demo
 
@@ -104,6 +114,8 @@ jobs:
       - name: Database integration tests (real PostgreSQL)
         env:
           CA_PG_REQUIRE: "1"
+          CA_BROWSER_REQUIRE: "1"
+          CA_BROWSER_NO_SANDBOX: "1"
         run: .venv-db/bin/python -I -m unittest discover -s tests/integration -t tests/integration -v
 
       - name: One-command investigation demo (CA-P2-005a/006a, its own disposable database)

@@ -67,6 +67,14 @@ One command serves the stored, verified results on `127.0.0.1` with run-scoped t
 .venv-db/bin/python -I tools/api_demo.py
 ```
 
+## Read-only dashboard (CA-P2-006c)
+
+The API also serves a read-only dashboard at `/` on the same loopback origin ([record](../docs/phase2/ca-p2-006/ca-p2-006c.md)). Without a database, a clearly labelled synthetic preview serves the same page with results computed in memory and marked as not verified:
+
+```bash
+python -I tools/dashboard_preview.py
+```
+
 ## End the session
 
 ```bash

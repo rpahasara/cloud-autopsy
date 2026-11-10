@@ -28,6 +28,12 @@ starve verified reads. A request that finds its gate full is answered at once wi
 ``503 {"error": "overloaded"}`` and ``Retry-After: 1``; nothing queues. Refusals that need no
 backend (400/401/403/404/405/413/414/431) are answered without taking a slot. Together the
 gates bound the API's database connections to ``max_in_flight + READY_MAX_IN_FLIGHT``.
+
+Dashboard (CA-P2-006c): when built with ``ui`` assets (``ui.load_assets()``), ``GET /`` and a
+fixed set of ``/ui/...`` paths return the static read-only dashboard with its own strict CSP.
+No other route changes. ``preview=True`` is used only by the labelled synthetic preview
+(``app.preview``): results are then computed in memory from fixtures, never read from a sealed
+run, and every ``/v1`` envelope says ``"verified": false`` and ``"data_source": "synthetic-preview"``.
 """
 
 import re
@@ -38,6 +44,7 @@ from ..contracts import canonical
 from ..contracts.errors import ContractError
 from . import API_VERSION
 from .grants import UUID
+from .ui import UI_HEADERS
 
 MAX_PATH = 256
 MAX_HEADER_BYTES = 8_192
@@ -120,10 +127,12 @@ class ApiService:
     document) and ``evidence`` ({evidence_id: {"coverage", "record"}}), or raises ``Unavailable``,
     ``Unverifiable`` or ``BackendDown``. ``check_ready()`` returns or raises ``BackendDown``."""
 
-    def __init__(self, grants, load_verified, check_ready, max_in_flight=DEFAULT_MAX_IN_FLIGHT):
+    def __init__(self, grants, load_verified, check_ready, max_in_flight=DEFAULT_MAX_IN_FLIGHT, ui=None,
+                 preview=False):
         if not 1 <= int(max_in_flight) <= 64:
             raise ValueError("max_in_flight must be between 1 and 64")
         self.grants, self.load_verified, self.check_ready = grants, load_verified, check_ready
+        self.ui, self.preview = dict(ui or {}), bool(preview)
         self._work = threading.BoundedSemaphore(int(max_in_flight))
         self._ready = threading.BoundedSemaphore(READY_MAX_IN_FLIGHT)
 
@@ -141,7 +150,7 @@ class ApiService:
         """A loggable form of the request: a fixed route template, never user-supplied values."""
         if method not in ("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE"):
             return "-", "<rejected>"
-        if path in ("/healthz", "/readyz"):
+        if path in ("/healthz", "/readyz") or path in self.ui:
             return method, path
         if len(path) <= MAX_PATH and _PATH_CHARS.fullmatch(path):
             if _RUN_ROUTE.fullmatch(path):
@@ -165,6 +174,9 @@ class ApiService:
             return _error(414, "path_too_long")
         if not _PATH_CHARS.fullmatch(path):
             return _error(400, "invalid_path")  # rejects query strings, percent-encoding, spaces
+        if path in self.ui:
+            content_type, body = self.ui[path]
+            return Response(200, body, (("Content-Type", content_type),) + UI_HEADERS)
         if path == "/healthz":
             return _json(200, {"api_version": API_VERSION, "status": "ok"})
         if path == "/readyz":
@@ -216,6 +228,10 @@ class ApiService:
         envelope = {"api_version": API_VERSION, "run_id": run_id, "result_digest": verified.result_digest,
                     "verified": True,
                     "verification": "re-executed from the sealed run; byte-identical to the stored result"}
+        if self.preview:
+            envelope.update(verified=False, data_source="synthetic-preview",
+                            verification="synthetic preview: computed in memory from fixtures; not read from "
+                                         "or verified against a sealed database run")
         if evidence_id is not None:
             member = verified.evidence.get(evidence_id)
             if member is None:

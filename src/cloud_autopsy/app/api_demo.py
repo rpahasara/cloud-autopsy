@@ -24,6 +24,7 @@ from pathlib import Path
 
 from ..api import grants as G
 from ..api import server
+from ..api import ui
 from ..contracts import canonical
 from ..engine import RESULT_DIGEST_ALGORITHM
 from ..synthetic import scenario_001 as scenario
@@ -38,6 +39,16 @@ def _get(port, path, token=None, method="GET"):
     body = response.read()
     con.close()
     return response.status, json.loads(body), len(body)
+
+
+def _page(port, path):
+    """Status and CSP header of a dashboard asset (CA-P2-006c)."""
+    con = http.client.HTTPConnection("127.0.0.1", port, timeout=30)
+    con.request("GET", path)
+    response = con.getresponse()
+    response.read()
+    con.close()
+    return response.status, response.getheader("Content-Security-Policy")
 
 
 def _tamper(database, run_id, stored_bytes):
@@ -78,6 +89,7 @@ def run(database, out_dir):
     try:
         checks["healthz"] = _get(port, "/healthz")[0] == 200
         checks["readyz"] = _get(port, "/readyz")[0] == 200
+        checks["dashboard"] = all(_page(port, path) == (200, ui.UI_CSP) for path in ui.ASSETS)
         for variant in scenario.VARIANTS:
             run_id, inv = runs[variant], stored[variant]
             status, body, size = _get(port, f"/v1/runs/{run_id}/result", token)

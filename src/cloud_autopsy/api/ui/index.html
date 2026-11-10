@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light">
+<title>Cloud Autopsy</title>
+<link rel="icon" href="/ui/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/ui/app.css">
+<script type="module" src="/ui/app.js"></script>
+</head>
+<body>
+<div class="window" id="app" data-state="signed-out" data-view="overview">
+  <aside class="rail" aria-label="Workspace">
+    <div class="brand" title="AU4 Labs &mdash; Cloud Autopsy">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="16" class="brand-disc"/><path class="brand-mark" d="M9.5 19.5c0-3 2.2-5.2 5-5.2.5-2.4 2.5-4 4.9-4 2.8 0 5 2.2 5 5 0 .2 0 .4-.1.6M8.5 22.5h15"/><circle class="brand-dot" cx="22.6" cy="22.5" r="1.4"/></svg>
+    </div>
+    <nav class="rail-nav">
+      <button type="button" class="rail-btn" id="rail-overview" aria-label="Overview" title="Overview"><svg viewBox="0 0 24 24" class="icon" aria-hidden="true"><rect x="4" y="4" width="6.5" height="6.5" rx="2"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="2"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="2"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="2"/></svg></button>
+      <button type="button" class="rail-btn" id="rail-runs" aria-label="Runs" title="Runs"><svg viewBox="0 0 24 24" class="icon" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h9"/></svg></button>
+      <button type="button" class="rail-btn" id="rail-refresh" aria-label="Verify again" title="Verify again"><svg viewBox="0 0 24 24" class="icon" aria-hidden="true"><path d="M19 12a7 7 0 1 1-2.05-4.95"/><path d="M19 4.5V8h-3.5"/></svg></button>
+    </nav>
+    <button type="button" class="rail-btn rail-lock" id="rail-lock" aria-label="Clear token" title="Clear token from memory"><svg viewBox="0 0 24 24" class="icon" aria-hidden="true"><rect x="5.5" y="10.5" width="13" height="9" rx="2.5"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/></svg></button>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <nav class="nav" id="nav" aria-label="Views">
+        <span class="nav-pill" id="nav-pill" aria-hidden="true"></span>
+        <button type="button" data-view="overview">Overview</button>
+        <button type="button" data-view="investigation">Investigation</button>
+        <button type="button" data-view="timeline">Timeline</button>
+        <button type="button" data-view="hypotheses">Hypotheses</button>
+        <button type="button" data-view="evidence">Evidence</button>
+        <button type="button" class="is-unavailable" aria-disabled="true" title="Reports are not available in this version">Reports<span class="soon">not available</span></button>
+      </nav>
+      <div class="topbar-right">
+        <span class="mode-chip is-muted" id="mode-chip">Not connected</span>
+        <button type="button" class="run-pill" id="run-pill" aria-haspopup="true"><span class="run-dot"></span><span id="run-pill-label">Runs</span></button>
+        <span class="org">AU4 Labs</span>
+      </div>
+      <div class="popover" id="runs-popover" hidden>
+        <p class="popover-title">Runs in this session</p>
+        <ul class="run-list" id="run-list"></ul>
+        <p class="popover-note">Each run is verified on the server when it is opened.</p>
+      </div>
+    </header>
+
+    <section class="titlebar">
+      <div>
+        <h1 id="run-title">Cloud Autopsy</h1>
+        <p class="title-sub" id="run-sub">Evidence-based incident investigation</p>
+      </div>
+      <dl class="run-meta" id="run-meta"></dl>
+    </section>
+
+    <main class="stage" id="stage" aria-live="polite">
+      <section class="card card-hero" data-card="hero" aria-label="Evidence map">
+        <button type="button" class="expand" aria-label="Expand evidence map"><svg viewBox="0 0 24 24" class="icon" aria-hidden="true"><path d="M14 5h5v5M10 19H5v-5M19 5l-6 6M5 19l6-6"/></svg></button>
+        <div class="layer layer-compact"></div>
+      </section>
+      <section class="card card-outcome" data-card="outcome" aria-label="Outcome"><div class="layer layer-compact"></div></section>
+      <section class="card card-verify" data-card="verify" aria-label="Verification"><div class="layer layer-compact"></div></section>
+      <section class="card card-coverage" data-card="coverage" aria-label="Evidence coverage"><div class="layer layer-compact"></div></section>
+      <section class="card card-hyps" data-card="hyps" aria-label="Hypotheses">
+        <button type="button" class="expand" aria-label="Expand hypotheses"><svg viewBox="0 0 24 24" class="icon" aria-hidden="true"><path d="M14 5h5v5M10 19H5v-5M19 5l-6 6M5 19l6-6"/></svg></button>
+        <div class="layer layer-compact"></div><div class="layer layer-expanded"></div>
+      </section>
+      <section class="card card-timeline" data-card="timeline" aria-label="Timeline">
+        <button type="button" class="expand" aria-label="Expand timeline"><svg viewBox="0 0 24 24" class="icon" aria-hidden="true"><path d="M14 5h5v5M10 19H5v-5M19 5l-6 6M5 19l6-6"/></svg></button>
+        <div class="layer layer-compact"></div><div class="layer layer-expanded"></div>
+      </section>
+      <section class="card card-evidence" data-card="evidence" aria-label="Evidence">
+        <button type="button" class="expand" aria-label="Expand evidence"><svg viewBox="0 0 24 24" class="icon" aria-hidden="true"><path d="M14 5h5v5M10 19H5v-5M19 5l-6 6M5 19l6-6"/></svg></button>
+        <div class="layer layer-compact"></div><div class="layer layer-expanded"></div>
+      </section>
+      <section class="card card-gaps" data-card="gaps" aria-label="Gaps and uncertainty">
+        <button type="button" class="expand" aria-label="Expand gaps and uncertainty"><svg viewBox="0 0 24 24" class="icon" aria-hidden="true"><path d="M14 5h5v5M10 19H5v-5M19 5l-6 6M5 19l6-6"/></svg></button>
+        <div class="layer layer-compact"></div><div class="layer layer-expanded"></div>
+      </section>
+
+      <aside class="inspector" id="inspector" aria-label="Inspector">
+        <header class="insp-head">
+          <button type="button" class="icon-btn" id="insp-back" aria-label="Back" hidden><svg viewBox="0 0 24 24" class="icon" aria-hidden="true"><path d="M14.5 6.5L9 12l5.5 5.5"/></svg></button>
+          <span class="insp-eyebrow" id="insp-eyebrow">Inspector</span>
+          <button type="button" class="icon-btn" id="insp-close" aria-label="Close and return to overview"><svg viewBox="0 0 24 24" class="icon" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg></button>
+        </header>
+        <div class="insp-content" id="insp-content"></div>
+      </aside>
+
+      <div class="state-panel" id="state-panel" hidden></div>
+    </main>
+  </div>
+
+  <div class="sheet" id="connect" hidden>
+    <form class="sheet-card" id="connect-form" autocomplete="off" novalidate>
+      <div class="sheet-brand">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="16" class="brand-disc"/><path class="brand-mark" d="M9.5 19.5c0-3 2.2-5.2 5-5.2.5-2.4 2.5-4 4.9-4 2.8 0 5 2.2 5 5 0 .2 0 .4-.1.6M8.5 22.5h15"/><circle class="brand-dot" cx="22.6" cy="22.5" r="1.4"/></svg>
+        <div><p class="sheet-org">AU4 Labs</p><h2>Cloud Autopsy</h2></div>
+      </div>
+      <p class="sheet-lead">Connect to the local, read-only investigation API on this machine.</p>
+      <label class="field"><span>Access token</span>
+        <input id="token" type="password" spellcheck="false" autocapitalize="off" autocomplete="off" required></label>
+      <label class="field"><span>Run IDs <small>one per line</small></span>
+        <textarea id="run-ids" rows="3" spellcheck="false" autocapitalize="off" autocomplete="off" required></textarea></label>
+      <p class="sheet-error" id="connect-error" role="alert" hidden></p>
+      <button type="submit" class="btn btn-ink btn-wide">Connect</button>
+      <ul class="sheet-notes">
+        <li>The token stays in this tab&rsquo;s memory only &mdash; never stored or put in a URL.</li>
+        <li>Results are shown only after the server verifies them; refusals are shown as they are.</li>
+      </ul>
+    </form>
+  </div>
+
+  <div class="toast" id="toast" role="status" hidden></div>
+</div>
+<noscript><p class="noscript">The Cloud Autopsy dashboard needs JavaScript. The read-only API remains available at /v1.</p></noscript>
+</body>
+</html>

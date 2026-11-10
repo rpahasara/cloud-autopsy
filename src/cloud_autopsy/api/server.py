@@ -16,6 +16,7 @@ from pathlib import Path
 from ..db import ingest, results
 from ..db.adapter import Database, DbError, Endpoint
 from . import grants as grants_module
+from . import ui
 from .service import ApiService, BackendDown, Unavailable, Unverifiable
 from .transport import LOOPBACK, LoopbackServer
 
@@ -66,9 +67,11 @@ def engine_connector(host, port, database, password):
     return connect
 
 
-def build(grants_path, connect, port=0, quiet=False):
+def build(grants_path, connect, port=0, quiet=False, dashboard=True):
     load_verified, check_ready = database_backend(connect)
-    return LoopbackServer(ApiService(grants_module.load(grants_path), load_verified, check_ready), port, quiet=quiet)
+    service = ApiService(grants_module.load(grants_path), load_verified, check_ready,
+                         ui=ui.load_assets() if dashboard else None)
+    return LoopbackServer(service, port, quiet=quiet)
 
 
 def main(argv=None):
@@ -83,7 +86,8 @@ def main(argv=None):
     connect = engine_connector(os.environ.get("CA_PG_HOST", LOOPBACK), os.environ.get("CA_PG_PORT", "55432"),
                                database, password)
     server = build(args.grants, connect, args.port)
-    sys.stderr.write(f"api listening on http://{LOOPBACK}:{server.port} (read-only, synthetic data only)\n")
+    sys.stderr.write(f"api listening on http://{LOOPBACK}:{server.port} (read-only, synthetic data only); "
+                     f"dashboard at http://{LOOPBACK}:{server.port}/\n")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

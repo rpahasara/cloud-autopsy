@@ -8,7 +8,9 @@ connection per request. Tampering is simulated with the bootstrap superuser
 import hashlib
 import http.client
 import json
+import os
 import shutil
+import sys
 import tempfile
 import threading
 import time
@@ -17,6 +19,11 @@ import uuid
 from pathlib import Path
 
 import _db
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "browser"))
+import _cdp  # noqa: E402  (standard-library CDP client, test-only)
+
+BROWSER_OK = bool(_cdp.find_browser()) or os.environ.get("CA_BROWSER_REQUIRE") == "1"
 
 if _db.AVAILABLE:
     from cloud_autopsy.api import grants as G
@@ -191,6 +198,33 @@ class ApiIntegrationTests(unittest.TestCase):
             admin.close()
             gated.shutdown()
             gated.server_close()
+
+    @unittest.skipUnless(BROWSER_OK, "no Chromium-family browser installed (set CA_BROWSER)")
+    def test_dashboard_shows_database_verified_results_and_refuses_tampering(self):  # CA-P2-006c
+        b = _cdp.Browser(1440, 900)
+        try:
+            b.navigate(f"http://127.0.0.1:{self.server.port}/")
+            runs = [self.runs["config-cause"], self.runs["configmap-unavailable"], self.runs["to-tamper"]]
+            b.js(f"document.querySelector('#token').value = {json.dumps(self.tokens['all'])};"
+                 f"document.querySelector('#run-ids').value = {json.dumps(chr(10).join(runs))};"
+                 "document.querySelector('#connect-form').requestSubmit(); 1")
+            b.wait_for("document.querySelector('#app').dataset.state === 'ready' && document.querySelector('#connect').hidden", 30)
+            self.assertEqual(b.js("document.querySelector('#mode-chip').textContent"), "Verified on read")
+            self.assertEqual(b.js("document.querySelector('.outcome-word').textContent"), "Resolved")
+            self.assertEqual(b.js("document.querySelector('.verify-title').textContent"), "Byte-identical replay")
+            b.js("document.querySelector('[data-view=evidence]').click(); 1")
+            b.wait_for("document.querySelectorAll('.ev-row').length > 0")
+            b.js("document.querySelector('.ev-row').click(); 1")
+            b.wait_for("document.querySelector('.insp-body .badges')", 30)
+            self.assertIn("Served after verification", b.js("document.querySelector('.insp-body .badges').textContent"))
+            b.js("document.querySelector('[data-view=overview]').click(); document.querySelector('#run-pill').click(); 1")
+            b.wait_for("document.querySelectorAll('.run-item').length === 3")
+            b.js("document.querySelectorAll('.run-item')[1].click(); 1")
+            b.wait_for("document.querySelector('.outcome-word')?.textContent === 'Abstained'", 30)
+            self.assertEqual(b.js("document.querySelector('#mode-chip').textContent"), "Verified on read")
+            self.assertEqual(b.console_errors(), [])
+        finally:
+            b.close()
 
     def test_tampered_result_is_never_served(self):
         run_id = self.runs["to-tamper"]

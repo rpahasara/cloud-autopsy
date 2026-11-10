@@ -79,7 +79,7 @@
         "review": "pending"
       },
       "upgrade_owner": "Unassigned (repository maintainer nomination pending under CA-DEC-008)",
-      "notes": "MIT covers the image definition repository only; preinstalled software carries its own licenses and is never shipped."
+      "notes": "MIT covers the image definition repository only; preinstalled software carries its own licenses and is never shipped. The CA-P2-006c browser tests drive the image's preinstalled Google Chrome headless against 127.0.0.1 only; no browser is downloaded, pinned or shipped."
     },
     {
       "id": "pg8000",
