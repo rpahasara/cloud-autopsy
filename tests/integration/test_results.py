@@ -81,10 +81,15 @@ class ResultStorageTests(unittest.TestCase):
         return self.engine.one("SELECT count(*) FROM ca.sealed_investigation_result WHERE run_id = CAST(:r AS uuid)",
                                r=run_id)[0]
 
+    def fresh(self, role):
+        """A new connection that is closed when the test ends (the server has few slots)."""
+        db = self.fx.connect(role)
+        self.addCleanup(db.close)
+        return db
+
     def assert_invalid_on_read(self, run_id, code):
-        fresh = self.fx.connect("ca_engine")
         with self.assertRaises(results.StoredResultInvalid) as caught:
-            results.load_verified_result(fresh, run_id)
+            results.load_verified_result(self.fresh("ca_engine"), run_id)
         self.assertEqual(caught.exception.code, code)
 
     # --- storage and replay -----------------------------------------------------------------
@@ -96,7 +101,10 @@ class ResultStorageTests(unittest.TestCase):
                 outcome, investigation = pipeline.record_result(self.engine, self.writer, run_id)
                 self.assertEqual(outcome, results.STORED)
                 fresh = self.fx.connect("ca_engine")
-                verified = results.load_verified_result(fresh, run_id)
+                try:
+                    verified = results.load_verified_result(fresh, run_id)
+                finally:
+                    fresh.close()
                 _, offline = pipeline.offline_result(variant)
                 self.assertEqual(verified.result_bytes, investigation.result_bytes)
                 self.assertEqual(verified.result_bytes, offline)  # stored == replayed == database-free
@@ -113,7 +121,7 @@ class ResultStorageTests(unittest.TestCase):
 
     def run_writers(self, run_id, submissions):
         """Store each submission concurrently, each writer with its own engine and writer connections."""
-        pairs = [(self.fx.connect("ca_engine"), self.fx.connect("ca_result_writer")) for _ in submissions]
+        pairs = [(self.fresh("ca_engine"), self.fresh("ca_result_writer")) for _ in submissions]
         barrier, outcomes, errors = threading.Barrier(len(submissions)), [], []
 
         def write(engine, writer, raw):
@@ -145,8 +153,10 @@ class ResultStorageTests(unittest.TestCase):
         run_id = self.sealed()
         investigation = results.investigate(self.engine, run_id)
         forged = forge(investigation.result_bytes, add_reason)
-        substituted = forge(investigation.result_bytes, lambda b: b["outcome"].update(
-            status="resolved", mechanism="rollout_limit_reduction"))
+        rollout = [h for h in investigation.result["hypotheses"] if h["mechanism"] == "rollout_limit_reduction"][0]
+        substituted = forge(investigation.result_bytes, lambda b: b["outcome"].update(  # a contradicted cause
+            hypothesis_id=rollout["hypothesis_id"], mechanism=rollout["mechanism"],
+            change_evidence_id=rollout["change_evidence_id"]))
         for bad, code in ((forged, "replay_mismatch"), (substituted, "outcome_invalid"),
                           (investigation.result_bytes + b" ", "result_not_canonical")):
             with self.subTest(code=code):
@@ -209,7 +219,7 @@ class ResultStorageTests(unittest.TestCase):
         plan, registry = scenario.plan("config-cause"), scenario.registry()
         run_id = ingest.create_run(self.roles["ca_planner"], plan)
         domains = scenario.clock_domain_records("config-cause")
-        planners = [self.fx.connect("ca_planner") for _ in range(WRITERS)]
+        planners = [self.fresh("ca_planner") for _ in range(WRITERS)]
         barrier, outcomes, errors = threading.Barrier(WRITERS), [], []
 
         def declare(db):
