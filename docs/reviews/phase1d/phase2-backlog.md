@@ -27,15 +27,15 @@ This is factual delivery status, not completion in the sense above. Work proceed
 
 | ID | Status | What exists | What is missing for the row's completion evidence |
 |---|---|---|---|
-| CA-P2-001 | Partial | Inventory, SBOM, license and NOTICE records, offline supply-chain checks, SHA-pinned CI ([record](../../phase2/ca-p2-001/README.md)) | License reviewer (D7) and dispositions, advisory scanning (D6), build provenance; decisions D1–D11 open |
-| CA-P2-002 | Implemented (provisional) | Contracts 002a–002d with vectors and tests | Architecture review of contracts and vectors; CA-DEC-003 |
-| CA-P2-003 | Implemented (provisional) | Migrations 0001–0004, ten runtime roles, ingest and two-phase seal, real-PostgreSQL CI ([003b-1](../../phase2/ca-p2-003/ca-p2-003b-1.md)) | Database and security review; R4 (failed seal stays `sealing`); PostgreSQL 18.7 re-pin |
-| CA-P2-004 | Not started | Source kinds exist only as contract labels | All collectors, RBAC manifest, negative mutation tests |
-| CA-P2-005 | Partial (005a) | Deterministic engine, one mechanism catalog, end-to-end synthetic run ([005a](../../phase2/ca-p2-005/ca-p2-005a.md)) | Further mechanisms; scoped symptom checks; evaluation evidence |
-| CA-P2-006 | Partial (006a–d) | Verify-on-read results, loopback read-only API with per-run grants, dashboard and Home ([006a](../../phase2/ca-p2-006/ca-p2-006a.md), [006b](../../phase2/ca-p2-006/ca-p2-006b.md), [006c](../../phase2/ca-p2-006/ca-p2-006c.md), [006d](../../phase2/ca-p2-006/ca-p2-006d.md)) | Export, retention, purge and tombstones, audit log, deletion and replay race tests, privacy and security review |
-| CA-P2-007 | Not started | The frozen prototype's self-evaluated scorer only; held-out kit on separate draft PR #14 | Independent truth custody, product scorer, A–E qualification |
-| CA-P2-008 | Not started | Synthesis is hard-coded as disabled | Everything |
-| CA-P2-009 | Not started | — | Everything |
-| CA-P2-010 | Not started | One scenario family (six synthetic variants) | Remaining corpus families, held-out freeze, performance protocol |
-| CA-P2-011 | Not started | — | Everything |
-| CA-P2-012 | Not started | — | Everything |
+| **CA-P2-001** | Partial | Inventory, SBOM, license and NOTICE records, offline supply-chain checks, SHA-pinned CI ([record](../../phase2/ca-p2-001/README.md)) | License reviewer (D7) and dispositions, advisory scanning (D6), build provenance; decisions D1–D11 open |
+| **CA-P2-002** | Implemented (provisional) | Contracts 002a–002d with vectors and tests | Architecture review of contracts and vectors; CA-DEC-003 |
+| **CA-P2-003** | Implemented (provisional) | Migrations 0001–0004, ten runtime roles, ingest and two-phase seal, real-PostgreSQL CI ([003b-1](../../phase2/ca-p2-003/ca-p2-003b-1.md)) | Database and security review; R4 (failed seal stays `sealing`); PostgreSQL 18.7 re-pin |
+| **CA-P2-004** | Not started | Source kinds exist only as contract labels | All collectors, RBAC manifest, negative mutation tests |
+| **CA-P2-005** | Partial (005a) | Deterministic engine, one mechanism catalog, end-to-end synthetic run ([005a](../../phase2/ca-p2-005/ca-p2-005a.md)) | Further mechanisms; scoped symptom checks; evaluation evidence |
+| **CA-P2-006** | Partial (006a–d) | Verify-on-read results, loopback read-only API with per-run grants, dashboard and Home ([006a](../../phase2/ca-p2-006/ca-p2-006a.md), [006b](../../phase2/ca-p2-006/ca-p2-006b.md), [006c](../../phase2/ca-p2-006/ca-p2-006c.md), [006d](../../phase2/ca-p2-006/ca-p2-006d.md)) | Export, retention, purge and tombstones, audit log, deletion and replay race tests, privacy and security review |
+| **CA-P2-007** | Not started | The frozen prototype's self-evaluated scorer only; held-out kit on separate draft PR #14 | Independent truth custody, product scorer, A–E qualification |
+| **CA-P2-008** | Not started | Synthesis is hard-coded as disabled | Everything |
+| **CA-P2-009** | Not started | — | Everything |
+| **CA-P2-010** | Not started | One scenario family (six synthetic variants) | Remaining corpus families, held-out freeze, performance protocol |
+| **CA-P2-011** | Not started | — | Everything |
+| **CA-P2-012** | Not started | — | Everything |
