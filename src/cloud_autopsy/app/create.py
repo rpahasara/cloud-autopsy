@@ -14,7 +14,9 @@ Two modes, one engine:
   that fails part-way is never presented as successful:
   - before sealing, it stays ``collecting``;
   - a failed seal leaves it unsealed (see R4);
-  - without a stored, verified result the API answers ``404 run_not_found``;
+  - without a stored, verified result the API answers ``404 run_not_found``; a failure after
+    storing (``verify_on_read``, ``compare_offline``) leaves a stored result that is still
+    verified on every read, but the creation is reported as failed;
   - no grant is ever issued for it.
 
 ``issue_private_grant`` accepts only ``DatabaseInvestigation`` objects, so a browser token is

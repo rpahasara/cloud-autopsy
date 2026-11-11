@@ -16,6 +16,7 @@ Exit status: 0 when every bundle succeeded; 1 when any bundle was refused or fai
 
 import argparse
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -81,23 +82,33 @@ def create_all(database, paths):
 
 
 def serve(database, investigations, grant_dir=None, port=0, ready=None):
-    """Issue a private grant for ``investigations`` and serve the read-only API until interrupted."""
+    """Issue a private grant for ``investigations`` and serve the read-only API until interrupted.
+
+    The token directory is removed when serving stops, however it stops, so the token never outlives
+    the server. With ``ready`` (tests), the caller owns the server and the token directory instead."""
     from ..api import server
     files = C.issue_private_grant(investigations, grant_dir)
-    connect = server.engine_connector(database.host, database.port, database.name, database.passwords["ca_engine"])
-    api = server.build(files.grants_path, connect, port=port)
-    sys.stderr.write(f"dashboard: http://127.0.0.1:{api.port}/  (read-only, synthetic data only)\n"
-                     f"token file (private, removed with the database at exit): {files.token_path}\n")
-    if ready:
-        ready(api, files)
-        return api, files
+    api = None
     try:
-        api.serve_forever()
-    except KeyboardInterrupt:
-        pass
+        connect = server.engine_connector(database.host, database.port, database.name, database.passwords["ca_engine"])
+        api = server.build(files.grants_path, connect, port=port)
+        sys.stderr.write(f"dashboard: http://127.0.0.1:{api.port}/  (read-only, synthetic data only)\n"
+                         f"token file (private, removed when the server stops): {files.token_path}\n")
+        if ready:
+            ready(api, files)
+            return api, files
+        try:
+            api.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        return api, files
     finally:
-        api.server_close()
-    return api, files
+        if not ready:
+            if api is not None:
+                api.server_close()
+            shutil.rmtree(files.directory, ignore_errors=True)
+            if files.directory.exists():
+                sys.stderr.write(f"warning: could not remove the token directory {files.directory}; delete it by hand\n")
 
 
 def main(argv=None, database_factory=None):

@@ -3,6 +3,7 @@
 No database and no network. The database path is tested in tests/integration/test_bundles.py.
 """
 
+import contextlib
 import hashlib
 import importlib.util
 import io
@@ -333,6 +334,58 @@ class CliTests(Workspace):
         self.assertEqual(code, 1)
         row = json.loads(out.getvalue())[0]
         self.assertEqual((row["status"], row["stage"], row["reason"], row["run_id"]), ("failed", "register", "RuntimeError", None))
+
+    def test_serving_removes_the_token_directory_when_it_stops(self):
+        """The CLI promises the token file is removed at exit: it must not outlive the server."""
+        import types
+        from unittest import mock
+
+        import cloud_autopsy.api as api_package
+        # A stand-in for the real server module (which needs the database driver), so this runs offline.
+        server = types.ModuleType("cloud_autopsy.api.server")
+        server.engine_connector = lambda *a: None
+        patched = (mock.patch.dict(sys.modules, {"cloud_autopsy.api.server": server}),
+                   mock.patch.object(api_package, "server", server, create=True))
+
+        class Db:
+            host, port, name, passwords = "127.0.0.1", 1, "x", {"ca_engine": "x"}
+
+        class Api:
+            port = 0
+            closed = False
+
+            def __init__(self, behaviour):
+                self.behaviour = behaviour
+
+            def serve_forever(self):
+                raise self.behaviour()
+
+            def server_close(self):
+                self.closed = True
+
+        inv = C.DatabaseInvestigation("b", "0" * 64, "2b099131-bb6b-5ccf-a811-8d092a7ae1a4", "d", "r", b"{}")
+        issued, real_issue = [], C.issue_private_grant
+
+        def issue(*a, **k):
+            issued.append(real_issue(*a, **k))
+            return issued[-1]
+
+        for behaviour, grant_dir in ((KeyboardInterrupt, self.tmp / "chosen"), (KeyboardInterrupt, None),
+                                     (OSError, self.tmp / "failing")):
+            with self.subTest(behaviour=behaviour.__name__, chosen=grant_dir is not None):
+                api = Api(behaviour)
+                C.issue_private_grant, server.build = issue, lambda *a, **k: api
+                try:
+                    with patched[0], patched[1], redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                        if behaviour is KeyboardInterrupt:
+                            create_cli.serve(Db(), [inv], grant_dir, 0)
+                        else:
+                            with self.assertRaises(OSError):
+                                create_cli.serve(Db(), [inv], grant_dir, 0)
+                finally:
+                    C.issue_private_grant = real_issue
+                self.assertTrue(api.closed)
+                self.assertFalse(issued[-1].directory.exists(), "the token directory outlived the server")
 
 
 class GrantTests(Workspace):
