@@ -1023,6 +1023,30 @@ class HomeBrowserTests(unittest.TestCase):
         b.js("document.querySelector('#home [data-filter=resolved]').click(); 1"); time.sleep(0.3)
         self.assertTrue(b.js("[...document.querySelectorAll('.inv-row[data-run]')].every(r => r.classList.contains('is-resolved'))"))
 
+    def test_inspector_always_renders_its_content_after_card_and_run_changes(self):
+        """QA-04: the inspector never animates `visibility` (which left its content stale-hidden in Chromium, so a
+        map marker opened a blank inspector), and after collapse / Home / another run, a marker shows its entity."""
+        b = self.b
+        b.js("window.__visAnims = []; const A = Element.prototype.animate; Element.prototype.animate = function (k, o) {"
+             " if (this.id === 'inspector' && JSON.stringify(k).includes('visibility')) window.__visAnims.push(JSON.stringify(k)); return A.call(this, k, o); }; 1")
+        rendered = ("(() => { const c = document.querySelector('#insp-content'); return {vis: getComputedStyle(c).visibility,"
+                    " text: c.innerText.trim().length, focus: document.querySelector('#stage').dataset.focus || null}; })()")
+        for plan in ("ca-scenario-001-config-cause", "ca-scenario-001-configmap-unavailable", "ca-scenario-001-clock-unknown"):
+            self.open_run_from_investigations(plan)
+            b.js("document.querySelector('[data-card=hero] .marker').click(); 1"); b.wait_for(SETTLED)
+            got = b.js(rendered)
+            with self.subTest(plan=plan, step="marker"):
+                self.assertEqual((got["focus"], got["vis"]), ("hero", "visible"))
+                self.assertGreater(got["text"], 0, "inspector opened blank")
+            b.js("document.querySelector('#insp-close').click(); 1"); b.wait_for(SETTLED)
+            b.js("document.querySelector('[data-card=gaps] .expand').click(); 1"); b.wait_for(SETTLED)
+            for t in ("keyDown", "keyUp"):
+                b.call("Input.dispatchKeyEvent", type=t, key="Escape", code="Escape", windowsVirtualKeyCode=27)
+            b.wait_for("!document.querySelector('#stage').dataset.focus"); b.wait_for(SETTLED)
+            self.assertFalse(b.js("document.querySelector('#inspector').classList.contains('is-leaving')"))
+            b.js("document.querySelector('[data-view=home]').click(); 1"); b.wait_for(self.PAGES_SETTLED)
+        self.assertEqual(b.js("window.__visAnims"), [], "the inspector's animations must not animate visibility")
+
     def test_home_fits_small_screens(self):
         for width in (390, 768, 1024):
             with self.subTest(width=width):

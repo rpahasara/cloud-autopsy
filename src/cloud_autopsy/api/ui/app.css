@@ -537,6 +537,11 @@ button.tick:hover { transform: translateY(-50%) scale(1.12); box-shadow: 0 6px 1
   box-shadow: var(--shadow-card), 0 30px 60px -36px rgba(40, 36, 20, 0.4); opacity: 0; visibility: hidden; pointer-events: none; overflow: hidden;
 }
 .stage[data-focus] .inspector { opacity: 1; visibility: visible; pointer-events: auto; }
+.inspector.is-leaving { visibility: visible; }
+/* The content's visibility is matched by its own selectors, not only inherited: Chromium could leave
+   the inherited value stale after a focus change, opening an inspector with a blank body (QA-04). */
+.insp-content { visibility: hidden; }
+.stage[data-focus] .insp-content, .inspector.is-leaving .insp-content { visibility: visible; }
 .insp-head { display: flex; align-items: center; gap: 8px; padding: 14px 14px 4px 20px; }
 .insp-eyebrow { flex: 1; font-size: 12px; color: var(--muted); }
 #insp-back:not([hidden]) + .insp-eyebrow { margin-left: -6px; }

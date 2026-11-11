@@ -221,6 +221,7 @@ function clearSession() {
   if (state.topo) { state.topo.destroy(); state.topo = null; }
   delete stage.dataset.focus; delete stage.dataset.error; delete stage.dataset.pending;
   stage.style.gridTemplateRows = "";
+  inspector.classList.remove("is-leaving");
   stage.classList.remove("is-loading");
   for (const c of Object.values(cards)) c.toggleAttribute("data-focused", false);
   for (const l of stage.querySelectorAll(".layer")) { clear(l); l.style.width = ""; l.style.height = ""; }
@@ -556,6 +557,7 @@ function setView(view, { quiet = false } = {}) {
   const inspOpacity = Number(getComputedStyle(inspector).opacity);
   const layers = [...stage.querySelectorAll(".layer")];
   cancelAll([...all, inspector, ...layers, inspBody]);
+  inspector.classList.remove("is-leaving");
   for (const c of all) c.classList.remove("is-morphing", "is-lifted");
   for (const l of layers) { l.style.width = ""; l.style.height = ""; }
 
@@ -608,11 +610,13 @@ function setView(view, { quiet = false } = {}) {
   }
   const off = narrow() ? "translateY(36px)" : "translateX(calc(100% + 28px))";
   if (next && !prev) {
-    anims.push(animate(inspector, [{ transform: off, opacity: inspOpacity, visibility: "visible" }, { transform: "none", opacity: 1, visibility: "visible" }],
-                       { spring: "panel", delay: 60 }));
+    anims.push(animate(inspector, [{ transform: off, opacity: inspOpacity }, { transform: "none", opacity: 1 }], { spring: "panel", delay: 60 }));
   } else if (!next && prev) {
-    anims.push(animate(inspector, [{ transform: "none", opacity: inspOpacity, visibility: "visible" }, { transform: off, opacity: 0, visibility: "visible" }],
-                       { spring: "recede" }));
+    // The inspector stays visible while it leaves through a class, not an animated `visibility`:
+    // animating an inherited property here left its content's computed visibility stale in
+    // Chromium (an inspector that opened blank, QA-04).
+    inspector.classList.add("is-leaving");
+    anims.push(animate(inspector, [{ transform: "none", opacity: inspOpacity }, { transform: off, opacity: 0 }], { spring: "recede" }));
   }
   finished(anims, 1400).then(() => { if (id === state.transition) afterTransition(next); });
   if (state.topo) trackMarkers(anims);
@@ -645,6 +649,7 @@ function trackMarkers(anims) {
 
 function afterTransition(next) {
   stage.style.gridTemplateRows = "";
+  inspector.classList.remove("is-leaving");
   for (const c of CARD_IDS.map((x) => cards[x])) c.classList.remove("is-morphing", "is-lifted");
   for (const l of stage.querySelectorAll(".layer")) {
     l.style.width = ""; l.style.height = "";
