@@ -85,6 +85,8 @@ def make_private_dir(path=None, prefix="ca-private-"):
         directory = Path(tempfile.mkdtemp(prefix=prefix))  # 0700 on POSIX
     else:
         directory = Path(os.path.abspath(path))
+        if _inside_git_tree(directory):  # refused before anything is created
+            raise PrivateDirError("secrets must be written outside any Git working tree")
         directory.mkdir(mode=0o700, parents=False, exist_ok=False)
     try:
         if _inside_git_tree(directory):
