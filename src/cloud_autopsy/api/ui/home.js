@@ -190,7 +190,7 @@ export function createHome(env) {
     ];
   }
 
-  function trendCard(f, W = 640, H = 200) {
+  function trendCard(f, W = 640, H = 200, grow = true) {
     const dated = f.results.filter((i) => startOf(i) !== null);
     const keyOf = (ms) => {
       const d = new Date(ms);
@@ -223,7 +223,7 @@ export function createHome(env) {
       for (const [kind, n, base] of segs) {
         if (!n) continue;
         const rect = s("rect", { x: cx - bw / 2, y: y(base + n), width: bw, height: y(base) - y(base + n), rx: Math.min(10, bw / 2), class: `tr-bar is-${kind}` });
-        if (!prefersReducedMotion()) animate(rect, [{ transform: "scaleY(0)" }, { transform: "scaleY(1)" }], { spring: "layout", delay: 80 + 60 * idx });
+        if (grow && !prefersReducedMotion()) animate(rect, [{ transform: "scaleY(0)" }, { transform: "scaleY(1)" }], { spring: "layout", delay: 80 + 60 * idx });
         g.append(rect);
       }
       g.append(s("text", { x: cx, y: H - 8, class: "tr-axis", "text-anchor": "middle" }, st.bucket === "day" ? fmtDate(b.k).replace(/ \d{4}$/, "") : `wk ${fmtDate(b.k).replace(/ \d{4}$/, "")}`));
@@ -365,13 +365,13 @@ export function createHome(env) {
     cancelAnimationFrame(trendFrame);
     trendFrame = requestAnimationFrame(() => {
       const box = cards.trend.querySelector(".trend-plot");
-      if (box && box.clientWidth > 40 && `${box.clientWidth}x${box.clientHeight}` !== trendSize) fill("trend");
+      if (box && box.clientWidth > 40 && `${box.clientWidth}x${box.clientHeight}` !== trendSize) fill("trend", { resized: true });
     });
   }).observe(cards.trend);
 
   // ---------------------------------------------------------------- render
 
-  function fill(id, { both = false } = {}) {
+  function fill(id, { both = false, resized = false } = {}) {
     const f = figures();
     const c = cards[id];
     if (id === "hero") replace(c, heroCard(f));
@@ -386,7 +386,7 @@ export function createHome(env) {
     else if (id === "trend") {
       const box = c.querySelector(".trend-plot");
       const size = box && box.clientWidth > 40 ? [box.clientWidth, box.clientHeight] : [640, 200];
-      replace(c, trendCard(f, size[0], Math.max(60, size[1])));
+      replace(c, trendCard(f, size[0], Math.max(60, size[1]), !resized));  // a size-only redraw never replays the bars' growth
       trendSize = size.join("x");
     }
     else if (id === "band") {
@@ -422,6 +422,9 @@ export function createHome(env) {
     const shown = (sel) => { const l = cards.band.querySelector(sel), cs = l && getComputedStyle(l);
                              return cs && cs.display !== "none" ? Number(cs.opacity) : 0; };
     const from = { compact: shown(".h-compact"), expanded: shown(".h-expanded") };
+    // The grid's resting rows. While the band morphs they are pinned, so its animated size never
+    // re-flows the white cards (which would resize them, redraw the chart and snap at the end).
+    let rows = root.style.gridTemplateRows || (next ? getComputedStyle(root).gridTemplateRows : "");
     cancelAll(all);
     clearMorph();  // an interrupted morph never leaves its in-flight state behind
     if (next) root.dataset.focus = next; else delete root.dataset.focus;
@@ -430,6 +433,7 @@ export function createHome(env) {
     const band = cards.band;
     const last = new Map(all.map((c) => [c, rectIn(c, root)]));
     if (quiet || prefersReducedMotion()) { fill("band"); return; }  // lands directly, never through a dimmed frame
+    root.style.gridTemplateRows = rows || getComputedStyle(root).gridTemplateRows;
     const anims = [];
     const f0 = first.get(band).r, l0 = last.get(band);
     band.classList.add("is-lifted", "is-morphing");
@@ -466,6 +470,7 @@ export function createHome(env) {
 
   function clearMorph() {
     const band = cards.band;
+    root.style.gridTemplateRows = "";
     band.classList.remove("is-lifted", "is-morphing");
     for (const l of band.querySelectorAll(".h-layer")) { l.style.width = ""; l.style.height = ""; for (const a of l.getAnimations()) a.cancel(); }
   }

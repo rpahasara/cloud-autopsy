@@ -635,6 +635,12 @@ class HomeBrowserTests(unittest.TestCase):
             # the band swaps its content directly: no fade through a dimmed or empty band
             self.assertEqual(b.js("[...document.querySelectorAll('.h-layer')].flatMap(l => l.getAnimations()).length"), 0)
             self.assertEqual(b.js(self.BAND_STATE)["x"], 1)
+            b.js("document.querySelector('[data-view=home]').click(); 1")
+            cards = b.js(self.CARDS_STATE)
+            self.assertEqual([cards[k]["o"] for k in self.WHITE], [1] * len(self.WHITE))
+            self.assertEqual(b.js("[...document.querySelectorAll('.h-card')].flatMap(c => c.getAnimations()).length"), 0)
+            b.js("document.querySelector('[data-view=investigations]').click(); 1")
+            b.wait_for("document.querySelector('#home').dataset.focus === 'band'")
             b.js("document.querySelector('.inv-row[data-run]').click(); 1")
             b.wait_for("document.querySelector('#app').dataset.page === 'run' && document.querySelector('.outcome-word')", 20)
             b.js("document.querySelector('[data-view=home]').click(); 1")
@@ -698,6 +704,97 @@ class HomeBrowserTests(unittest.TestCase):
             self.assertEqual(b.js("document.querySelector('.h-compact [data-keep]') ? 1 : 0"), 1,
                              "the compact layer was rebuilt at the end of the morph")
         self.assertEqual(b.console_errors(), [])
+
+    # ---- PR #26 review: the white cards around the band morph
+
+    WHITE = ("hero", "granted", "resolved", "abstained", "attention", "trend")
+    CARDS_STATE = ("(() => { const out = {}; for (const id of %s) { const c = document.querySelector('.h-' + id), cs = getComputedStyle(c);"
+                   "out[id] = {o: cs.visibility === 'hidden' ? 0 : Number(cs.opacity), x: c.offsetLeft, y: c.offsetTop,"
+                   "w: c.offsetWidth, h: c.offsetHeight, grow: [...c.querySelectorAll('.tr-bar')].flatMap(e => e.getAnimations()).length}; }"
+                   "return out; })()") % json.dumps(WHITE)
+
+    def step_cards(self, trigger, until=900, finish=True):
+        b = self.b
+        b.js("window.__st = window.__st || window.setTimeout; window.setTimeout = (f, ms) => window.__st(f, ms > 300 ? 1e8 : ms); 1")
+        b.js(f"{trigger}; window.__anims = document.getAnimations().filter(a => isFinite(a.effect.getComputedTiming().endTime));"
+             " window.__anims.forEach(a => a.pause()); 1")
+        frames = []
+        for t in range(0, until, 30):
+            b.js(f"window.__anims.forEach(a => {{ a.currentTime = {t}; }}); 1")
+            frames.append((t, b.js(self.CARDS_STATE)))
+        if finish:
+            b.js("window.__anims.forEach(a => a.finish()); window.setTimeout = window.__st; 1")
+            b.wait_for(HOME_SETTLED, 10)
+        return frames
+
+    def assert_cards_steady(self, frames, rest, label):
+        """While a white card is visible its layout box never changes (only its transform moves), its
+        chart never replays, and its opacity moves continuously, never snapping hidden <-> shown."""
+        for id_ in self.WHITE:
+            prev = None
+            for t, f in frames:
+                c = f[id_]
+                with self.subTest(phase=label, card=id_, t=t):
+                    if c["o"] > 0.02:
+                        self.assertEqual((c["x"], c["y"], c["w"], c["h"]), (rest[id_]["x"], rest[id_]["y"], rest[id_]["w"], rest[id_]["h"]),
+                                         "a visible card changed size or place in the grid mid-transition")
+                        self.assertEqual(c["grow"], 0, "the chart was rebuilt and replayed its growth mid-transition")
+                    if prev is not None:
+                        self.assertLessEqual(abs(c["o"] - prev), 0.35, f"opacity jumped {prev:.2f} -> {c['o']:.2f}")
+                prev = c["o"]
+
+    def assert_cards_at_rest(self, rest):
+        b = self.b
+        now = b.js(self.CARDS_STATE)
+        for id_ in self.WHITE:
+            with self.subTest(card=id_, check="rest"):
+                self.assertEqual({k: now[id_][k] for k in "oxywh"}, {k: rest[id_][k] for k in "oxywh"})
+        self.assertEqual(b.js("[...document.querySelectorAll('.h-card')].map(c => c.style.cssText + (c.getAnimations().length || '')).join('')"
+                              " + document.querySelector('.home').style.cssText"), "", "stale inline styles or animations")
+
+    def test_white_cards_hold_their_layout_through_band_morphs(self):
+        b = self.b
+        for w, h, dpr in ((1440, 900, 1), (1152, 720, 1.25)):
+            b.call("Emulation.setDeviceMetricsOverride", width=w, height=h, deviceScaleFactor=dpr, mobile=False)
+            time.sleep(0.6)
+            b.wait_for(HOME_SETTLED, 10)
+            rest = b.js(self.CARDS_STATE)
+            for round_ in range(2):
+                tag = f"{w}x{h}@{dpr} #{round_}"
+                self.assert_cards_steady(self.step_cards("document.querySelector('.band-notch').click()"), rest, f"expand {tag}")
+                # back to Home through the tab (Investigations -> Home)
+                self.assert_cards_steady(self.step_cards("document.querySelector('[data-view=home]').click()"), rest, f"collapse {tag}")
+                self.assert_cards_at_rest(rest)
+        self.assertEqual(b.console_errors(), [])
+
+    def test_white_cards_recover_from_reversals_tab_switches_and_resizes(self):
+        b = self.b
+        rest = b.js(self.CARDS_STATE)
+        # reverse a collapse midway, then collapse again from the partly expanded state
+        b.js("document.querySelector('.band-notch').click(); 1")
+        b.wait_for(HOME_SETTLED, 10)
+        self.step_cards("document.querySelector('.band-notch').click()", until=150, finish=False)
+        frames = self.step_cards("document.querySelector('.band-notch').click(); document.querySelector('.band-notch').click()")
+        self.assert_cards_steady(frames, rest, "reversed twice")
+        self.assert_cards_at_rest(rest)
+        # rapid tab switching with a resize in the middle settles exactly at the new size's rest layout
+        for js in ("[data-view=investigations]", "[data-view=home]", "[data-view=investigations]", ".band-notch", "[data-view=investigations]"):
+            b.js(f"document.querySelector('{js}').click(); 1")
+            time.sleep(0.06)
+        b.call("Emulation.setDeviceMetricsOverride", width=1366, height=768, deviceScaleFactor=1, mobile=False)
+        time.sleep(0.05)
+        b.js("document.querySelector('[data-view=home]').click(); 1")
+        b.wait_for(HOME_SETTLED, 10)
+        time.sleep(1.4)
+        b.wait_for(HOME_SETTLED, 10)
+        settled = b.js(self.CARDS_STATE)
+        b.navigate(self.url)  # a fresh load at this size is the reference layout
+        b.js(f"document.querySelector('#token').value = {json.dumps(self.token)}; document.querySelector('#connect-form').requestSubmit(); 1")
+        b.wait_for("document.querySelector('#app').dataset.page === 'home' && document.querySelector('#connect').hidden", 20)
+        b.wait_for(HOME_SETTLED, 10)
+        time.sleep(0.6)
+        self.assertEqual({k: {m: v[m] for m in "oxywh"} for k, v in settled.items()},
+                         {k: {m: v[m] for m in "oxywh"} for k, v in b.js(self.CARDS_STATE).items()})
 
     def test_interrupted_band_morph_reverses_from_where_it_is(self):
         b = self.b
