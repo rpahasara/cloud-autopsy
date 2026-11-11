@@ -87,7 +87,7 @@ small { font-size: 0.86em; }
 #rail-overview { background: #fff; color: var(--ink); box-shadow: var(--shadow-float); }
 .rail-lock { margin-top: auto; background: #fff; box-shadow: var(--shadow-float); color: var(--ink); }
 
-.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 20px 26px 24px 4px; }
+.main { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 20px 26px 24px 4px; }
 
 .topbar { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 46px; }
 .nav { position: relative; display: flex; gap: 2px; padding: 3px; overflow-x: auto; scrollbar-width: none; }
@@ -552,20 +552,20 @@ button.tick:hover { transform: translateY(-50%) scale(1.12); box-shadow: 0 6px 1
    gloss on a transparent track. Browsers without ::-webkit-scrollbar (Firefox) get the thin
    standard scrollbar in the same colours; Chromium ignores the ::-webkit rules when the standard
    properties are set, so those are applied only where the pseudo-elements are unsupported. */
-:is(.insp-content, .layer-expanded, .run-list, .field textarea)::-webkit-scrollbar { width: 4px; height: 4px; }
-:is(.insp-content, .layer-expanded, .run-list, .field textarea)::-webkit-scrollbar-track { background: transparent; }
-:is(.insp-content, .layer-expanded, .run-list, .field textarea)::-webkit-scrollbar-corner { background: transparent; }
-:is(.insp-content, .layer-expanded, .run-list, .field textarea)::-webkit-scrollbar-thumb {
+:is(.insp-content, .layer-expanded, .run-list, .field textarea, .main)::-webkit-scrollbar { width: 4px; height: 4px; }
+:is(.insp-content, .layer-expanded, .run-list, .field textarea, .main)::-webkit-scrollbar-track { background: transparent; }
+:is(.insp-content, .layer-expanded, .run-list, .field textarea, .main)::-webkit-scrollbar-corner { background: transparent; }
+:is(.insp-content, .layer-expanded, .run-list, .field textarea, .main)::-webkit-scrollbar-thumb {
   border-radius: 999px;
   background: linear-gradient(90deg, rgba(150, 146, 132, 0.30), rgba(128, 132, 116, 0.36));
   box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.45);
 }
-:is(.insp-content, .layer-expanded, .run-list, .field textarea):hover::-webkit-scrollbar-thumb {
+:is(.insp-content, .layer-expanded, .run-list, .field textarea, .main):hover::-webkit-scrollbar-thumb {
   background: linear-gradient(90deg, rgba(132, 128, 114, 0.46), rgba(110, 118, 98, 0.52));
 }
-:is(.insp-content, .layer-expanded, .run-list, .field textarea)::-webkit-scrollbar-thumb:active { background: rgba(100, 106, 88, 0.6); }
+:is(.insp-content, .layer-expanded, .run-list, .field textarea, .main)::-webkit-scrollbar-thumb:active { background: rgba(100, 106, 88, 0.6); }
 @supports not selector(::-webkit-scrollbar) {
-  .insp-content, .layer-expanded, .run-list, .field textarea { scrollbar-width: thin; scrollbar-color: rgba(138, 136, 122, 0.4) transparent; }
+  .insp-content, .layer-expanded, .run-list, .field textarea, .main { scrollbar-width: thin; scrollbar-color: rgba(138, 136, 122, 0.4) transparent; }
 }
 .insp-body { display: flex; flex-direction: column; }
 .eyebrow { margin: 6px 0 2px; font-size: 11.5px; color: var(--muted); letter-spacing: 0.01em; }
@@ -619,6 +619,7 @@ button.insp-row:active { transform: scale(0.99); }
 .state-card .reason { color: var(--muted); font-size: 12px; }
 .state-actions { display: flex; justify-content: center; gap: 10px; margin-top: 20px; }
 
+.stage[data-pending] .card > .layer, .stage[data-pending] .card > .expand { opacity: 0; }
 .stage.is-loading .card::after {
   content: ""; position: absolute; inset: 0; z-index: 3; pointer-events: none;
   background: linear-gradient(105deg, transparent 30%, rgba(255, 255, 255, 0.7) 50%, transparent 70%) 0 0 / 220% 100%;
@@ -740,6 +741,7 @@ button.insp-row:active { transform: scale(0.99); }
   --on-dark-3: rgba(255, 255, 255, 0.34);
   --glass: rgba(255, 255, 255, 0.55);
   --glass-edge: rgba(255, 255, 255, 0.78);
+  --muted-strong: #6f6e67;
 }
 
 @media (max-width: 1599px) { .org, .nav .soon { display: none; } }
@@ -750,7 +752,7 @@ button.insp-row:active { transform: scale(0.99); }
 .home {
   position: relative; flex: 1 1 auto; min-height: 0; display: grid; gap: var(--gap);
   grid-template-columns: minmax(0, 1.16fr) minmax(0, 1fr) minmax(0, 1fr);
-  grid-template-rows: minmax(94px, 0.66fr) minmax(94px, 0.66fr) minmax(170px, 1.32fr) minmax(234px, 1.6fr);
+  grid-template-rows: minmax(max-content, 0.66fr) minmax(max-content, 0.66fr) minmax(150px, 1.32fr) minmax(max-content, 1.6fr);
   grid-template-areas: "hero granted resolved" "hero abstained attention" "hero trend trend" "band band band";
 }
 .h-hero { grid-area: hero; }
@@ -769,6 +771,13 @@ button.insp-row:active { transform: scale(0.99); }
 }
 .h-card:not(.h-hero):not(.h-band) { display: flex; flex-direction: column; padding: 16px 20px 14px; }
 .h-card:not(.h-band):hover { box-shadow: var(--shadow-card), 0 26px 50px -30px rgba(48, 44, 24, 0.3); }
+/* Home fills the window; its rows never shrink below their content. When the viewport is shorter
+   than that, the window's content area scrolls (slim scrollbar) instead of clipping the cards. */
+@media (min-width: 1180px) {
+  #app.window[data-page="home"] .main { overflow-x: hidden; overflow-y: auto; }
+  #app.window[data-page="home"] .home { flex: 1 1 0; min-height: 660px; }
+}
+.h-band { min-height: 224px; }
 .home[data-focus] .h-card:not([data-focused]) { opacity: 0; visibility: hidden; pointer-events: none; }
 .home[data-focus="band"] .h-band { grid-area: 1 / 1 / 5 / 4; }
 .h-card.is-lifted { z-index: 6; }
@@ -776,7 +785,7 @@ button.insp-row:active { transform: scale(0.99); }
 /* metric cards */
 .m-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .m-head h3 { margin: 0; font-size: 13.5px; font-weight: 540; letter-spacing: -0.005em; }
-.m-sub { margin: 2px 0 0; font-size: 11.5px; color: var(--muted); }
+.m-sub { margin: 2px 0 0; font-size: 11.5px; color: var(--muted-strong); }
 .m-chip { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px; font-size: 11px; font-weight: 600; white-space: nowrap;
           background: #141414; color: #fff; box-shadow: 0 6px 12px -8px rgba(0, 0, 0, 0.6); }
 .m-chip.is-resolved { background: linear-gradient(140deg, #7f9a6b, #a3b68d); }
@@ -784,7 +793,7 @@ button.insp-row:active { transform: scale(0.99); }
 .m-chip.is-attention { background: var(--rose-bg); color: var(--rose); box-shadow: none; }
 .m-body { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-top: auto; }
 .m-value { margin: 0; font-size: clamp(32px, 2.8vw, 42px); font-weight: 300; letter-spacing: -0.045em; line-height: 0.95; }
-.m-foot { margin: 6px 0 0; font-size: 11.5px; color: var(--muted); }
+.m-foot { margin: 6px 0 0; font-size: 11.5px; color: var(--muted-strong); }
 .dot-strip { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; max-width: 58%; padding-bottom: 6px; }
 .dot-run { width: 8px; height: 8px; border-radius: 50%; background: #e6e4de; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.03); }
 .dot-run.is-resolved { background: linear-gradient(140deg, #7f9a6b, #a3b68d); }
@@ -809,7 +818,7 @@ button.insp-row:active { transform: scale(0.99); }
 .gauge-fill { fill: none; stroke: url(#ca-gauge); stroke-width: 7; stroke-linecap: round; }
 .gauge-value { margin: 2px 0 0; font-size: 24px; font-weight: 400; letter-spacing: -0.035em; }
 .gauge-value small { font-size: 12px; color: var(--muted); letter-spacing: 0; margin-left: 1px; }
-.gauge-sub { margin: 0; font-size: 11px; color: var(--muted); }
+.gauge-sub { margin: 0; font-size: 11px; color: var(--muted-strong); }
 .gauge.is-line .lg-track { position: relative; height: 4px; margin: 26px 0 20px; border-radius: 999px; background: rgba(255, 255, 255, 0.85); }
 .lg-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px; background: linear-gradient(90deg, #cfcbc0, #141414); }
 .lg-marker { position: absolute; top: 50%; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: #141414;
@@ -828,7 +837,7 @@ button.insp-row:active { transform: scale(0.99); }
               box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 0 0 1px rgba(255, 255, 255, 0.6), 0 16px 30px -22px rgba(40, 36, 20, 0.4); }
 .hero-col p { margin: 0 0 8px; font-size: 12px; color: var(--ink-2); }
 .hero-col b { font-size: 16px; font-weight: 600; color: var(--ink); margin-left: 2px; }
-.hero-col small { display: block; margin-top: 5px; font-size: 10.5px; color: var(--faint); }
+.hero-col small { display: block; margin-top: 5px; font-size: 10.5px; color: var(--muted); }
 .barcode { display: flex; align-items: flex-end; gap: 3px; height: 30px; }
 .barcode span { width: 4px; border-radius: 2px; background: #2a2a2a; }
 .barcode .is-resolved { background: linear-gradient(180deg, #a3b68d, #6f8b5d); }

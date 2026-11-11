@@ -496,6 +496,156 @@ class HomeBrowserTests(unittest.TestCase):
             self.assertAlmostEqual(a, c, delta=0.5)
         self.assertEqual(b.js("[...document.querySelectorAll('.h-layer')].filter(l => l.style.width || l.getAnimations().length).length"), 0)
 
+    # ---- PR #26 polish: page transitions, content visibility
+
+    PAGE_STATE = ("(() => { const home = document.querySelector('#home'), stage = document.querySelector('#stage');"
+                  "const op = e => e.hidden ? 0 : Number(getComputedStyle(e).opacity);"
+                  "return {page: document.querySelector('#app').dataset.page, focus: home.dataset.focus || null,"
+                  "home: op(home), stage: op(stage), pending: stage.hasAttribute('data-pending'),"
+                  "title: document.querySelector('#run-title').textContent}; })()")
+    PAGES_SETTLED = (HOME_SETTLED + " && [document.querySelector('#home'), document.querySelector('#stage')]"
+                     ".every(e => e.getAnimations().length === 0 && !e.style.position)")
+
+    def step_page_change(self, trigger):
+        """Step a page change with its animations paused (timers above 300 ms deferred); return per-frame states."""
+        b = self.b
+        b.js("window.__st = window.__st || window.setTimeout; window.setTimeout = (f, ms) => window.__st(f, ms > 300 ? 1e8 : ms); 1")
+        b.js(f"{trigger}; window.__anims = document.getAnimations().filter(a => isFinite(a.effect.getComputedTiming().endTime));"
+             "window.__anims.forEach(a => a.pause()); 1")
+        frames = []
+        for t in range(0, 900, 30):
+            b.js(f"window.__anims.forEach(a => {{ a.currentTime = {t}; }}); 1")
+            frames.append((t, b.js(self.PAGE_STATE)))
+        b.js("window.__anims.forEach(a => a.finish()); window.setTimeout = window.__st; 1")
+        b.wait_for(self.PAGES_SETTLED, 10)
+        return frames
+
+    def click(self, selector):
+        rect = self.b.js(f"(() => {{ const e = document.querySelector({json.dumps(selector)}); e.scrollIntoView({{block: 'center'}});"
+                         "const r = e.getBoundingClientRect(); return [r.left + r.width / 2, r.top + Math.min(r.height / 2, 40)]; })()")
+        for kind in ("mouseMoved", "mousePressed", "mouseReleased"):
+            self.b.call("Input.dispatchMouseEvent", type=kind, x=rect[0], y=rect[1], button="left", clickCount=1)
+
+    def open_run_from_investigations(self, plan):
+        b = self.b
+        b.js("document.querySelector('[data-view=investigations]').click(); 1")
+        b.wait_for("document.querySelector('#home').dataset.focus === 'band'")
+        b.wait_for(self.PAGES_SETTLED)
+        run = next(i for i in self.summaries["items"] if i.get("plan_id") == plan)["run_id"]
+        b.js(f"document.querySelector('.inv-row[data-run=\"{run}\"]').click(); 1")
+        b.wait_for(f"document.querySelector('#run-title').textContent === {json.dumps(plan)} && document.querySelector('.outcome-word')", 20)
+        b.wait_for(self.PAGES_SETTLED)
+        b.wait_for(SETTLED)
+        return run
+
+    def assert_direct(self, frames, page, focus):
+        for t, f in frames:
+            with self.subTest(t=t):
+                self.assertEqual(f["page"], page)
+                if page == "home":
+                    self.assertEqual(f["focus"], focus, "Home revealed in a different view than requested")
+                self.assertGreater(max(f["home"], f["stage"]), 0.6 if 120 <= t <= 600 else 0.0,
+                                   "both pages nearly invisible: a blank frame")
+
+    def test_detail_to_home_goes_straight_to_the_overview(self):
+        self.open_run_from_investigations("ca-scenario-001-config-cause")
+        self.click('[data-view="overview"]')
+        frames = self.step_page_change("document.querySelector('[data-view=home]').click()")
+        self.assert_direct(frames, "home", None)
+        final = self.b.js(self.PAGE_STATE)
+        self.assertEqual((final["page"], final["focus"], final["home"], final["stage"]), ("home", None, 1, 0))
+        self.assertEqual(self.text("#nav .is-on"), "Home")
+
+    def test_detail_to_investigations_goes_straight_to_the_table(self):
+        self.open_run_from_investigations("ca-scenario-001-no-symptom")
+        frames = self.step_page_change("document.querySelector('[data-view=investigations]').click()")
+        self.assert_direct(frames, "home", "band")
+        self.assertEqual(self.text("#nav .is-on"), "Investigations")
+        self.assertTrue(self.b.js("document.querySelectorAll('.inv-row[data-run]').length > 0"))
+
+    def test_switching_cases_never_shows_the_previous_case(self):
+        b = self.b
+        self.open_run_from_investigations("ca-scenario-001-config-cause")
+        b.js("document.querySelector('[data-view=home]').click(); 1")
+        b.wait_for(self.PAGES_SETTLED)
+        other = next(i for i in self.summaries["items"] if i.get("plan_id") == "ca-scenario-001-symptom-before-change")["run_id"]
+        b.js("document.querySelector('[data-view=investigations]').click(); 1")
+        b.wait_for(self.PAGES_SETTLED)
+        frames = self.step_page_change(f"document.querySelector('.inv-row[data-run=\"{other}\"]').click()")
+        for t, f in frames:
+            with self.subTest(t=t):
+                self.assertEqual(f["page"], "run")
+                if f["stage"] > 0.05:  # whenever the workspace is visible, it is the new case or a neutral skeleton
+                    self.assertTrue(f["pending"] or f["title"] == "ca-scenario-001-symptom-before-change",
+                                    f"previous case shown while opening another: {f['title']}")
+        b.wait_for("document.querySelector('#run-title').textContent === 'ca-scenario-001-symptom-before-change'", 20)
+        b.wait_for("!document.querySelector('#stage').hasAttribute('data-pending')")
+
+    def test_rapid_navigation_and_resizing_settle_consistently(self):
+        b = self.b
+        run = self.open_run_from_investigations("ca-scenario-001-clock-unknown")
+        for js in ("document.querySelector('[data-view=home]').click()", "document.querySelector('[data-view=investigations]').click()",
+                   f"document.querySelector('.inv-row[data-run=\"{run}\"]')?.click()", "document.querySelector('[data-view=home]').click()",
+                   "document.querySelector('[data-view=timeline]').click()", "document.querySelector('[data-view=home]').click()"):
+            b.js(f"{js}; 1")
+            time.sleep(0.07)
+        b.call("Emulation.setDeviceMetricsOverride", width=1280, height=820, deviceScaleFactor=1, mobile=False)
+        b.wait_for(self.PAGES_SETTLED, 15)
+        time.sleep(1.2)
+        b.wait_for(self.PAGES_SETTLED, 15)
+        final = b.js(self.PAGE_STATE)
+        self.assertEqual((final["page"], final["focus"]), ("home", None))
+        self.assertEqual((final["home"], final["stage"]), (1, 0))
+        self.assertEqual(self.text("#nav .is-on"), "Home")
+        self.assertEqual(b.js("[document.querySelector('#home').hidden, document.querySelector('#stage').hidden]"), [False, True])
+
+    def test_home_cards_are_fully_visible_at_desktop_sizes_and_zoom(self):
+        b = self.b
+        visible = ("(sel => { const el = document.querySelector(sel); el.scrollIntoView({block: 'nearest'});"
+                   "const r = el.getBoundingClientRect(); let top = r.top, bottom = r.bottom;"
+                   "for (let p = el.parentElement; p; p = p.parentElement) { const cs = getComputedStyle(p);"
+                   "if (/(hidden|clip|auto|scroll)/.test(cs.overflow + cs.overflowY)) { const q = p.getBoundingClientRect();"
+                   "top = Math.max(top, q.top); bottom = Math.min(bottom, q.bottom); } }"
+                   "return {cut: Math.max(0, r.bottom - Math.min(bottom, innerHeight)) + Math.max(0, Math.max(top, 0) - r.top), h: r.height}; })")
+        targets = [f"{c} .m-foot" for c in (".h-granted", ".h-resolved", ".h-abstained", ".h-attention")] + \
+                  [f"{c} .m-value" for c in (".h-granted", ".h-attention")] + \
+                  [f".tile.is-{k}" for k in ("resolved", "abstained", "attention")] + \
+                  [".tile.is-attention .tile-line:last-child", ".chips-dark", ".recent li:last-child"]
+        for w, h, dpr in ((1440, 900, 1), (1694, 900, 1), (1920, 1042, 1), (1152, 720, 1.25), (1694, 780, 1), (1366, 768, 1), (1024, 900, 1), (768, 1024, 1)):
+            b.call("Emulation.setDeviceMetricsOverride", width=w, height=h, deviceScaleFactor=dpr, mobile=False)
+            time.sleep(0.5)
+            for sel in targets:
+                with self.subTest(size=f"{w}x{h}@{dpr}", target=sel):
+                    got = b.js(f"{visible}({json.dumps(sel)})")
+                    self.assertGreater(got["h"], 0)
+                    self.assertLessEqual(got["cut"], 0.5, "content clipped")
+            if w >= 1440 and h >= 900:  # full desktop heights fit without any scrolling
+                with self.subTest(size=f"{w}x{h}", check="fits"):
+                    self.assertLessEqual(b.js("(m => m.scrollHeight - m.clientHeight)(document.querySelector('.main'))"), 1)
+
+    def test_reduced_motion_page_changes_land_directly(self):
+        server, token, secret_dir, _ = serve()
+        b = _cdp.Browser(1440, 900, reduced_motion=True)
+        try:
+            b.navigate(f"http://127.0.0.1:{server.port}/")
+            b.js(f"document.querySelector('#token').value = {json.dumps(token)}; document.querySelector('#connect-form').requestSubmit(); 1")
+            b.wait_for("document.querySelector('#app').dataset.page === 'home' && document.querySelector('#connect').hidden", 20)
+            b.js("document.querySelector('[data-view=investigations]').click(); 1")
+            b.wait_for("document.querySelector('#home').dataset.focus === 'band'")
+            b.js("document.querySelector('.inv-row[data-run]').click(); 1")
+            b.wait_for("document.querySelector('#app').dataset.page === 'run' && document.querySelector('.outcome-word')", 20)
+            b.js("document.querySelector('[data-view=home]').click(); 1")
+            moving = b.js("document.getAnimations().flatMap(a => a.effect.getKeyframes().flatMap(k => Object.keys(k)))"
+                          ".filter(p => ['transform', 'width', 'height'].includes(p))")
+            self.assertEqual(moving, [])
+            b.wait_for("document.querySelector('#app').dataset.page === 'home' && !document.querySelector('#home').dataset.focus", 10)
+            self.assertEqual(b.console_errors(), [])
+        finally:
+            b.close()
+            server.shutdown()
+            server.server_close()
+            shutil.rmtree(secret_dir, ignore_errors=True)
+
     def test_home_fits_small_screens(self):
         for width in (390, 768, 1024):
             with self.subTest(width=width):

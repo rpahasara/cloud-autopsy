@@ -419,6 +419,7 @@ export function createHome(env) {
     const all = CARD_IDS.map((c) => cards[c]);
     const first = new Map(all.map((c) => [c, { r: rectIn(c, root), o: Number(getComputedStyle(c).opacity) }]));
     cancelAll(all);
+    clearMorph();  // an interrupted morph never leaves its in-flight state behind
     if (next) root.dataset.focus = next; else delete root.dataset.focus;
     cards.band.toggleAttribute("data-focused", Boolean(next));
     fill("band", { both: true });  // both layers carry content for the crossfade
@@ -451,10 +452,15 @@ export function createHome(env) {
     }
     finished(anims, 1400).then(() => {
       if (id !== st.transition) return;
-      band.classList.remove("is-lifted", "is-morphing");
-      for (const l of band.querySelectorAll(".h-layer")) { l.style.width = ""; l.style.height = ""; for (const a of l.getAnimations()) a.cancel(); }
+      clearMorph();
       fill("band");
     });
+  }
+
+  function clearMorph() {
+    const band = cards.band;
+    band.classList.remove("is-lifted", "is-morphing");
+    for (const l of band.querySelectorAll(".h-layer")) { l.style.width = ""; l.style.height = ""; for (const a of l.getAnimations()) a.cancel(); }
   }
 
   // ---------------------------------------------------------------- entrance

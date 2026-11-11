@@ -209,34 +209,74 @@ const home = createHome({
 });
 
 let pageTransition = 0;
+let pageCleanup = null;
 function setPage(page) {
   app.dataset.page = page;
   stage.hidden = page !== "run";
   homeEl.hidden = page !== "home";
 }
 
-function showPage(page, then) {
+// Page change: the destination is fully prepared (its view state, data and header) before it is
+// shown, and the two pages crossfade: the outgoing page is held in place out of flow while the
+// incoming one enters, so there is no blank gap and no layout correction after the reveal.
+const PAGE_HOLD = ["position", "left", "top", "width", "height", "pointerEvents", "zIndex"];
+function showPage(page, { prepare, then } = {}) {
   const current = app.dataset.page;
   closePopover();
-  if (page === current) { if (page === "home") home.render(); if (then) then(); return; }
+  if (page === current) { if (prepare) prepare(); if (page === "home") home.render(); if (then) then(); return; }
+  if (pageCleanup) pageCleanup();
   const id = ++pageTransition;
   const out = page === "home" ? stage : homeEl, inn = page === "home" ? homeEl : stage;
-  const a = animate(out, [{ opacity: 1, transform: "none" }, { opacity: 0, transform: "translateY(6px) scale(0.985)" }],
-                    { spring: "recede", fill: "forwards" });
-  finished([a], 420).then(() => {
-    if (id !== pageTransition) return;
+  const r = rectIn(out, $(".main"));
+  cancelAll([stage, homeEl]);
+  Object.assign(out.style, { position: "absolute", left: `${r.x}px`, top: `${r.y}px`, width: `${r.w}px`, height: `${r.h}px`,
+                             pointerEvents: "none", zIndex: "1" });
+  app.dataset.page = page;
+  inn.hidden = false;
+  if (page === "home") {
+    if (prepare) prepare();
+    home.render();
+    state.view = home.view;
+    syncNav(state.view);
+  } else {
+    refreshRunHeader();
+    if (prepare) prepare();
+  }
+  // The outgoing page holds its opacity while the incoming one rises, then fades: at every frame
+  // one page is clearly visible (no dip to a blank frame).
+  const a = animate(out, [{ opacity: 1, transform: "none" }, { opacity: 1, offset: 0.45 },
+                          { opacity: 0, transform: "translateY(6px) scale(0.985)" }], { spring: "panel", fill: "forwards" });
+  const b = animate(inn, [{ opacity: 0, transform: "translateY(10px) scale(0.985)" }, { opacity: 1, transform: "none" }],
+                    { spring: "panel" });
+  const cleanup = () => {
     if (a) a.cancel();
-    setPage(page);
-    if (page === "home") { home.render(); state.view = home.view; syncNav(state.view); } else refreshRunHeader();
-    animate(inn, [{ opacity: 0, transform: "translateY(10px) scale(0.985)" }, { opacity: 1, transform: "none" }], { spring: "panel" });
-    if (page === "run" && state.topo) requestAnimationFrame(() => state.topo && state.topo.place());
-    if (then) then();
-  });
+    out.hidden = app.dataset.page !== (out === stage ? "run" : "home");
+    for (const k of PAGE_HOLD) out.style[k] = "";
+    if (pageCleanup === cleanup) pageCleanup = null;
+  };
+  pageCleanup = cleanup;
+  finished([a, b], 900).then(() => { if (id === pageTransition) cleanup(); });
+  if (page === "run" && state.topo) requestAnimationFrame(() => state.topo && state.topo.place());
+  if (then) then();
 }
 
 function openRun(runId) {
   if (!state.runs.find((r) => r.id === runId)) state.runs.push({ id: runId, status: "pending" });
-  showPage("run", () => selectRun(runId));
+  const switching = runId !== state.active || !state.model;
+  // A different run never shows the previous run's content while it is verified.
+  showPage("run", { prepare: () => { if (switching) pendingRun(runId); }, then: () => selectRun(runId) });
+}
+
+function pendingRun(runId) {
+  if (stage.dataset.focus) setView("overview", { quiet: true });
+  stage.dataset.pending = "";
+  stage.classList.add("is-loading");
+  $("#run-title").textContent = `Run ${shortRun(runId)}`;
+  $("#run-sub").textContent = "Verifying from the sealed run\u2026";
+  clear($("#run-meta"));
+  const chip = $("#mode-chip");
+  chip.className = "mode-chip is-muted";
+  chip.textContent = "Verifying";
 }
 
 function refreshRunHeader() {
@@ -290,6 +330,7 @@ function renderError(run) {
   const [title, text] = ERRORS[err.code] || ["Unexpected response", `The API answered with code ${err.code}.`];
   app.dataset.state = "ready";
   stage.dataset.error = err.code;
+  delete stage.dataset.pending;
   if (stage.dataset.focus) setView("overview", { quiet: true });
   state.model = null;
   // Nothing from any other run stays on screen behind a refusal.
@@ -362,6 +403,7 @@ function layer(card, name) { return card.querySelector(`.layer-${name}`); }
 function renderRun(animated) {
   const model = state.model;
   delete stage.dataset.error;
+  delete stage.dataset.pending;
   $("#state-panel").hidden = true;
   renderTitle(model);
   updateModeChip(model);
@@ -677,12 +719,14 @@ nav.addEventListener("click", (e) => {
   const view = b.dataset.view;
   if (view === "home" || view === "investigations") return goHome(view);
   if (!state.model) return;
-  if (app.dataset.page !== "run") return showPage("run", () => setView(view));
+  if (app.dataset.page !== "run") return showPage("run", { then: () => setView(view) });
   setView(view);
 });
 
 function goHome(view = "home") {
-  showPage("home", () => { home.setView(view); state.view = view; syncNav(view); });
+  if (app.dataset.page === "home") { home.setView(view); state.view = view; syncNav(view); return; }
+  // Apply the requested Home view before Home is revealed: no intermediate layout, no second morph.
+  showPage("home", { prepare: () => { home.setView(view, { quiet: true }); state.view = view; } });
 }
 
 for (const id of EXPANDABLE) {
