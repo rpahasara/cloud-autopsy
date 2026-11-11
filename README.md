@@ -1,24 +1,61 @@
 # Cloud Autopsy
 
-> **Status:** Phase 1 planning draft. No requirements, architecture decisions, risks, or security controls are approved or signed off.
+> **Status (2026-11-11):** synthetic-only development foundation. The repository has a frozen offline prototype and pre-gate implementations of the evidence contracts, a PostgreSQL store, a deterministic investigation engine, verify-on-read results, a loopback read-only API and a local dashboard. Everything runs on synthetic fixtures only. No requirement, architecture decision (CA-DEC-001…008), risk, security control or gate (D, I or E) is approved or signed off. Nothing here is production-ready.
 
-Cloud Autopsy is an AU4 Labs commercial product concept for deterministic, evidence-first incident reconstruction, initially evaluated against Kubernetes incidents. The product direction is read-only by default: assemble and time-align provenance-linked evidence first, then use constrained AI only to explain supported, contradicted, and unresolved hypotheses.
+Cloud Autopsy is an AU4 Labs commercial product concept for deterministic, evidence-first incident reconstruction. It is initially evaluated against Kubernetes incidents.
 
-This repository is currently owned by the personal GitHub account `rpahasara` and is intended to transfer to the AU4 Labs organization later. It contains planning and SSDLC artifacts only—no production application code.
+The product direction is read-only by default. Cloud Autopsy first assembles and time-aligns evidence that is linked to its provenance. Constrained AI may then be used only to explain which hypotheses the evidence supports, contradicts or leaves unresolved. No AI component is implemented.
+
+This repository is currently owned by the personal GitHub account `rpahasara` and is intended to transfer to the AU4 Labs organization later. It contains planning and SSDLC artifacts, plus the synthetic-only implementation described below.
+
+## What is implemented (synthetic only, pre-gate)
+
+The implementation was built under the product owner's [pre-gate development authorization](docs/phase2/ca-p2-003/ca-p2-003b-1.md), which is synthetic-only. It is not a gate approval.
+
+| Area | Where | Record |
+|---|---|---|
+| Frozen offline prototype (CA-SPIKE-001, commit `c21b50d`) | `prototype/` | [CA-SPIKE-001](docs/spikes/CA-SPIKE-001.md) |
+| Dependency, licensing and SSDLC foundation; offline supply-chain checks | `supply-chain/`, `tools/supply_chain/` | [CA-P2-001](docs/phase2/ca-p2-001/README.md) |
+| Provisional contracts: canonical JSON, time intervals, evidence identity, run plan, batches, frozen input | `src/cloud_autopsy/contracts/` | [CA-P2-002a](docs/phase2/ca-p2-002/ca-p2-002a.md) to [002d](docs/phase2/ca-p2-002/ca-p2-002d.md) |
+| PostgreSQL schema, roles, ingest and atomic seal (disposable, loopback-only container) | `src/cloud_autopsy/db/` | [CA-P2-003](docs/phase2/ca-p2-003/README.md), [003b-1](docs/phase2/ca-p2-003/ca-p2-003b-1.md) |
+| Deterministic investigation engine (one mechanism catalog) | `src/cloud_autopsy/engine/` | [CA-P2-005a](docs/phase2/ca-p2-005/ca-p2-005a.md) |
+| Immutable results with verify-on-read replay | `src/cloud_autopsy/db/results.py` | [CA-P2-006a](docs/phase2/ca-p2-006/ca-p2-006a.md) |
+| Loopback read-only API with per-run grants | `src/cloud_autopsy/api/` | [CA-P2-006b](docs/phase2/ca-p2-006/ca-p2-006b.md) |
+| Local dashboard and Home overview, including a labelled synthetic preview | `src/cloud_autopsy/api/ui/`, `tools/dashboard_preview.py` | [CA-P2-006c](docs/phase2/ca-p2-006/ca-p2-006c.md), [006d](docs/phase2/ca-p2-006/ca-p2-006d.md) |
+
+**Not implemented:**
+- collectors or any live cluster access (CA-P2-004);
+- starting an investigation outside the fixture-driven demos;
+- export, retention, purge or audit logging;
+- AI synthesis;
+- an independent evaluation scorer or held-out truth (CA-P2-007, and the separate [held-out kit](https://github.com/rpahasara/cloud-autopsy/pull/14), PR #14);
+- production authentication, TLS and deployment.
+
+Backlog status: [Phase 2 backlog](docs/reviews/phase1d/phase2-backlog.md#status).
+
+**Try it locally:**
+- **Synthetic preview** (no database; results labelled "not verified"): `python -I tools/dashboard_preview.py`
+- **Database-verified demos** (Docker, disposable database): `tools/investigation_demo.py` and `tools/api_demo.py`, run with the hash-locked interpreter described in [db/README.md](db/README.md).
 
 ## Phase 1 objective
 
-Demonstrate, with a reproducible evaluation corpus, that a deterministic evidence engine can reconstruct incident timelines, detect false-cause traps, expose telemetry gaps, and support calibrated abstention. Phase 1 targets a portfolio prototype and evidence for a later product-validation decision; it is not a production release.
+Demonstrate, with a reproducible evaluation corpus, that a deterministic evidence engine can:
+- reconstruct incident timelines;
+- detect false-cause traps;
+- expose telemetry gaps;
+- support calibrated abstention.
 
-All quality metrics and performance/capacity budgets are provisional until benchmarked and explicitly approved. The historical 70% target is a hypothesis; stricter review proposals are in CA-DEC-006. Five CA-SCENARIO-001 variants qualify the initial harness; the full gate needs 8–12 scenarios.
+Phase 1 targets a portfolio prototype and evidence for a later product-validation decision. It is not a production release.
+
+All quality metrics and performance or capacity budgets are provisional until benchmarked and explicitly approved. The historical 70% target is a hypothesis; stricter review proposals are in CA-DEC-006. Five CA-SCENARIO-001 variants qualify the initial harness; the full gate needs 8–12 scenarios.
 
 ## Proposed Phase 1 gates
 
-- Historical, unbenchmarked hypothesis: at least 70% evidence-citation accuracy; final metric/threshold disposition remains Proposed under CA-DEC-006.
+- Historical, unbenchmarked hypothesis: at least 70% evidence-citation accuracy. The final metric and threshold disposition remains Proposed under CA-DEC-006.
 - Correct abstention on designated missing-telemetry scenarios.
 - No unsupported destructive action path; collection remains read-only.
 - Prompt-injection and approval-bypass scenarios are explicitly tested.
-- Gate results are measured and reviewed; this document does not claim they have been achieved.
+- Gate results are measured and reviewed. This document does not claim they have been achieved.
 
 ## Planning index
 
@@ -39,16 +76,40 @@ All quality metrics and performance/capacity budgets are provisional until bench
 
 ## Governance
 
-All artifacts are drafts until a named authorized reviewer records approval. Issue closure, pull-request merge, or repository transfer does not constitute product, security, legal, or architecture signoff.
+All artifacts are drafts until a named authorized reviewer records approval. Issue closure, pull-request merge, integration into `main` or repository transfer does not constitute product, security, legal or architecture sign-off.
+
+The [integration record](docs/phase2/integration.md) describes how the draft PR chain is consolidated into `main`. It is a solo product-owner decision, not a specialist approval or a gate.
 
 ## Phase 1C architecture proposal
 
-[System architecture and security design](docs/architecture/phase1c/README.md) adds reviewable diagrams, data models, collector/RBAC, deterministic engine, AI boundary, API contracts, threat coverage and a proposed sign-off checklist. It is a separate draft stacked on PR #11, not an approved baseline or implementation.
+[System architecture and security design](docs/architecture/phase1c/README.md) adds:
+- reviewable diagrams and data models;
+- collector and RBAC design;
+- the deterministic engine and the AI boundary;
+- API contracts and threat coverage;
+- a proposed sign-off checklist.
+
+It is a draft design, not an approved baseline.
 
 ## Phase 1D final design review
 
-[Approval and implementation-readiness package](docs/reviews/phase1d/README.md) provides blockers, eight scoped ADR requests, independent reviewers, source-backed technology research, differentiation, benchmark plans, formal completion gates and a proposed Phase 2 backlog. Readiness remains blocked pending approval; no implementation is started.
+[Approval and implementation-readiness package](docs/reviews/phase1d/README.md) provides blockers, eight scoped ADR requests, independent reviewers, source-backed technology research, differentiation, benchmark plans, formal completion gates and a proposed Phase 2 backlog. Readiness for Gate D, I or E remains blocked pending approval. Synthetic-only implementation proceeded under the pre-gate authorization above.
 
-## Phase 2 preparation (CA-P2-001)
+## Phase 2 (pre-gate, synthetic only)
 
-[Dependency, licensing and SSDLC foundation](docs/phase2/ca-p2-001/README.md) proposes the minimum stack, dependency inventory, license/NOTICE records, SBOM approach, offline supply-chain checks and the CA-P2-002 contract plan. Nothing is approved; Gate D, Gate I and all CA-DEC decisions remain open.
+Records, in order:
+- [CA-P2-001 dependency, licensing and SSDLC foundation](docs/phase2/ca-p2-001/README.md)
+- CA-P2-002a–d contracts:
+  - [002a](docs/phase2/ca-p2-002/ca-p2-002a.md)
+  - [002b](docs/phase2/ca-p2-002/ca-p2-002b.md)
+  - [002c](docs/phase2/ca-p2-002/ca-p2-002c.md)
+  - [002d](docs/phase2/ca-p2-002/ca-p2-002d.md)
+- [CA-P2-003 PostgreSQL design](docs/phase2/ca-p2-003/README.md) and [003b-1 implementation](docs/phase2/ca-p2-003/ca-p2-003b-1.md)
+- [CA-P2-005a end-to-end investigation](docs/phase2/ca-p2-005/ca-p2-005a.md)
+- CA-P2-006a–d:
+  - [006a results](docs/phase2/ca-p2-006/ca-p2-006a.md)
+  - [006b API](docs/phase2/ca-p2-006/ca-p2-006b.md)
+  - [006c dashboard](docs/phase2/ca-p2-006/ca-p2-006c.md)
+  - [006d Home](docs/phase2/ca-p2-006/ca-p2-006d.md)
+
+Nothing in these records is approved. Gate D, Gate I, Gate E and all CA-DEC decisions remain open.

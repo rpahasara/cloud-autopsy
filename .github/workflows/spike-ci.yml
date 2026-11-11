@@ -4,7 +4,8 @@ name: spike-ci
 
 on:
   push:
-    branches: [spike/ca-scenario-001]
+    # main: every integrated state is checked by the same jobs as the pull requests.
+    branches: [main, spike/ca-scenario-001]
   pull_request:
   workflow_dispatch:
 

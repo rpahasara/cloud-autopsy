@@ -2,6 +2,17 @@
 
 Date: 2026-11-03. Baseline: PR #20 at `0176abb`. This is the single checkpoint that gates CA-P2-003b. It consolidates the blockers from the [design package](README.md); it doesn't add architecture.
 
+> **Status update (2026-11-11).** The verdict below is still the formal gate position: no specialist approval in rows 5–10 has been given, so this checkpoint is **not passed**.
+>
+> What changed is a separate decision. On 2026-11-09 the product owner (the solo founder) gave a synthetic-only [pre-gate development authorization](ca-p2-003b-1.md), and CA-P2-003b-1 and later slices were implemented under it.
+>
+> | | Status |
+> |---|---|
+> | Completed for synthetic-only development | Disposable loopback-only container (`db/test/compose.yaml`, re-pinned to `postgres:18.6-trixie@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42`; the re-pin is recorded in [CA-P2-003b-1](ca-p2-003b-1.md)); hash-locked pg8000 tree; per-session random credentials outside Git; migrations 0001–0004; ten runtime roles; real-PostgreSQL CI |
+> | Still outstanding before shared, real-data or production use | Database and security reviewer approval of the schema, roles and `SECURITY DEFINER` functions; licensing review of the driver tree and image (provisional only); TLS (currently off, loopback only); R4 (a failed seal stays `sealing`); a fresh version check (PostgreSQL 18.7) before any non-disposable use; the privacy and retention decision (CA-DEC-005) |
+>
+> The original 2026-11-03 text is kept unchanged below as the historical record.
+
 **Current verdict: NO-GO.** Every engineering preparation item is done. Every remaining item is a **human decision or approval** that can't be satisfied by automated checks or AI review. No dependency has been installed, no container started, no credential created and no migration written.
 
 ## Product-owner decisions recorded (provisional, not specialist approvals)
