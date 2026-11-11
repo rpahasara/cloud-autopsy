@@ -217,9 +217,15 @@ class ApiIntegrationTests(unittest.TestCase):
             b.js("document.querySelector('.ev-row').click(); 1")
             b.wait_for("document.querySelector('.insp-body .badges')", 30)
             self.assertIn("Served after verification", b.js("document.querySelector('.insp-body .badges').textContent"))
+            # The switcher lists the typed runs and, once Home's summaries arrive, the token's other
+            # granted runs: select the intended run by its ID, never by count or position.
+            target = self.runs["configmap-unavailable"]
             b.js("document.querySelector('[data-view=overview]').click(); document.querySelector('#run-pill').click(); 1")
-            b.wait_for("document.querySelectorAll('.run-item').length === 3")
-            b.js("document.querySelectorAll('.run-item')[1].click(); 1")
+            b.wait_for(f"document.querySelectorAll('.run-item[data-run=\"{target}\"]').length === 1")
+            listed = b.js("[...document.querySelectorAll('.run-item')].map(e => e.dataset.run)")
+            self.assertEqual(len(listed), len(set(listed)), "duplicate switcher entries")
+            self.assertLessEqual(set(listed), set(self.runs.values()) | {self.unknown}, "a run outside the grant is listed")
+            b.js(f"document.querySelector('.run-item[data-run=\"{target}\"]').click(); 1")
             b.wait_for("document.querySelector('.outcome-word')?.textContent === 'Abstained'", 30)
             self.assertEqual(b.js("document.querySelector('#mode-chip').textContent"), "Verified on read")
             self.assertEqual(b.console_errors(), [])

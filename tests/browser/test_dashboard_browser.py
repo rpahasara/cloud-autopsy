@@ -299,7 +299,7 @@ class DashboardBrowserTests(unittest.TestCase):
         self.connect([preview.RUNS["config-cause"], preview.RUNS["configmap-unavailable"]])
         self.click("#run-pill")
         b.wait_for("!document.querySelector('#runs-popover').hidden")
-        b.js("document.querySelectorAll('.run-item')[1].click(); 1")
+        b.js(f"document.querySelector('.run-item[data-run=\"{preview.RUNS['configmap-unavailable']}\"]').click(); 1")
         b.wait_for("document.querySelector('#run-title').textContent === 'ca-scenario-001-configmap-unavailable'")
         b.wait_for(SETTLED)
         self.assertEqual(self.text(".outcome-word"), "Abstained")
@@ -335,11 +335,27 @@ class DashboardBrowserTests(unittest.TestCase):
         self.connect([preview.RUNS["config-cause"], UNGRANTED_RUN])
         b.js("document.querySelector('#run-pill').click(); 1")
         b.wait_for("!document.querySelector('#runs-popover').hidden")
-        b.js("document.querySelectorAll('.run-item')[1].click(); 1")
+        b.js(f"document.querySelector('.run-item[data-run=\"{UNGRANTED_RUN}\"]').click(); 1")
         b.wait_for("document.querySelector('#state-panel') && !document.querySelector('#state-panel').hidden")
         self.assertEqual(self.text(".state-card h2"), "Run not granted")
         self.assertEqual(b.js("[...document.querySelectorAll('.layer')].filter(l => l.childElementCount).length"), 0)
         self.assertEqual(self.text("#mode-chip"), "No data")
+
+    def test_run_switcher_lists_typed_and_granted_runs_once_each(self):  # CA-P2-006d
+        b = self.b
+        typed = [preview.RUNS["configmap-unavailable"], UNGRANTED_RUN, preview.RUNS["config-cause"]]
+        self.connect(typed)
+        granted = set(preview.RUNS.values()) | {HOSTILE_RUN, MISSING_RUN}
+        b.wait_for(f"document.querySelectorAll('.run-item').length === {len(granted | set(typed))}", 20)
+        listed = b.js("[...document.querySelectorAll('.run-item')].map(e => e.dataset.run)")
+        self.assertEqual(len(listed), len(set(listed)), "duplicate switcher entries")
+        self.assertEqual(set(listed), granted | set(typed))  # nothing beyond the grant and what was typed
+        self.assertEqual(listed[:3], typed)  # typed runs first, in the order given
+        state = b.js(f"document.querySelector('.run-item[data-run=\"{UNGRANTED_RUN}\"] .run-state').textContent")
+        self.assertEqual(state, "Run not granted")  # refused by the API (403); never filled from the summaries
+        self.assertNotIn(UNGRANTED_RUN, [i["run_id"] for i in self.b.js(
+            "fetch('/v1/summaries/1', {headers: {Authorization: 'Bearer ' + " + json.dumps(self.token) + "}}).then(r => r.json())"
+            ".then(d => d.items)")])
 
     def test_small_screens_have_no_horizontal_scroll(self):
         b = self.b
