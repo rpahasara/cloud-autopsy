@@ -46,6 +46,18 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ------------------------------------------------------------------ API client
 
+// Every request belongs to the session (token) that issued it. Signing out ends the session: its
+// in-flight requests are aborted and any late or still-queued response is discarded as stale, so
+// nothing from a previous token can reach the page after sign-out or under another token.
+let session = 0;
+let sessionAbort = new AbortController();
+const STALE = () => ({ status: 0, stale: true, body: { error: "signed_out" } });
+function endSession() {
+  session += 1;
+  sessionAbort.abort();
+  sessionAbort = new AbortController();
+}
+
 let inFlight = 0;
 const waiting = [];
 function queued(fn) {
@@ -58,28 +70,29 @@ function queued(fn) {
   });
 }
 
-async function request(path, attempt = 0) {
-  if (!token) return { status: 401, body: { error: "invalid_token" } };
+async function request(path, gen, attempt = 0) {
+  if (gen !== session || !token) return STALE();
   let res;
   try {
     res = await fetch(path, { headers: { Authorization: `Bearer ${token}` }, cache: "no-store", credentials: "omit",
-                              redirect: "error", referrerPolicy: "no-referrer", mode: "same-origin" });
+                              redirect: "error", referrerPolicy: "no-referrer", mode: "same-origin", signal: sessionAbort.signal });
   } catch {
-    return { status: 0, body: { error: "disconnected" } };
+    return gen !== session ? STALE() : { status: 0, body: { error: "disconnected" } };
   }
   let body;
   try { body = await res.json(); } catch { body = { error: "unreadable_response" }; }
+  if (gen !== session) return STALE();
   if (res.status === 503 && body && body.error === "overloaded" && attempt < 4) {
     toast("API busy \u2014 retrying", "is-amber");
     const wait = (Number(res.headers.get("Retry-After")) || 1) * 1000 + 180 * (attempt + 1);
     await sleep(wait);
-    return request(path, attempt + 1);
+    return request(path, gen, attempt + 1);
   }
   if (!body || typeof body !== "object") body = { error: "unreadable_response" };
   return { status: res.status, body };
 }
 
-const api = (path) => queued(() => request(path));
+const api = (path) => { const gen = session; return queued(() => request(path, gen)); };
 
 function failure(response) {
   const code = (response.body && response.body.error) || `http_${response.status}`;
@@ -90,10 +103,12 @@ async function loadRun(run, { full }) {
   run.status = "loading";
   renderRunList();
   const result = await api(`/v1/runs/${run.id}/result`);
+  if (result.stale) return run;
   if (result.status !== 200 || !result.body.data) return fail(run, failure(result));
   let citations = null;
   if (full) {
     citations = await api(`/v1/runs/${run.id}/citations`);
+    if (citations.stale) return run;
     if (citations.status !== 200) return fail(run, failure(citations));
     if (citations.body.result_digest !== result.body.result_digest) return fail(run, { code: "inconsistent" });
   }
@@ -127,12 +142,12 @@ form.addEventListener("submit", async (event) => {
   const bad = ids.filter((id) => !UUID_RE.test(id));
   if (bad.length) return showConnectError(`Not a run ID: ${bad[0].slice(0, 40)}`);
   if (ids.length > 50) return showConnectError("At most 50 run IDs at a time.");
+  clearSession();
   token = candidate;
+  const gen = session;
   tokenInput.value = "";
   showConnectError("");
   state.runs = ids.map((id) => ({ id, status: "pending" }));
-  state.evidenceCache.clear();
-  home.reset();
   app.dataset.state = "loading";
   hideSheet();
   if (!ids.length) {
@@ -151,9 +166,9 @@ form.addEventListener("submit", async (event) => {
   // The other named runs for the switcher, paced through the queue; then the Home overview.
   for (const id of ids.slice(1)) {
     const run = state.runs.find((r) => r.id === id);
-    if (token && run && run.status === "pending") await loadRun(run, { full: false });
+    if (gen === session && run && run.status === "pending") await loadRun(run, { full: false });
   }
-  if (token) home.load();
+  if (gen === session) home.load();
 });
 
 function showConnectError(text) {
@@ -184,10 +199,43 @@ function showSheet(message) {
 }
 
 function signOut(message) {
-  token = null;
-  state.evidenceCache.clear();
+  clearSession();
   app.dataset.state = "signed-out";
   showSheet(message);
+}
+
+// Ends the session and removes everything it showed or held: run results, evidence and citations,
+// Home's summaries, the workspace, inspector and header, and the view state. The next token starts
+// from an empty page, and no late response from this session can repopulate it.
+function clearSession() {
+  token = null;
+  endSession();
+  closePopover(true);
+  if (pageCleanup) pageCleanup();
+  cancelAll([stage, homeEl, inspector, ...Object.values(cards), ...stage.querySelectorAll(".layer")]);
+  for (const c of Object.values(cards)) c.classList.remove("is-morphing", "is-lifted");
+  state.runs = []; state.active = null; state.model = null; state.entry = null; state.evidence = null;
+  state.evidenceFilter = "all"; state.filter = "all"; state.stack = []; state.current = null; state.view = "overview";
+  state.evidenceCache.clear();
+  state.transition += 1;
+  if (state.topo) { state.topo.destroy(); state.topo = null; }
+  delete stage.dataset.focus; delete stage.dataset.error; delete stage.dataset.pending;
+  stage.style.gridTemplateRows = "";
+  stage.classList.remove("is-loading");
+  for (const c of Object.values(cards)) c.toggleAttribute("data-focused", false);
+  for (const l of stage.querySelectorAll(".layer")) { clear(l); l.style.width = ""; l.style.height = ""; }
+  clear(inspBody);
+  $("#insp-eyebrow").textContent = "";
+  const panel = $("#state-panel"); clear(panel); panel.hidden = true;
+  app.classList.remove("is-abstained", "is-preview");
+  cards.outcome.classList.remove("is-sage", "is-stone");
+  app.dataset.view = "overview";
+  renderTitle(null, null);
+  updateModeChip(null);
+  home.clear();
+  renderRunList();
+  syncNav("home");
+  const t = $("#toast"); t.hidden = true; t.textContent = "";
 }
 
 // ------------------------------------------------------------------ pages: Home and the run workspace
@@ -227,7 +275,9 @@ function showPage(page, { prepare, then } = {}) {
   if (pageCleanup) pageCleanup();
   const id = ++pageTransition;
   const out = page === "home" ? stage : homeEl, inn = page === "home" ? homeEl : stage;
-  const r = rectIn(out, $(".main"));
+  const main = $(".main");
+  const r = rectIn(out, main);
+  main.scrollTop = 0;  // the new page starts at its top; the outgoing page is held where it was seen
   cancelAll([stage, homeEl]);
   Object.assign(out.style, { position: "absolute", left: `${r.x}px`, top: `${r.y}px`, width: `${r.w}px`, height: `${r.h}px`,
                              pointerEvents: "none", zIndex: "1" });
@@ -308,15 +358,16 @@ function renderHomeTitle(f, hs) {
 async function selectRun(runId, { first = false, reverify = false } = {}) {
   const run = state.runs.find((r) => r.id === runId);
   if (!run) return;
+  const gen = session;
   state.active = runId;
   closePopover();
   if (!first && state.view !== "overview") setView("overview", { quiet: true });
   if (reverify || run.status !== "ready" || !run.citations) {
     stage.classList.add("is-loading");
     await loadRun(run, { full: true });
-    stage.classList.remove("is-loading");
+    if (gen === session) stage.classList.remove("is-loading");
   }
-  if (!token || state.active !== runId) return;  // signed out (401) or another run was chosen meanwhile
+  if (gen !== session || !token || state.active !== runId) return;  // signed out, or another run was chosen meanwhile
   if (run.status === "error") return renderError(run);
   state.model = buildModel(run.result, run.citations);
   state.entry = null; state.evidence = null; state.evidenceFilter = "all"; state.stack = []; state.current = null;
@@ -348,7 +399,7 @@ function renderError(run) {
     err.reason ? h("p", { class: "mono reason" }, `reason: ${err.reason}`) : null,
     h("div", { class: "state-actions" },
       h("button", { type: "button", class: "btn btn-ink", onclick: () => selectRun(run.id, { reverify: true }) }, "Try again"),
-      state.runs.length > 1 ? h("button", { type: "button", class: "btn btn-soft", onclick: openPopover }, "Other runs") : null)));
+      state.runs.length > 1 ? h("button", { type: "button", class: "btn btn-soft", onclick: (e) => openPopover(e.currentTarget) }, "Other runs") : null)));
   panel.hidden = false;
   animate(panel.firstChild, [{ opacity: 0, transform: "translateY(12px) scale(0.985)" }, { opacity: 1, transform: "none" }], { spring: "panel" });
   updateModeChip(null);
@@ -497,7 +548,11 @@ function setView(view, { quiet = false } = {}) {
 
   const id = ++state.transition;
   const all = CARD_IDS.map((c) => cards[c]);
-  const first = new Map(all.map((c) => [c, { r: rectIn(c, stage), o: Number(getComputedStyle(c).opacity) }]));
+  // Measured against the content area, not the stage: the area may scroll (short viewports), and
+  // the stage moves when the layout's height changes.
+  const box = stage.parentElement;
+  const first = new Map(all.map((c) => [c, { r: rectIn(c, box), o: Number(getComputedStyle(c).opacity) }]));
+  stage.style.gridTemplateRows = "";
   const inspOpacity = Number(getComputedStyle(inspector).opacity);
   const layers = [...stage.querySelectorAll(".layer")];
   cancelAll([...all, inspector, ...layers, inspBody]);
@@ -509,7 +564,7 @@ function setView(view, { quiet = false } = {}) {
   for (const c of all) c.toggleAttribute("data-focused", c.dataset.card === next);
   app.dataset.view = view;
   if (next) { fillExpanded(next); defaultInspector(view, false); }
-  const last = new Map(all.map((c) => [c, rectIn(c, stage)]));
+  const last = new Map(all.map((c) => [c, rectIn(c, box)]));
 
   if (quiet || prefersReducedMotion()) {
     if (!quiet && prefersReducedMotion()) {
@@ -520,6 +575,10 @@ function setView(view, { quiet = false } = {}) {
     return;
   }
 
+  // The overview's rows follow their cards' content; while a card collapses back into them its
+  // animated size must not re-flow the rows (resizing the other cards), so they are held at the
+  // final layout until the transition ends.
+  if (!next) stage.style.gridTemplateRows = getComputedStyle(stage).gridTemplateRows;
   const anims = [];
   const nextCard = next && cards[next], prevCard = prev && cards[prev];
   const origin = nextCard ? last.get(nextCard) : first.get(prevCard).r;
@@ -585,6 +644,7 @@ function trackMarkers(anims) {
 }
 
 function afterTransition(next) {
+  stage.style.gridTemplateRows = "";
   for (const c of CARD_IDS.map((x) => cards[x])) c.classList.remove("is-morphing", "is-lifted");
   for (const l of stage.querySelectorAll(".layer")) {
     l.style.width = ""; l.style.height = "";
@@ -660,7 +720,7 @@ async function openEvidence(id) {
   if (!envelope) {
     showInspector({ type: "loading" }, { push: true });
     const res = await api(`/v1/runs/${run.id}/evidence/${hexOf(id)}`);
-    if (state.evidence !== id || state.active !== run.id) return;
+    if (res.stale || state.evidence !== id || state.active !== run.id) return;
     if (res.status !== 200 || !res.body.data) {
       const f = failure(res);
       state.current = state.stack.pop() || null;
@@ -758,28 +818,42 @@ function renderRunList() {
   $("#run-pill").dataset.status = active ? (active.status === "ready" ? active.result.data.outcome.status : active.status) : "";
 }
 
-function openPopover() {
+let popoverTrigger = null;
+const POPOVER_TRIGGERS = [$("#run-pill"), $("#rail-runs")];
+function setExpanded(open) { for (const b of POPOVER_TRIGGERS) b.setAttribute("aria-expanded", String(open)); }
+setExpanded(false);
+function openPopover(trigger) {
   if (!state.runs.length) return;
+  popoverTrigger = trigger instanceof Element ? trigger : $("#run-pill");
   popover.hidden = false;
+  setExpanded(true);
   animate(popover, [{ opacity: 0, transform: "translateY(-6px) scale(0.98)" }, { opacity: 1, transform: "none" }], { spring: "panel" });
   const on = popover.querySelector(".is-on") || popover.querySelector("button");
   if (on) on.focus();
 }
-function closePopover() {
+function closePopover(instant = false) {
   if (popover.hidden) return;
+  setExpanded(false);
+  // Focus inside the list returns to the button that opened it, never to the page body.
+  if (popover.contains(document.activeElement) && popoverTrigger && popoverTrigger.isConnected) popoverTrigger.focus({ preventScroll: true });
+  if (instant) { cancelAll([popover]); popover.hidden = true; return; }
   const a = animate(popover, [{ opacity: 1 }, { opacity: 0, transform: "translateY(-4px) scale(0.985)" }], { spring: "micro" });
-  finished([a]).then(() => { popover.hidden = true; });
+  finished([a]).then(() => { if (popover.getAttribute("aria-expanded") !== "true" && $("#run-pill").getAttribute("aria-expanded") === "false") popover.hidden = true; });
 }
-$("#run-pill").addEventListener("click", (e) => { e.stopPropagation(); popover.hidden ? openPopover() : closePopover(); });
-$("#rail-runs").addEventListener("click", (e) => { e.stopPropagation(); popover.hidden ? openPopover() : closePopover(); });
+for (const b of POPOVER_TRIGGERS) b.addEventListener("click", (e) => { e.stopPropagation(); popover.hidden || b.getAttribute("aria-expanded") === "false" ? openPopover(b) : closePopover(); });
+popover.addEventListener("keydown", (e) => {
+  if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
+  const items = [...popover.querySelectorAll(".run-item")];
+  if (!items.length) return;
+  e.preventDefault();
+  const i = items.indexOf(document.activeElement);
+  const next = e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : (i + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+  items[next].focus();
+});
 $("#rail-overview").addEventListener("click", () => { if (app.dataset.state === "ready") goHome("home"); });
 $("#rail-refresh").addEventListener("click", () => { if (state.active && token) selectRun(state.active, { reverify: true }); });
 $("#rail-lock").addEventListener("click", () => {
   if (!token) return showSheet("");
-  state.runs = []; state.active = null; state.model = null;
-  if (stage.dataset.focus) setView("overview", { quiet: true });
-  home.reset();
-  renderRunList();
   signOut("Token cleared from memory.");
 });
 document.addEventListener("click", (e) => { if (!popover.hidden && !popover.contains(e.target)) closePopover(); });

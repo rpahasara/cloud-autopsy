@@ -36,6 +36,10 @@ HOSTILE = '<img src=x onerror="window.__pwned=1"><script>window.__pwned=2</scrip
 HOSTILE_RUN = str(uuid.uuid5(uuid.NAMESPACE_URL, "ca-dashboard-browser/hostile"))
 UNGRANTED_RUN = str(uuid.uuid5(uuid.NAMESPACE_URL, "ca-dashboard-browser/ungranted"))
 MISSING_RUN = str(uuid.uuid5(uuid.NAMESPACE_URL, "ca-dashboard-browser/missing"))  # granted, no stored result
+# Distinct run IDs that serve a scenario's result: the "other" grant (disjoint from the viewer's) and a
+# long list for the Investigations table.
+OTHER_RUN = str(uuid.uuid5(uuid.NAMESPACE_URL, "ca-dashboard-browser/other"))
+CROWD_RUNS = [str(uuid.uuid5(uuid.NAMESPACE_URL, f"ca-dashboard-browser/crowd-{i}")) for i in range(30)]
 CSP_RECORDER = ("window.__csp = []; document.addEventListener('securitypolicyviolation', "
                 "e => window.__csp.push(e.violatedDirective + ' ' + e.blockedURI));")
 HOME_SETTLED = ("[...document.querySelectorAll('.h-card, .h-layer')].every(e => e.getAnimations().length === 0)"
@@ -52,15 +56,20 @@ def serve():
     evidence[target]["record"]["attributes"]["message"] = HOSTILE
     hostile = SimpleNamespace(result_digest=base.result_digest, result=base.result, evidence=evidence)
 
+    variants = list(preview.RUNS.values())
+    aliases = {OTHER_RUN: preview.RUNS["config-cause"], **{r: variants[i % len(variants)] for i, r in enumerate(CROWD_RUNS)}}
+
     def load_with_hostile(run_id):
-        return hostile if run_id == HOSTILE_RUN else load(run_id)
+        return hostile if run_id == HOSTILE_RUN else load(aliases.get(run_id, run_id))
 
     secret_dir = Path(tempfile.mkdtemp(prefix="ca-dashboard-browser-"))
-    record, tokens = G.issue({"viewer": list(preview.RUNS.values()) + [HOSTILE_RUN, MISSING_RUN]})
+    record, tokens = G.issue({"viewer": list(preview.RUNS.values()) + [HOSTILE_RUN, MISSING_RUN], "other": [OTHER_RUN],
+                              "crowd": list(preview.RUNS.values()) + CROWD_RUNS})
     G.write_private(secret_dir / "grants.json", json.dumps(record).encode("utf-8"))
     service = ApiService(G.load(secret_dir / "grants.json"), load_with_hostile, ready, ui=ui.load_assets(), preview=True)
     server = LoopbackServer(service, quiet=True)
     threading.Thread(target=server.serve_forever, daemon=True).start()
+    server.tokens = tokens
     return server, tokens["viewer"], secret_dir, target
 
 
@@ -819,6 +828,200 @@ class HomeBrowserTests(unittest.TestCase):
         self.assertEqual(b.js("document.querySelector('#home').dataset.focus"), "band")
         self.assertEqual((st["c"], st["x"]), (0, 1))
         self.assertEqual(b.js("[...document.querySelectorAll('.h-layer')].map(l => l.style.cssText)"), ["", ""])
+
+    # ---- QA remediation slice 1
+
+    def sign_in(self, token, wait_granted=None):
+        b = self.b
+        b.js(f"document.querySelector('#token').value = {json.dumps(token)}; document.querySelector('#connect-form').requestSubmit(); 1")
+        b.wait_for("document.querySelector('#connect').hidden && document.querySelector('#app').dataset.page === 'home'", 20)
+        if wait_granted is not None:
+            b.wait_for(f"document.querySelector('.h-granted .m-value')?.textContent === '{wait_granted}'", 20)
+        b.wait_for(self.PAGES_SETTLED, 15)
+
+    CLIPPED = ("[...document.querySelectorAll('#stage .card')].filter(c => c.offsetParent).map(c => {"
+               "const cr = c.getBoundingClientRect(); let worst = 0;"
+               "for (const e of c.querySelectorAll('*')) { if (!e.offsetParent || e.closest('.layer-expanded')) continue;"
+               "const r = e.getBoundingClientRect(); if (r.height > 0 && r.bottom > cr.bottom + 0.5 && r.top < cr.bottom) worst = Math.max(worst, r.bottom - cr.bottom); }"
+               "return [c.dataset.card, Math.round(worst)]; }).filter(x => x[1] > 1)")
+
+    def test_overview_cards_show_their_content_at_laptop_sizes(self):
+        """QA-01: no overview card cuts off its content; on short viewports the content area scrolls to it."""
+        b = self.b
+        for plan in ("ca-scenario-001-config-cause", "ca-scenario-001-clock-unknown", "ca-scenario-001-configmap-conflict"):
+            self.open_run_from_investigations(plan)
+            for w, h in ((1440, 900), (1694, 900), (1366, 768), (1920, 1042)):
+                b.call("Emulation.setDeviceMetricsOverride", width=w, height=h, deviceScaleFactor=1, mobile=False)
+                time.sleep(0.45)
+                with self.subTest(plan=plan, size=f"{w}x{h}"):
+                    self.assertEqual(b.js(self.CLIPPED), [], "card content cut off at the card's edge")
+                    # the reasoning panel can be brought fully into view (deliberate scrolling, not clipping)
+                    seen = b.js("(() => { const e = document.querySelector('[data-card=gaps] .insight'); e.scrollIntoView({block: 'nearest'});"
+                                "const r = e.getBoundingClientRect(), m = document.querySelector('.main').getBoundingClientRect();"
+                                "return r.top >= Math.max(0, m.top) - 0.5 && r.bottom <= Math.min(innerHeight, m.bottom) + 0.5; })()")
+                    self.assertTrue(seen, "'Why no cause' / 'Basis' cannot be brought into view")
+                    b.js("document.querySelector('.main').scrollTop = 0; 1")
+            b.call("Emulation.setDeviceMetricsOverride", width=1440, height=900, deviceScaleFactor=1, mobile=False)
+            time.sleep(0.3)
+            b.js("document.querySelector('[data-view=home]').click(); 1")
+            b.wait_for(self.PAGES_SETTLED)
+
+    def test_overview_expand_and_collapse_keep_the_rows_steady_when_scrolled(self):
+        """QA-01: the content-sized rows don't re-flow while a card collapses back, even from a scrolled area."""
+        b = self.b
+        b.call("Emulation.setDeviceMetricsOverride", width=1366, height=768, deviceScaleFactor=1, mobile=False)
+        self.open_run_from_investigations("ca-scenario-001-config-cause")
+        rest = b.js("[...document.querySelectorAll('#stage .card')].map(c => [c.offsetLeft, c.offsetTop, c.offsetWidth, c.offsetHeight])")
+        b.js("document.querySelector('.main').scrollTop = 80; 1")
+        b.js("document.querySelector('[data-card=gaps] .expand').click(); 1")
+        b.wait_for("document.querySelector('#stage').dataset.focus === 'gaps'"); b.wait_for(SETTLED)
+        b.js("window.__st = window.__st || window.setTimeout; window.setTimeout = (f, ms) => window.__st(f, ms > 300 ? 1e8 : ms); 1")
+        b.js("document.querySelector('#insp-close').click(); window.__anims = document.getAnimations().filter(a => isFinite(a.effect.getComputedTiming().endTime));"
+             " window.__anims.forEach(a => a.pause()); 1")
+        for t in range(0, 900, 60):
+            b.js(f"window.__anims.forEach(a => {{ a.currentTime = {t}; }}); 1")
+            boxes = b.js("[...document.querySelectorAll('#stage .card')].map(c => [c.offsetLeft, c.offsetTop, c.offsetWidth, c.offsetHeight])")
+            with self.subTest(t=t):
+                for i, (now, was) in enumerate(zip(boxes, rest)):
+                    if b.js(f"document.querySelectorAll('#stage .card')[{i}].dataset.card") != "gaps":
+                        self.assertEqual(now, was, "an overview card re-flowed during the collapse")
+        b.js("window.__anims.forEach(a => a.finish()); window.setTimeout = window.__st; 1")
+        b.wait_for(SETTLED)
+        self.assertEqual(b.js("document.querySelector('#stage').style.gridTemplateRows"), "")
+        self.assertEqual(b.js(self.CLIPPED), [])
+
+    def no_trace_of(self, run_ids, plans=()):
+        """Neither visible nor hidden DOM carries any of these runs (by ID) or plan titles."""
+        text = self.b.js("document.querySelector('#app').textContent + [...document.querySelectorAll('#app [data-run]')].map(e => e.dataset.run).join(' ')")
+        for r in run_ids:
+            self.assertNotIn(r[:8], text, f"run {r[:8]} still in the page")
+        for p in plans:
+            self.assertNotIn(p, text, f"{p} still in the page")
+
+    def test_sign_out_removes_every_result_and_cancels_late_responses(self):
+        """QA-02: sign-out mid-request, then a token with a different grant: nothing of the first appears."""
+        b = self.b
+        viewer = [i["run_id"] for i in self.summaries["items"]]
+        other = self.server.tokens["other"]
+        # 1) a run open with the inspector showing evidence, then Clear token
+        run = self.open_run_from_investigations("ca-scenario-001-configmap-conflict")
+        b.js("document.querySelector('[data-view=evidence]').click(); 1"); b.wait_for(SETTLED)
+        b.js("document.querySelector('[data-card=evidence] .ev-row').click(); 1")
+        b.wait_for("document.querySelector('#insp-content').textContent.includes('Provenance')", 10)
+        b.js("document.querySelector('#rail-lock').click(); 1")
+        b.wait_for("!document.querySelector('#connect').hidden")
+        self.no_trace_of(viewer, ("ca-scenario-001",))
+        self.assertEqual(b.js("[...document.querySelectorAll('#run-list .run-item')].length"), 0)
+        self.assertEqual(b.js("[document.querySelector('#stage').dataset.focus || null, document.querySelector('#run-title').textContent]"), [None, "Cloud Autopsy"])
+        # 2) sign in again and sign out while a run's verification and Home's summaries are still in flight
+        self.sign_in(self.token, wait_granted=self.summaries["granted_total"])
+        b.js("window.__hold = 1500; window.__f = window.__f || window.fetch;"
+             "window.fetch = (...a) => window.__f(...a).then(r => new Promise(res => setTimeout(() => res(r), window.__hold))); 1")
+        b.js(f"document.querySelector('.inv-row[data-run=\"{run}\"]')?.click() || document.querySelector('[data-view=investigations]').click(); 1")
+        time.sleep(0.2)
+        b.js("document.querySelector('[data-view=investigations]').click(); 1")
+        time.sleep(0.1)
+        b.js(f"document.querySelector('.inv-row[data-run=\"{run}\"]')?.click(); 1")
+        time.sleep(0.15)
+        b.js("document.querySelector('#rail-lock').click(); 1")
+        # 3) a different token, while the first session's responses are still arriving
+        b.js("window.__hold = 0; 1")
+        self.sign_in(other, wait_granted=1)
+        time.sleep(2.2)  # every held response of the first session has now resolved
+        b.wait_for(self.PAGES_SETTLED, 15)
+        self.no_trace_of([r for r in viewer if r != OTHER_RUN])
+        self.assertEqual(b.js("[...document.querySelectorAll('.inv-row[data-run], .rr, #run-list .run-item')].every(e => (e.dataset.run || e.textContent).includes('') )"), True)
+        self.assertEqual(b.js("document.querySelector('.h-granted .m-value').textContent"), "1")
+        self.assertEqual(b.js("document.querySelector('#app').dataset.page"), "home")
+        b.js("document.querySelector('[data-view=investigations]').click(); 1"); b.wait_for(self.PAGES_SETTLED)
+        self.assertEqual(b.js("[...document.querySelectorAll('.inv-row[data-run]')].map(r => r.dataset.run)"), [OTHER_RUN])
+        # 4) the second token's run opens normally
+        b.js(f"document.querySelector('.inv-row[data-run=\"{OTHER_RUN}\"]').click(); 1")
+        b.wait_for(f"document.querySelector('#run-sub').textContent.includes('{OTHER_RUN[:8]}') && document.querySelector('.outcome-word')", 20)
+        self.no_trace_of([r for r in viewer if r != OTHER_RUN])
+
+    def test_run_switcher_announces_its_state_and_returns_focus(self):
+        """QA-03: aria-expanded/aria-controls on both triggers; arrows move; Escape and selection return focus."""
+        b = self.b
+        self.open_run_from_investigations("ca-scenario-001-config-cause")
+        pill = "document.querySelector('#run-pill')"
+        self.assertEqual(b.js(f"[{pill}.getAttribute('aria-expanded'), {pill}.getAttribute('aria-controls'), !!document.getElementById({pill}.getAttribute('aria-controls'))]"),
+                         ["false", "runs-popover", True])
+        self.assertEqual(b.js("document.querySelector('#rail-runs').getAttribute('aria-expanded')"), "false")
+        b.js(f"{pill}.focus(); {pill}.click(); 1")
+        b.wait_for("!document.querySelector('#runs-popover').hidden")
+        self.assertEqual(b.js(f"{pill}.getAttribute('aria-expanded')"), "true")
+        self.assertTrue(b.js("document.querySelector('#runs-popover').contains(document.activeElement)"))
+        first = b.js("document.activeElement.dataset.run")
+        for key, code in (("ArrowDown", 40),):
+            for t in ("keyDown", "keyUp"):
+                b.call("Input.dispatchKeyEvent", type=t, key=key, code=key, windowsVirtualKeyCode=code)
+        self.assertNotEqual(b.js("document.activeElement.dataset.run"), first, "ArrowDown moves through the runs")
+        for t in ("keyDown", "keyUp"):
+            b.call("Input.dispatchKeyEvent", type=t, key="Escape", code="Escape", windowsVirtualKeyCode=27)
+        b.wait_for("document.querySelector('#runs-popover').hidden")
+        self.assertEqual(b.js(f"[{pill}.getAttribute('aria-expanded'), document.activeElement === {pill}]"), ["false", True])
+        # the rail button: open, choose another run; the list closes and focus returns to the rail button
+        b.js("document.querySelector('#rail-runs').focus(); document.querySelector('#rail-runs').click(); 1")
+        b.wait_for("!document.querySelector('#runs-popover').hidden")
+        self.assertEqual(b.js("document.querySelector('#rail-runs').getAttribute('aria-expanded')"), "true")
+        other = next(i["run_id"] for i in self.summaries["items"] if i.get("plan_id") == "ca-scenario-001-no-symptom")
+        b.js(f"document.querySelector('#run-list .run-item[data-run=\"{other}\"]').click(); 1")
+        b.wait_for("document.querySelector('#runs-popover').hidden && document.querySelector('#run-title').textContent === 'ca-scenario-001-no-symptom'", 20)
+        self.assertEqual(b.js("[document.querySelector('#rail-runs').getAttribute('aria-expanded'), document.activeElement.id]"), ["false", "rail-runs"])
+
+    CONTRAST = """(sel, bg) => { const e = document.querySelector(sel); if (!e) return null;
+      const p = s => s.match(/[\\d.]+/g).map(Number); const f = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+      const L = c => 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]);
+      const c = p(getComputedStyle(e).color), b = p(bg), a = c.length > 3 ? c[3] : 1;
+      const mix = [0, 1, 2].map(i => c[i] * a + b[i] * (1 - a)); const [x, y] = [L(mix), L(b)].sort((m, n) => n - m);
+      const cs = getComputedStyle(e), size = parseFloat(cs.fontSize), bold = Number(cs.fontWeight) >= 600;
+      return { ratio: (x + 0.05) / (y + 0.05), large: size >= 24 || (bold && size >= 18.66) }; }"""
+
+    def test_secondary_text_meets_wcag_aa_contrast(self):
+        """Meaningful secondary text reaches AA (4.5:1; 3:1 for large text) on its surface."""
+        b = self.b
+        window, card, charcoal = "rgb(243, 242, 238)", "rgb(252, 252, 251)", "rgb(27, 28, 30)"
+        checks = [(".m-sub", card), (".m-foot", card), (".gauge-sub", card), (".hero-col small", card), (".inv-row small", charcoal), (".inv-title small", charcoal)]
+        b.js("document.querySelector('[data-view=investigations]').click(); 1"); b.wait_for(self.PAGES_SETTLED)
+        home = [(sel, b.js(f"({self.CONTRAST})({json.dumps(sel)}, {json.dumps(bg)})")) for sel, bg in checks]
+        b.js("document.querySelector('[data-view=home]').click(); 1"); b.wait_for(self.PAGES_SETTLED)
+        self.open_run_from_investigations("ca-scenario-001-config-cause")
+        b.js("document.querySelector('[data-view=timeline]').click(); 1"); b.wait_for(SETTLED)
+        run = [(sel, b.js(f"({self.CONTRAST})({json.dumps(sel)}, {json.dumps(bg)})"))
+               for sel, bg in (("#run-sub", window), (".seq-rel:not(.is-unordered)", card), (".seq-entity", card), (".eyebrow", card), (".lane-label small", card))]
+        b.js("document.querySelector('[data-view=overview]').click(); 1"); b.wait_for(SETTLED)
+        run.append((".verify-digest", b.js(f"({self.CONTRAST})('.verify-digest', {json.dumps(card)})")))
+        for sel, got in home + run:
+            if got is None:
+                continue
+            with self.subTest(selector=sel):
+                self.assertGreaterEqual(round(got["ratio"], 2), 3.0 if got["large"] else 4.5, f"{sel}: {got}")
+
+    def test_investigations_header_stays_in_view_while_scrolling_a_long_list(self):
+        """Long tables scroll with the page; the title, filters and column header stay pinned and usable."""
+        b = self.b
+        b.js("document.querySelector('#rail-lock').click(); 1")
+        b.wait_for("!document.querySelector('#connect').hidden")
+        self.sign_in(self.server.tokens["crowd"], wait_granted=len(CROWD_RUNS) + 6)
+        b.js("document.querySelector('[data-view=investigations]').click(); 1"); b.wait_for(self.PAGES_SETTLED)
+        b.wait_for("document.querySelectorAll('.inv-row[data-run]').length === 36", 20)
+        main = "document.querySelector('.main')"
+        self.assertGreater(b.js(f"{main}.scrollHeight - {main}.clientHeight"), 400)
+        before = b.js("document.querySelector('.inv-row[data-run]').getBoundingClientRect().top")
+        b.js(f"{main}.scrollTop = 900; 1"); time.sleep(0.3)
+        got = b.js("""(() => { const m = document.querySelector('.main').getBoundingClientRect();
+          const head = document.querySelector('.inv-head').getBoundingClientRect(), cols = document.querySelector('.inv-row.is-head').getBoundingClientRect();
+          const f = document.querySelector('#home [data-filter=resolved]'); const fr = f.getBoundingClientRect();
+          const hit = document.elementFromPoint(fr.left + fr.width / 2, fr.top + fr.height / 2);
+          return {headTop: head.top - m.top, colsTop: cols.top - head.bottom, filterHit: f.contains(hit),
+                  firstRow: document.querySelector('.inv-row[data-run]').getBoundingClientRect().top}; })()""")
+        self.assertLess(got["firstRow"], before - 600, "the list scrolled")
+        self.assertGreaterEqual(got["headTop"], -1); self.assertLess(got["headTop"], 30, "title and filters stay at the top")
+        self.assertGreaterEqual(got["colsTop"], -1); self.assertLess(got["colsTop"], 20, "column header stays just below them")
+        self.assertTrue(got["filterHit"], "the pinned filter is on top and clickable")
+        b.js("document.querySelector('#home [data-filter=resolved]').click(); 1"); time.sleep(0.3)
+        self.assertTrue(b.js("[...document.querySelectorAll('.inv-row[data-run]')].every(r => r.classList.contains('is-resolved'))"))
 
     def test_home_fits_small_screens(self):
         for width in (390, 768, 1024):

@@ -27,6 +27,7 @@ export function createHome(env) {
   // ---------------------------------------------------------------- data
 
   function reset() {
+    st.gen = (st.gen || 0) + 1;
     st.items.clear();
     st.granted = st.pages = st.error = null;
     st.loaded = 0; st.loading = false; st.view = "home"; st.filter = "all"; st.sort = "newest"; st.rendered = false;
@@ -34,8 +35,20 @@ export function createHome(env) {
     for (const c of Object.values(cards)) c.toggleAttribute("data-focused", false);
   }
 
-  async function loadPage(page) {
+  // Sign-out: forget the summaries and remove every card's content (rebuilt on the next render).
+  function clear() {
+    reset();
+    st.transition += 1;
+    cancelAll(Object.values(cards));
+    clearMorph();
+    headObserver.disconnect();
+    trendSize = "";
+    for (const c of Object.values(cards)) replace(c);
+  }
+
+  async function loadPage(page, gen) {
     const res = await env.api(`/v1/summaries/${page}`);
+    if (res.stale || gen !== st.gen) return false;  // from an ended session: never shown
     if (res.status !== 200 || !Array.isArray(res.body.items)) {
       const code = (res.body && res.body.error) || `http_${res.status}`;
       if (code === "invalid_token") { env.signOut(); return false; }
@@ -53,15 +66,17 @@ export function createHome(env) {
 
   async function load() {
     if (st.loading) return;
+    const gen = st.gen;
     st.loading = true; st.error = null;
     render();
     let page = st.loaded + 1;
     const limit = st.loaded + AUTO_PAGES;
     while (page <= limit && (st.pages === null || page <= st.pages)) {
-      if (!(await loadPage(page))) break;
+      if (!(await loadPage(page, gen))) break;
       render();
       page += 1;
     }
+    if (gen !== st.gen) return;
     st.loading = false;
     render();
   }
@@ -371,6 +386,13 @@ export function createHome(env) {
 
   // ---------------------------------------------------------------- render
 
+  const headObserver = new ResizeObserver((entries) => {
+    for (const e of entries) {
+      const inv = e.target.closest(".inv");
+      if (inv) inv.style.setProperty("--inv-head-h", `${e.target.offsetHeight}px`);
+    }
+  });
+
   function fill(id, { both = false, resized = false } = {}) {
     const f = figures();
     const c = cards[id];
@@ -396,6 +418,10 @@ export function createHome(env) {
           s("svg", { viewBox: "0 0 24 24", class: "icon", "aria-hidden": "true" }, s("path", { d: st.view === "investigations" ? "M7 10l5 5 5-5" : "M7 14l5-5 5 5" }))),
         h("div", { class: "h-layer h-compact" }, bandCompact(f)),
         h("div", { class: "h-layer h-expanded" }, st.view === "investigations" || both ? bandExpanded(f) : null));
+      // The sticky column header sits just below the sticky title and filters, whatever their height.
+      headObserver.disconnect();
+      const head = c.querySelector(".inv-head");
+      if (head) headObserver.observe(head, { box: "border-box" });
     }
   }
 
@@ -483,5 +509,5 @@ export function createHome(env) {
                                         { spring: "panel", delay: 30 * i }));
   }
 
-  return { root, reset, load, render, setView, enter, get view() { return st.view; }, get state() { return st; }, figures };
+  return { root, reset, clear, load, render, setView, enter, get view() { return st.view; }, get state() { return st; }, figures };
 }
