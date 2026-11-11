@@ -418,6 +418,10 @@ export function createHome(env) {
     const id = ++st.transition;
     const all = CARD_IDS.map((c) => cards[c]);
     const first = new Map(all.map((c) => [c, { r: rectIn(c, root), o: Number(getComputedStyle(c).opacity) }]));
+    // Each layer's rendered opacity right now, so an interrupted morph reverses from where it is.
+    const shown = (sel) => { const l = cards.band.querySelector(sel), cs = l && getComputedStyle(l);
+                             return cs && cs.display !== "none" ? Number(cs.opacity) : 0; };
+    const from = { compact: shown(".h-compact"), expanded: shown(".h-expanded") };
     cancelAll(all);
     clearMorph();  // an interrupted morph never leaves its in-flight state behind
     if (next) root.dataset.focus = next; else delete root.dataset.focus;
@@ -425,11 +429,7 @@ export function createHome(env) {
     fill("band", { both: true });  // both layers carry content for the crossfade
     const band = cards.band;
     const last = new Map(all.map((c) => [c, rectIn(c, root)]));
-    if (quiet || prefersReducedMotion()) {
-      fill("band");
-      if (!quiet) animate(band.querySelector(next ? ".h-expanded" : ".h-compact"), [{ opacity: 0 }, { opacity: 1 }]);
-      return;
-    }
+    if (quiet || prefersReducedMotion()) { fill("band"); return; }  // lands directly, never through a dimmed frame
     const anims = [];
     const f0 = first.get(band).r, l0 = last.get(band);
     band.classList.add("is-lifted", "is-morphing");
@@ -439,8 +439,14 @@ export function createHome(env) {
     const outgoing = band.querySelector(next ? ".h-compact" : ".h-expanded");
     incoming.style.width = `${l0.w}px`; incoming.style.height = `${l0.h}px`;
     outgoing.style.width = `${f0.w}px`; outgoing.style.height = `${f0.h}px`;
-    anims.push(animate(outgoing, [{ opacity: 1 }, { opacity: 0 }], { duration: 170, easing: "cubic-bezier(.3,0,.7,1)", fill: "forwards" }));
-    anims.push(animate(incoming, [{ opacity: 0, transform: "translateY(6px)" }, { opacity: 1, transform: "none" }], { spring: "panel", delay: 110 }));
+    // A short, offset crossfade: the incoming content starts at once and the outgoing begins to
+    // fade 40 ms later (sooner when a reversed morph's incoming content is already partly visible),
+    // so the band is never empty (the stronger layer stays above 0.6) and the two never sit near
+    // full strength together (their sum stays about 1.25).
+    const fadeIn = from[next ? "expanded" : "compact"], fadeOut = from[next ? "compact" : "expanded"];
+    anims.push(animate(outgoing, [{ opacity: fadeOut }, { opacity: 0 }], { duration: 160, delay: Math.round(40 * (1 - fadeIn)), easing: "linear", fill: "both" }));
+    anims.push(animate(incoming, [{ opacity: fadeIn }, { opacity: 1 }], { duration: 160, easing: "linear", fill: "backwards" }));
+    anims.push(animate(incoming, [{ transform: "translateY(6px)" }, { transform: "none" }], { spring: "panel" }));
     let k = 0;
     for (const c of all) {
       if (c === band) continue;
@@ -453,7 +459,8 @@ export function createHome(env) {
     finished(anims, 1400).then(() => {
       if (id !== st.transition) return;
       clearMorph();
-      fill("band");
+      // Keep the visible nodes (no rebuild, so no final-frame swap); only drop the hidden table.
+      if (!next) replace(band.querySelector(".h-expanded"));
     });
   }
 

@@ -882,6 +882,8 @@ button.insp-row:active { transform: scale(0.99); }
 .h-band[data-focused] .h-compact { display: none; }
 .h-band[data-focused] .h-expanded { display: flex; }
 .h-band.is-morphing .h-layer { display: flex; position: absolute; top: 0; left: 0; overflow: hidden; }
+/* while morphing, each layer keeps its own end size; the band clips them to its current shape */
+.h-band.is-morphing { overflow: clip; }
 .band-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1fr); gap: 24px; height: 100%; min-height: 0; }
 .band-col { display: flex; flex-direction: column; min-height: 0; }
 .band-col h3 { margin: 0 0 10px; font-size: 14.5px; font-weight: 520; letter-spacing: -0.01em; color: var(--on-dark); }

@@ -632,6 +632,9 @@ class HomeBrowserTests(unittest.TestCase):
             b.wait_for("document.querySelector('#app').dataset.page === 'home' && document.querySelector('#connect').hidden", 20)
             b.js("document.querySelector('[data-view=investigations]').click(); 1")
             b.wait_for("document.querySelector('#home').dataset.focus === 'band'")
+            # the band swaps its content directly: no fade through a dimmed or empty band
+            self.assertEqual(b.js("[...document.querySelectorAll('.h-layer')].flatMap(l => l.getAnimations()).length"), 0)
+            self.assertEqual(b.js(self.BAND_STATE)["x"], 1)
             b.js("document.querySelector('.inv-row[data-run]').click(); 1")
             b.wait_for("document.querySelector('#app').dataset.page === 'run' && document.querySelector('.outcome-word')", 20)
             b.js("document.querySelector('[data-view=home]').click(); 1")
@@ -645,6 +648,80 @@ class HomeBrowserTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             shutil.rmtree(secret_dir, ignore_errors=True)
+
+    # ---- PR #26 review: the charcoal band's expand/collapse crossfade
+
+    BAND_STATE = ("(() => { const b = document.querySelector('.h-band');"
+                  "const eff = e => { let o = 1; for (let p = e; p && p !== b.parentElement; p = p.parentElement) {"
+                  "const cs = getComputedStyle(p); if (cs.display === 'none' || cs.visibility === 'hidden') return 0; o *= Number(cs.opacity); }"
+                  "return o; };"
+                  "const br = b.getBoundingClientRect(), clip = getComputedStyle(b).overflow;"
+                  "const spill = [...b.querySelectorAll('.h-layer')].filter(l => eff(l) > 0.02).some(l => { const r = l.getBoundingClientRect();"
+                  "return clip === 'visible' && (r.bottom > br.bottom + 1 || r.right > br.right + 1); });"
+                  "return {c: eff(b.querySelector('.h-compact')), x: eff(b.querySelector('.h-expanded')), spill}; })()")
+
+    def step_band(self, trigger, until=600, then=None):
+        """Step a band morph every 30 ms with its animations paused; return per-frame layer states."""
+        b = self.b
+        b.js("window.__st = window.__st || window.setTimeout; window.setTimeout = (f, ms) => window.__st(f, ms > 300 ? 1e8 : ms); 1")
+        b.js(f"{trigger}; window.__anims = document.getAnimations().filter(a => isFinite(a.effect.getComputedTiming().endTime));"
+             " window.__anims.forEach(a => a.pause()); 1")
+        frames = []
+        for t in range(0, until, 30):
+            b.js(f"window.__anims.forEach(a => {{ a.currentTime = {t}; }}); 1")
+            frames.append((t, b.js(self.BAND_STATE)))
+        if then is None:
+            b.js("window.__anims.forEach(a => a.finish()); window.setTimeout = window.__st; 1")
+            b.wait_for(HOME_SETTLED, 10)
+        return frames
+
+    def assert_crossfade(self, frames, label):
+        for t, f in frames:
+            with self.subTest(phase=label, t=t):
+                self.assertGreaterEqual(max(f["c"], f["x"]), 0.6, f"band content nearly invisible: {f}")
+                self.assertLessEqual(f["c"] + f["x"], 1.3, f"both layers near full strength: {f}")
+                self.assertFalse(f["spill"], "a layer is drawn outside the band")
+
+    def test_band_crossfades_without_a_blank_frame(self):
+        b = self.b
+        for round_ in range(2):  # repeated expand/collapse behaves the same every time
+            self.assert_crossfade(self.step_band("document.querySelector('.band-notch').click()"), f"expand {round_}")
+            self.assertEqual(b.js("document.querySelector('#home').dataset.focus"), "band")
+            self.assertEqual(b.js(self.BAND_STATE)["x"], 1)
+            # the finished morph keeps the visible nodes: no rebuild, so no final-frame swap
+            self.assertEqual(b.js("document.querySelectorAll('.h-expanded .inv-row[data-run]').length > 0"), True)
+            # collapse through the Home pill (expanded Investigations -> Home)
+            self.assert_crossfade(self.step_band("document.querySelector('[data-view=home]').click();"
+                                                 "document.querySelector('.h-compact > *').dataset.keep = 'c'"), f"collapse {round_}")
+            final = b.js(self.BAND_STATE)
+            self.assertEqual((final["c"], final["x"]), (1, 0))
+            self.assertEqual(b.js("document.querySelector('.h-compact [data-keep]') ? 1 : 0"), 1,
+                             "the compact layer was rebuilt at the end of the morph")
+        self.assertEqual(b.console_errors(), [])
+
+    def test_interrupted_band_morph_reverses_from_where_it_is(self):
+        b = self.b
+        out = self.step_band("document.querySelector('.band-notch').click()", until=120, then=False)
+        mid = out[-1][1]
+        back = self.step_band("document.querySelector('.band-notch').click()")
+        first = back[0][1]
+        self.assertAlmostEqual(first["c"], mid["c"], delta=0.06, msg="compact layer jumped when the morph reversed")
+        self.assertAlmostEqual(first["x"], mid["x"], delta=0.06, msg="expanded layer jumped when the morph reversed")
+        self.assert_crossfade(back, "reverse")
+        self.assertIsNone(b.js("document.querySelector('#home').dataset.focus || null"))
+        self.assertFalse(b.js("document.querySelector('.h-band').classList.contains('is-morphing')"))
+        # rapid clicks with a resize in between settle into a clean, consistent band
+        for _ in range(5):
+            b.js("document.querySelector('.band-notch').click(); 1")
+            time.sleep(0.05)
+        b.call("Emulation.setDeviceMetricsOverride", width=1366, height=768, deviceScaleFactor=1, mobile=False)
+        b.wait_for(HOME_SETTLED, 10)
+        time.sleep(1.6)
+        b.wait_for(HOME_SETTLED, 10)
+        st = b.js(self.BAND_STATE)
+        self.assertEqual(b.js("document.querySelector('#home').dataset.focus"), "band")
+        self.assertEqual((st["c"], st["x"]), (0, 1))
+        self.assertEqual(b.js("[...document.querySelectorAll('.h-layer')].map(l => l.style.cssText)"), ["", ""])
 
     def test_home_fits_small_screens(self):
         for width in (390, 768, 1024):
