@@ -180,6 +180,91 @@ class DashboardBrowserTests(unittest.TestCase):
         self.assertTrue(self.visible(".inspector"))
         self.assertEqual(b.js("[...document.querySelectorAll('.layer')].filter(l => l.style.width).length"), 0)
 
+    # ---- Gaps & uncertainty morph (PR #25 review: compact and expanded content overlapped on collapse)
+
+    CARD_STATE = ("(() => { const c = document.querySelector('[data-card=%s]'); const r = c.getBoundingClientRect();"
+                  "const o = e => Number(getComputedStyle(e).opacity);"
+                  "return {x: r.x, y: r.y, w: r.width, h: r.height, compact: o(c.querySelector('.layer-compact')),"
+                  "expanded: o(c.querySelector('.layer-expanded')), morph: c.classList.contains('is-morphing'),"
+                  "z: Number(getComputedStyle(c).zIndex) || 0, inspZ: Number(getComputedStyle(document.querySelector('#inspector')).zIndex),"
+                  "inline: [...c.querySelectorAll('.layer')].filter(l => l.style.width || l.style.height).length,"
+                  "held: [...c.querySelectorAll('.layer')].reduce((n, l) => n + l.getAnimations().length, 0),"
+                  "transform: getComputedStyle(c).transform}; })()")
+
+    @property
+    def GAPS_STATE(self):
+        return self.CARD_STATE % "gaps"
+
+    def step_through(self, trigger, card="gaps"):
+        """Run a transition with its animations paused and sampled every 30 ms (timers above 300 ms deferred)."""
+        b = self.b
+        b.js("window.__st = window.__st || window.setTimeout; window.setTimeout = (f, ms) => window.__st(f, ms > 300 ? 1e8 : ms); 1")
+        # Keep the transition's own animations: a paused, unfilled animation sought past its end
+        # drops out of document.getAnimations() but must still be finished.
+        b.js(f"{trigger}; window.__anims = document.getAnimations(); window.__anims.forEach(a => a.pause()); 1")
+        frames = []
+        for t in range(0, 900, 30):
+            b.js(f"window.__anims.forEach(a => {{ a.currentTime = {t}; }}); 1")
+            frames.append((t, b.js(self.CARD_STATE % card)))
+        b.js("window.__anims.forEach(a => a.finish()); window.setTimeout = window.__st; 1")
+        return frames
+
+    def settle_gaps(self):
+        self.b.wait_for(SETTLED)
+        return self.b.js(self.GAPS_STATE)
+
+    def assert_overview_gaps(self, state, original):
+        for key in ("x", "y", "w", "h"):
+            self.assertAlmostEqual(state[key], original[key], delta=0.5, msg=key)
+        self.assertEqual((state["compact"], state["morph"], state["inline"], state["held"], state["transform"]),
+                         (1, False, 0, 0, "none"))
+
+    def test_gaps_card_layers_never_show_together_while_morphing(self):
+        b = self.b
+        self.connect(list(preview.RUNS.values()))
+        for card in ("gaps", "hyps", "timeline", "evidence"):  # gaps first: the reported defect
+            original = b.js(self.CARD_STATE % card)
+            for name, trigger in (("expand", f"document.querySelector('[data-card={card}]').click()"),
+                                  ("collapse", "document.querySelector('#insp-close').click()")):
+                frames = self.step_through(trigger, card)
+                for t, s in frames:
+                    with self.subTest(card=card, phase=name, t=t):
+                        if s["morph"]:
+                            self.assertLessEqual(min(s["compact"], s["expanded"]), 0.25,
+                                                 "compact and expanded content visible at the same time")
+                            self.assertGreater(s["z"], s["inspZ"], "card in flight drawn under the inspector")
+                b.wait_for(f"!document.querySelector('[data-card={card}]').classList.contains('is-morphing')", 5)
+            b.wait_for(SETTLED)
+            self.assert_overview_gaps(b.js(self.CARD_STATE % card), original)
+
+    def test_gaps_card_survives_rapid_toggling_switching_and_resizing(self):
+        b = self.b
+        self.connect(list(preview.RUNS.values()))
+        original = b.js(self.GAPS_STATE)
+        for _ in range(3):  # expand and collapse in quick succession, interrupting each transition
+            b.js("document.querySelector('[data-card=gaps] .expand').click(); 1")
+            time.sleep(0.08)
+            b.js("document.querySelector('[data-card=gaps] .expand').click(); 1")
+            time.sleep(0.05)
+        self.assert_overview_gaps(self.settle_gaps(), original)
+        b.js("document.querySelector('[data-card=gaps]').click(); 1")  # gaps -> hypotheses -> overview
+        time.sleep(0.15)
+        b.js("document.querySelector('[data-view=hypotheses]').click(); 1")
+        b.wait_for(SETTLED)
+        self.assertEqual(b.js("document.querySelector('#stage').dataset.focus"), "hyps")
+        self.assertFalse(self.visible("[data-card=gaps]"))
+        self.click('[data-view="overview"]')
+        self.assert_overview_gaps(self.settle_gaps(), original)
+        b.js("document.querySelector('[data-card=gaps]').click(); 1")  # resize while expanding, then collapse
+        time.sleep(0.12)
+        b.call("Emulation.setDeviceMetricsOverride", width=1280, height=860, deviceScaleFactor=1, mobile=False)
+        b.wait_for(SETTLED)
+        focused = b.js(self.GAPS_STATE)
+        self.assertEqual((focused["inline"], focused["morph"], focused["expanded"]), (0, False, 1))
+        b.call("Emulation.setDeviceMetricsOverride", width=1440, height=900, deviceScaleFactor=1, mobile=False)
+        self.key("Escape", 27)
+        self.assert_overview_gaps(self.settle_gaps(), original)
+
     def test_timeline_selection_opens_the_evidence_inspector(self):
         b = self.b
         self.connect(list(preview.RUNS.values()))

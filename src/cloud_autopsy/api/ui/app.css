@@ -180,11 +180,12 @@ h1 { margin: 0; font-size: clamp(26px, 2.5vw, 38px); line-height: 1.04; font-wei
 .stage:not([data-focus]) .card:is([data-card="hero"], [data-card="hyps"], [data-card="timeline"], [data-card="evidence"], [data-card="gaps"]) { cursor: zoom-in; }
 .stage:not([data-focus]) .card:hover { box-shadow: var(--shadow-card), 0 26px 50px -30px rgba(48, 44, 24, 0.3); }
 .card[data-focused] { grid-area: var(--focus-area); z-index: 3; cursor: default; }
-.card.is-lifted { z-index: 4; }
+/* A card in flight stays above the inspector, whose column the hypotheses and gaps cards return into. */
+.card.is-lifted { z-index: 6; }
 .stage[data-focus] .card:not([data-focused]) { opacity: 0; visibility: hidden; pointer-events: none; }
 
 .layer { position: relative; display: flex; flex-direction: column; height: 100%; padding: 20px 22px 20px; min-height: 0; }
-.layer-expanded { display: none; overflow: auto; padding: 24px 26px 28px; scrollbar-width: thin; }
+.layer-expanded { display: none; overflow: auto; padding: 24px 26px 28px; }
 .card[data-focused]:not([data-card="hero"]) .layer-compact { display: none; }
 .card[data-focused] .layer-expanded { display: flex; }
 .card.is-morphing .layer { display: flex; position: absolute; top: 0; left: 0; }
@@ -544,7 +545,28 @@ button.tick:hover { transform: translateY(-50%) scale(1.12); box-shadow: 0 6px 1
 .icon-btn:hover { background: var(--soft-2); }
 .icon-btn:active { transform: scale(0.94); }
 .icon-btn .icon { width: 16px; height: 16px; }
-.insp-content { flex: 1; min-height: 0; overflow: auto; padding: 4px 20px 24px; scrollbar-width: thin; }
+.insp-content { flex: 1; min-height: 0; overflow: auto; padding: 4px 20px 24px; }
+
+/* Understated scrollbars for the dashboard's scrolling panels (not the navigation, which hides
+   its own). Chromium and Safari: a 4px rounded, translucent warm-grey thumb with a soft inner
+   gloss on a transparent track. Browsers without ::-webkit-scrollbar (Firefox) get the thin
+   standard scrollbar in the same colours; Chromium ignores the ::-webkit rules when the standard
+   properties are set, so those are applied only where the pseudo-elements are unsupported. */
+:is(.insp-content, .layer-expanded, .run-list, .field textarea)::-webkit-scrollbar { width: 4px; height: 4px; }
+:is(.insp-content, .layer-expanded, .run-list, .field textarea)::-webkit-scrollbar-track { background: transparent; }
+:is(.insp-content, .layer-expanded, .run-list, .field textarea)::-webkit-scrollbar-corner { background: transparent; }
+:is(.insp-content, .layer-expanded, .run-list, .field textarea)::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(150, 146, 132, 0.30), rgba(128, 132, 116, 0.36));
+  box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.45);
+}
+:is(.insp-content, .layer-expanded, .run-list, .field textarea):hover::-webkit-scrollbar-thumb {
+  background: linear-gradient(90deg, rgba(132, 128, 114, 0.46), rgba(110, 118, 98, 0.52));
+}
+:is(.insp-content, .layer-expanded, .run-list, .field textarea)::-webkit-scrollbar-thumb:active { background: rgba(100, 106, 88, 0.6); }
+@supports not selector(::-webkit-scrollbar) {
+  .insp-content, .layer-expanded, .run-list, .field textarea { scrollbar-width: thin; scrollbar-color: rgba(138, 136, 122, 0.4) transparent; }
+}
 .insp-body { display: flex; flex-direction: column; }
 .eyebrow { margin: 6px 0 2px; font-size: 11.5px; color: var(--muted); letter-spacing: 0.01em; }
 .insp-title { margin: 0; font-size: 22px; font-weight: 640; letter-spacing: -0.025em; line-height: 1.15; overflow-wrap: anywhere; outline: none; }

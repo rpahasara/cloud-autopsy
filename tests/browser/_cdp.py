@@ -109,7 +109,7 @@ class WebSocket:
 class Browser:
     """Headless browser with one page; ``call`` sends a CDP command and returns its result."""
 
-    def __init__(self, width=1440, height=900, reduced_motion=False):
+    def __init__(self, width=1440, height=900, reduced_motion=False, hide_scrollbars=True):
         exe = find_browser()
         if not exe:
             raise RuntimeError("no Chromium-family browser found (set CA_BROWSER)")
@@ -117,8 +117,10 @@ class Browser:
         args = [exe, "--headless=new", "--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0",
                 f"--user-data-dir={self.profile}", "--no-first-run", "--no-default-browser-check",
                 "--disable-extensions", "--disable-background-networking", "--disable-sync",
-                "--disable-component-update", "--disable-default-apps", "--hide-scrollbars",
+                "--disable-component-update", "--disable-default-apps",
                 "--force-color-profile=srgb", f"--window-size={width},{height}", "about:blank"]
+        if hide_scrollbars:
+            args.insert(1, "--hide-scrollbars")
         if os.environ.get("CA_BROWSER_NO_SANDBOX") == "1":
             args.insert(1, "--no-sandbox")  # CI runners whose kernel forbids the sandbox's namespaces
         self.proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

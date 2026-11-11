@@ -436,7 +436,9 @@ function morphLayers(card, expanding, f, l, anims) {
   const [incoming, outgoing, inSize, outSize] = expanding ? [expanded, compact, l, f] : [compact, expanded, l, f];
   incoming.style.width = `${inSize.w}px`; incoming.style.height = `${inSize.h}px`;
   outgoing.style.width = `${outSize.w}px`; outgoing.style.height = `${outSize.h}px`;
-  anims.push(animate(outgoing, [{ opacity: 1 }, { opacity: 0 }], { duration: 170, easing: "cubic-bezier(.3,0,.7,1)" }));
+  // The outgoing layer stays displayed until the whole morph ends, so its fade must hold at 0
+  // ("forwards"); with no fill it would snap back to full opacity over the incoming layer.
+  anims.push(animate(outgoing, [{ opacity: 1 }, { opacity: 0 }], { duration: 170, easing: "cubic-bezier(.3,0,.7,1)", fill: "forwards" }));
   anims.push(animate(incoming, [{ opacity: 0, transform: "translateY(6px)" }, { opacity: 1, transform: "none" }], { spring: "panel", delay: 110 }));
 }
 
@@ -449,7 +451,10 @@ function trackMarkers(anims) {
 
 function afterTransition(next) {
   for (const c of CARD_IDS.map((x) => cards[x])) c.classList.remove("is-morphing", "is-lifted");
-  for (const l of stage.querySelectorAll(".layer")) { l.style.width = ""; l.style.height = ""; }
+  for (const l of stage.querySelectorAll(".layer")) {
+    l.style.width = ""; l.style.height = "";
+    for (const a of l.getAnimations()) a.cancel();  // no held (filled) layer state outlives its transition
+  }
   if (state.topo) state.topo.place();
   if (next) {
     const heading = inspector.querySelector(".insp-title");
