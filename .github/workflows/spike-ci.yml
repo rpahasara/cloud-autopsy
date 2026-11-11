@@ -55,6 +55,12 @@ jobs:
       - name: Local API tests (CA-P2-006b, no database; HTTP on 127.0.0.1 only)
         run: python -I -m unittest discover -s tests/api -t tests/api -v
 
+      - name: Evidence bundle tests (CA-P2-004a, offline, no database)
+        run: python -I -m unittest discover -s tests/app -t tests/app -v
+
+      - name: Example bundles investigate offline (CA-P2-004a)
+        run: python -I tools/create_investigation.py --offline examples/bundles/*
+
       # CA-P2-006c: the read-only dashboard in the runner's preinstalled Chrome (headless, temporary
       # profile, DevTools on 127.0.0.1), served by the real API with the labelled synthetic preview.
       # The sandbox is disabled only because hosted runners may forbid its user namespaces; the

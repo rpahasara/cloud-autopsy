@@ -13,11 +13,9 @@
 
 import random
 
-from ..contracts import acquisition as acq
-from ..contracts import frozen_input as fi
 from ..db import ingest, results, seal
-from ..engine import inputs, result
 from ..synthetic import scenario_001 as scenario
+from . import offline
 
 
 def deliveries(variant, seed=None):
@@ -34,14 +32,26 @@ def deliveries(variant, seed=None):
 
 
 def persist_and_seal(roles, variant, seed=None):
-    plan = scenario.plan(variant)
-    registry = scenario.registry()
+    return persist_records(roles, scenario.plan(variant), scenario.registry(), scenario.clock_domain_records(variant),
+                           deliveries(variant, seed), scenario_id=f"scenario-001-{variant}")
+
+
+def persist_records(roles, plan, registry, clock_records, records, scenario_id, progress=None):
+    """Register, create the run, freeze its clocks, ingest ``records`` in order and seal, each as its
+    least-privileged role. ``progress`` (a dict), when given, receives ``run_id`` and the current
+    ``stage`` as they happen, so a caller can report exactly where a failure left the run."""
+    progress = {} if progress is None else progress
+    progress["stage"] = "register"
     ingest.register_registry(roles["ca_planner"], registry)
     ingest.register_plan(roles["ca_planner"], plan)
-    run_id = ingest.create_run(roles["ca_planner"], plan, scenario_id=f"scenario-001-{variant}")
-    results.declare_clocks(roles["ca_planner"], run_id, plan, registry, scenario.clock_domain_records(variant))
-    outcomes = [ingest.ingest_batch(roles["ca_ingest"], run_id, record, plan, registry).outcome
-                for record in deliveries(variant, seed)]
+    progress["stage"] = "create_run"
+    run_id = ingest.create_run(roles["ca_planner"], plan, scenario_id=scenario_id)
+    progress["run_id"] = run_id
+    progress["stage"] = "declare_clocks"
+    results.declare_clocks(roles["ca_planner"], run_id, plan, registry, clock_records)
+    progress["stage"] = "ingest"
+    outcomes = [ingest.ingest_batch(roles["ca_ingest"], run_id, record, plan, registry).outcome for record in records]
+    progress["stage"] = "seal"
     frozen = seal.seal_run(roles["ca_sealer"], run_id, plan, registry)
     return run_id, frozen.digest, outcomes
 
@@ -61,15 +71,8 @@ def replay_stored(engine_db, run_id):
 
 
 def offline_result(variant, seed=None):
-    plan, registry = scenario.plan(variant), scenario.registry()
-    records = deliveries(variant, seed)
-    frozen = fi.seal(plan, registry, records)
-    members = {(m["evidence_id"], m["content_digest"]) for m in fi.collection_items(frozen, "evidence")}
-    evidence = {}
-    for record in records:
-        for item in acq.decode_batch(record, plan, registry).evidence:
-            if (item.evidence_id, item.content_digest) in members:
-                evidence[item.evidence_id] = item.to_record()
-    inp = inputs.build_input(frozen, plan, registry, list(evidence.values()), scenario.clock_domain_records(variant))
-    _, result_bytes = result.build(inp)
-    return result.verify_result(result_bytes, inp), result_bytes
+    return offline_from_records(scenario.plan(variant), scenario.registry(), deliveries(variant, seed),
+                                scenario.clock_domain_records(variant))
+
+
+offline_from_records = offline.offline_from_records  # re-exported; the offline path needs no database

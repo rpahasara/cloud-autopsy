@@ -22,10 +22,11 @@ The implementation was built under the product owner's [pre-gate development aut
 | Immutable results with verify-on-read replay | `src/cloud_autopsy/db/results.py` | [CA-P2-006a](docs/phase2/ca-p2-006/ca-p2-006a.md) |
 | Loopback read-only API with per-run grants | `src/cloud_autopsy/api/` | [CA-P2-006b](docs/phase2/ca-p2-006/ca-p2-006b.md) |
 | Local dashboard and Home overview, including a labelled synthetic preview | `src/cloud_autopsy/api/ui/`, `tools/dashboard_preview.py` | [CA-P2-006c](docs/phase2/ca-p2-006/ca-p2-006c.md), [006d](docs/phase2/ca-p2-006/ca-p2-006d.md) |
+| Creating investigations from evidence bundles (offline, or database-verified on a disposable database) | `src/cloud_autopsy/app/bundle.py`, `create.py`, `tools/create_investigation.py`, `examples/bundles/` | [CA-P2-004a](docs/phase2/ca-p2-004/ca-p2-004a.md) |
 
 **Not implemented:**
 - collectors or any live cluster access (CA-P2-004);
-- starting an investigation outside the fixture-driven demos;
+- live evidence acquisition: investigations can be created only from synthetic evidence bundles;
 - export, retention, purge or audit logging;
 - AI synthesis;
 - an independent evaluation scorer or held-out truth (CA-P2-007, and the separate [held-out kit](https://github.com/rpahasara/cloud-autopsy/pull/14), PR #14);
@@ -35,6 +36,7 @@ Backlog status: [Phase 2 backlog](docs/reviews/phase1d/phase2-backlog.md#status)
 
 **Try it locally:**
 - **Synthetic preview** (no database; results labelled "not verified"): `python -I tools/dashboard_preview.py`
+- **Create from bundles:** `python -I tools/create_investigation.py --offline examples/bundles/*`. Add `--serve` with the hash-locked interpreter to create database-verified runs and open them in the dashboard ([CA-P2-004a](docs/phase2/ca-p2-004/ca-p2-004a.md)).
 - **Database-verified demos** (Docker, disposable database): `tools/investigation_demo.py` and `tools/api_demo.py`, run with the hash-locked interpreter described in [db/README.md](db/README.md).
 
 ## Phase 1 objective

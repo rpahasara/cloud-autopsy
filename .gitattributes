@@ -2,3 +2,6 @@
 prototype/fixtures/** -text
 prototype/truth/** -text
 prototype/ca_eval/truth-pins.json -text
+
+# CA-P2-004a: example bundles are byte-exact canonical JSON (their SHA-256 is in bundle.json)
+examples/bundles/** -text
