@@ -75,6 +75,8 @@ The API also serves a read-only dashboard at `/` on the same loopback origin ([r
 python -I tools/dashboard_preview.py
 ```
 
+The dashboard opens on **Home**, a summary of the runs granted to the token served by `GET /v1/summaries/{page}` ([record](../docs/phase2/ca-p2-006/ca-p2-006d.md)); sign in with the token alone.
+
 ## End the session
 
 ```bash

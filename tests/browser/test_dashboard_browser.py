@@ -6,6 +6,7 @@ that untrusted evidence text is rendered as text. Skipped when no browser is ins
 ``CA_BROWSER_REQUIRE=1`` (CI), where a missing browser fails the run.
 """
 
+import http.client
 import json
 import os
 import shutil
@@ -34,8 +35,11 @@ REQUIRED = os.environ.get("CA_BROWSER_REQUIRE") == "1"
 HOSTILE = '<img src=x onerror="window.__pwned=1"><script>window.__pwned=2</script>&lt;b&gt;bold'
 HOSTILE_RUN = str(uuid.uuid5(uuid.NAMESPACE_URL, "ca-dashboard-browser/hostile"))
 UNGRANTED_RUN = str(uuid.uuid5(uuid.NAMESPACE_URL, "ca-dashboard-browser/ungranted"))
+MISSING_RUN = str(uuid.uuid5(uuid.NAMESPACE_URL, "ca-dashboard-browser/missing"))  # granted, no stored result
 CSP_RECORDER = ("window.__csp = []; document.addEventListener('securitypolicyviolation', "
                 "e => window.__csp.push(e.violatedDirective + ' ' + e.blockedURI));")
+HOME_SETTLED = ("[...document.querySelectorAll('.h-card, .h-layer')].every(e => e.getAnimations().length === 0)"
+                " && !document.querySelector('.h-card.is-morphing')")
 SETTLED = ("[...document.querySelectorAll('.card, .inspector, .layer')].every(e => e.getAnimations().length === 0)"
            " && !document.querySelector('.card.is-lifted, .card.is-morphing')")
 
@@ -52,7 +56,7 @@ def serve():
         return hostile if run_id == HOSTILE_RUN else load(run_id)
 
     secret_dir = Path(tempfile.mkdtemp(prefix="ca-dashboard-browser-"))
-    record, tokens = G.issue({"viewer": list(preview.RUNS.values()) + [HOSTILE_RUN]})
+    record, tokens = G.issue({"viewer": list(preview.RUNS.values()) + [HOSTILE_RUN, MISSING_RUN]})
     G.write_private(secret_dir / "grants.json", json.dumps(record).encode("utf-8"))
     service = ApiService(G.load(secret_dir / "grants.json"), load_with_hostile, ready, ui=ui.load_assets(), preview=True)
     server = LoopbackServer(service, quiet=True)
@@ -370,6 +374,118 @@ class ReducedMotionTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             shutil.rmtree(secret_dir, ignore_errors=True)
+
+
+@unittest.skipUnless(BROWSER or REQUIRED, "no Chromium-family browser installed (set CA_BROWSER)")
+class HomeBrowserTests(unittest.TestCase):
+    """CA-P2-006d Home: token-only sign-in, figures equal to the API's, Investigations, navigation."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server, cls.token, cls.secret_dir, _ = serve()
+        cls.url = f"http://127.0.0.1:{cls.server.port}/"
+        con = http.client.HTTPConnection("127.0.0.1", cls.server.port, timeout=30)
+        con.request("GET", "/v1/summaries/1", headers={"Authorization": f"Bearer {cls.token}"})
+        cls.summaries = json.loads(con.getresponse().read())
+        con.close()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        shutil.rmtree(cls.secret_dir, ignore_errors=True)
+
+    def setUp(self):
+        self.b = _cdp.Browser(1440, 900)
+        self.b.call("Page.addScriptToEvaluateOnNewDocument", source=CSP_RECORDER)
+        self.b.navigate(self.url)
+        self.b.js(f"document.querySelector('#token').value = {json.dumps(self.token)};"
+                  "document.querySelector('#connect-form').requestSubmit(); 1")
+        self.b.wait_for("document.querySelector('#app').dataset.page === 'home' && document.querySelector('#connect').hidden"
+                        " && document.querySelector('.h-granted .m-value')?.textContent === String("
+                        f"{self.summaries['granted_total']})", 20)
+        self.b.wait_for(HOME_SETTLED)
+
+    def tearDown(self):
+        try:
+            self.assertEqual(self.b.js("window.__csp"), [], "CSP violations")
+            self.assertEqual(self.b.console_errors(), [], "console errors")
+        finally:
+            self.b.close()
+
+    def text(self, selector):
+        return self.b.js(f"document.querySelector({json.dumps(selector)})?.textContent ?? null")
+
+    def test_token_only_sign_in_opens_home_with_the_apis_own_figures(self):
+        items = self.summaries["items"]
+        results = [i for i in items if i["state"] in ("verified", "preview")]
+        resolved = sum(1 for i in results if i["outcome"]["status"] == "resolved")
+        figures = {".h-granted .m-value": str(self.summaries["granted_total"]),
+                   ".h-resolved .m-value": str(resolved),
+                   ".h-abstained .m-value": str(len(results) - resolved),
+                   ".h-attention .m-value": str(sum(1 for i in items if i["state"] == "unverifiable"))}
+        for selector, expected in figures.items():
+            with self.subTest(selector=selector):
+                self.assertEqual(self.text(selector), expected)
+        self.assertEqual(self.text("#run-title"), "Cloud Autopsy")
+        self.assertIn("not verified", self.text("#mode-chip"))
+        self.assertIn("1 not found", self.text(".h-attention .m-foot"))  # MISSING_RUN, never counted as an outcome
+        self.assertEqual(self.text(".orb-value"), f"{len(items)}/{self.summaries['granted_total']}")
+        self.assertTrue(self.text(".h-hero .gauge-value").startswith("0"))  # preview: nothing is verified
+        self.assertEqual(self.b.js("[...document.querySelectorAll('#nav [data-view]')].filter(b => b.getAttribute('aria-disabled') === 'true')"
+                                   ".map(b => b.dataset.view)"), ["overview", "investigation", "timeline", "hypotheses", "evidence"])
+        self.assertEqual(self.b.js("[localStorage.length, sessionStorage.length, document.cookie]"), [0, 0, ""])
+
+    def test_investigations_filter_sort_and_open_a_run(self):
+        b = self.b
+        b.js("document.querySelector('[data-view=investigations]').click(); 1")
+        b.wait_for("document.querySelector('#home').dataset.focus === 'band'")
+        b.wait_for(HOME_SETTLED)
+        rows = b.js("document.querySelectorAll('.inv-row[data-run]').length")
+        self.assertEqual(rows, len(self.summaries["items"]))
+        b.js("document.querySelector('[data-filter=resolved]').click(); 1")
+        resolved = [i for i in self.summaries["items"] if i.get("outcome", {}).get("status") == "resolved"]
+        self.assertEqual(b.js("document.querySelectorAll('.inv-row[data-run]').length"), len(resolved))
+        b.js("document.querySelector('[data-filter=all]').click(); document.querySelector('[data-sort=title]').click(); 1")
+        titles = b.js("[...document.querySelectorAll('.inv-row[data-run] .inv-title b')].map(e => e.textContent).filter(t => t !== '\u2014')")
+        self.assertEqual(titles, sorted(titles))
+        missing = b.js(f"document.querySelector('.inv-row[data-run=\"{MISSING_RUN}\"] .inv-ver').textContent")
+        self.assertEqual(missing, "Not found")
+        target = next(i for i in self.summaries["items"] if i.get("plan_id") == "ca-scenario-001-configmap-unavailable")
+        b.js(f"document.querySelector('.inv-row[data-run=\"{target['run_id']}\"]').click(); 1")
+        b.wait_for("document.querySelector('#app').dataset.page === 'run' && "
+                   "document.querySelector('#run-title').textContent === 'ca-scenario-001-configmap-unavailable'", 20)
+        self.assertEqual(self.text(".outcome-word"), "Abstained")
+        self.assertEqual(b.js("document.querySelectorAll('#nav [data-view][aria-disabled=true]').length"), 0)
+        b.js("document.querySelector('[data-view=home]').click(); 1")
+        b.wait_for("document.querySelector('#app').dataset.page === 'home' && !document.querySelector('#home').hidden")
+        b.wait_for(HOME_SETTLED)
+        self.assertIsNone(b.js("document.querySelector('#home').dataset.focus ?? null"))
+        self.assertEqual(self.text("#nav .is-on"), "Home")
+
+    def test_investigations_view_reverses_and_escape_returns_home(self):
+        b = self.b
+        before = b.js("(() => { const r = document.querySelector('.h-band').getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; })()")
+        b.js("document.querySelector('.band-notch').click(); 1")
+        b.wait_for("document.querySelector('.h-band').getAnimations().length > 0")
+        b.wait_for(HOME_SETTLED)
+        self.assertTrue(b.js("document.querySelector('.h-band').hasAttribute('data-focused')"))
+        self.assertEqual(b.js("getComputedStyle(document.querySelector('.h-trend')).visibility"), "hidden")
+        for kind, code in (("keyDown", 27), ("keyUp", 27)):
+            b.call("Input.dispatchKeyEvent", type=kind, key="Escape", code="Escape", windowsVirtualKeyCode=code)
+        b.wait_for("!document.querySelector('#home').dataset.focus")
+        b.wait_for(HOME_SETTLED)
+        after = b.js("(() => { const r = document.querySelector('.h-band').getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; })()")
+        for a, c in zip(before, after):
+            self.assertAlmostEqual(a, c, delta=0.5)
+        self.assertEqual(b.js("[...document.querySelectorAll('.h-layer')].filter(l => l.style.width || l.getAnimations().length).length"), 0)
+
+    def test_home_fits_small_screens(self):
+        for width in (390, 768, 1024):
+            with self.subTest(width=width):
+                self.b.call("Emulation.setDeviceMetricsOverride", width=width, height=844, deviceScaleFactor=1, mobile=width < 760)
+                time.sleep(0.4)
+                self.assertLessEqual(self.b.js("document.documentElement.scrollWidth"), width)
 
 
 if __name__ == "__main__":

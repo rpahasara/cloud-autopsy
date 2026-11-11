@@ -142,6 +142,11 @@ class SourceSafetyTests(unittest.TestCase):
                 self.assertTrue(request.startswith("/v1/runs/"))
                 self.assertNotIn("token", request)
 
+    def test_home_requests_only_the_summaries_route(self):  # CA-P2-006d
+        home = self.text(ui.UI_DIR / "home.js")
+        self.assertNotIn("fetch(", home)  # it uses the app's queued, token-carrying client
+        self.assertEqual(re.findall(r"env\.api\(`([^`]*)`\)", home), ["/v1/summaries/${page}"])
+
     def test_no_inline_script_style_or_event_handlers_in_the_page(self):
         page = self.text(ui.UI_DIR / "index.html")
         self.assertNotRegex(page, r"<script(?![^>]*\bsrc=)")

@@ -226,6 +226,53 @@ class ApiIntegrationTests(unittest.TestCase):
         finally:
             b.close()
 
+    def test_summaries_list_only_granted_runs_each_verified_on_read(self):  # CA-P2-006d
+        status, body = self.get("/v1/summaries/1")
+        self.assertEqual(status, 200)
+        granted = sorted(list(self.runs.values()) + [self.unknown])
+        self.assertEqual(body["granted_total"], len(granted))
+        self.assertEqual([i["run_id"] for i in body["items"]], granted)
+        self.assertNotIn("data_source", body)
+        by_id = {i["run_id"]: i for i in body["items"]}
+        for variant in scenario.VARIANTS:
+            with self.subTest(variant=variant):
+                item = by_id[self.runs[variant]]
+                self.assertEqual((item["state"], item["verified"]), ("verified", True))
+                self.assertEqual(item["result_digest"], self.stored[variant].result["result_digest"])
+                self.assertEqual(item["outcome"]["status"], self.stored[variant].result["outcome"]["status"])
+        self.assertEqual(by_id[self.unknown], {"run_id": self.unknown, "state": "not_found"})
+        for key in ("to-tamper", "to-malform", "to-misshape"):  # other tests may rewrite these rows first
+            item = by_id[self.runs[key]]
+            with self.subTest(run=key):
+                self.assertIn(item["state"], ("verified", "unverifiable"))
+                if item["state"] == "unverifiable":
+                    self.assertEqual(set(item), {"run_id", "state", "reason"})
+        status, one = self.get("/v1/summaries/1", "one")
+        self.assertEqual([i["run_id"] for i in one["items"]], [self.runs["config-cause"]])
+        self.assertEqual(self.get("/v1/summaries/2")[0], 404)
+        self.assertEqual(self.get("/v1/summaries/1", None)[0], 401)
+
+    @unittest.skipUnless(BROWSER_OK, "no Chromium-family browser installed (set CA_BROWSER)")
+    def test_home_shows_database_verified_summaries(self):  # CA-P2-006d
+        b = _cdp.Browser(1440, 900)
+        try:
+            b.navigate(f"http://127.0.0.1:{self.server.port}/")
+            b.js(f"document.querySelector('#token').value = {json.dumps(self.tokens['one'])};"
+                 "document.querySelector('#connect-form').requestSubmit(); 1")
+            b.wait_for("document.querySelector('#app').dataset.page === 'home' && "
+                       "document.querySelector('.h-granted .m-value')?.textContent === '1'", 30)
+            b.wait_for("document.querySelector('#mode-chip').textContent === 'Verified on read'", 30)
+            self.assertEqual(b.js("document.querySelector('.h-resolved .m-value').textContent"), "1")
+            self.assertTrue(b.js("document.querySelector('.h-hero .gauge-value').textContent").startswith("1"))
+            b.js("document.querySelector('[data-view=investigations]').click(); 1")
+            b.wait_for("document.querySelector('.inv-row[data-run] .inv-ver')?.textContent === 'Verified'", 30)
+            b.js("document.querySelector('.inv-row[data-run]').click(); 1")
+            b.wait_for("document.querySelector('#app').dataset.page === 'run' && "
+                       "document.querySelector('.verify-title')?.textContent === 'Byte-identical replay'", 30)
+            self.assertEqual(b.console_errors(), [])
+        finally:
+            b.close()
+
     def test_tampered_result_is_never_served(self):
         run_id = self.runs["to-tamper"]
         self.assertEqual(self.get(f"/v1/runs/{run_id}/result")[0], 200)  # verified before tampering

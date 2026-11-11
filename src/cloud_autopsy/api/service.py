@@ -29,6 +29,15 @@ starve verified reads. A request that finds its gate full is answered at once wi
 backend (400/401/403/404/405/413/414/431) are answered without taking a slot. Together the
 gates bound the API's database connections to ``max_in_flight + READY_MAX_IN_FLIGHT``.
 
+Run summaries (CA-P2-006d): ``/v1/summaries/{page}`` pages through the run IDs in the caller's
+own grant (never any other run), in run-ID order, ``SUMMARY_PAGE_SIZE`` per page. Every run on
+the page is loaded through the same verify-on-read loader before anything about it is returned;
+a run that fails is reported only by state (``unverifiable`` with its reason, ``not_found`` or
+``unavailable``), never with data. One page request holds a single slot of the verified-read
+gate and verifies its runs one after another, so the work per request is bounded and the
+existing concurrency limits still hold. There is no unrestricted listing and no aggregation
+beyond the page: totals across pages are left to the client, which knows how much it examined.
+
 Dashboard (CA-P2-006c): when built with ``ui`` assets (``ui.load_assets()``), ``GET /`` and a
 fixed set of ``/ui/...`` paths return the static read-only dashboard with its own strict CSP.
 No other route changes. ``preview=True`` is used only by the labelled synthetic preview
@@ -56,6 +65,8 @@ EVIDENCE_ID_PREFIX = "ca-evidence-id-sha256/0.1-provisional:"
 EVIDENCE_HEX = re.compile(r"[0-9a-f]{64}", re.ASCII)
 _RUN_ROUTE = re.compile(r"/v1/runs/([^/]+)/(result|timeline|hypotheses|citations)", re.ASCII)
 _EVIDENCE_ROUTE = re.compile(r"/v1/runs/([^/]+)/evidence/([^/]+)", re.ASCII)
+_SUMMARY_ROUTE = re.compile(r"/v1/summaries/([0-9]{1,4})", re.ASCII)
+SUMMARY_PAGE_SIZE = 10     # PROVISIONAL: verified loads per summary request
 _PATH_CHARS = re.compile(r"[A-Za-z0-9/._:-]+", re.ASCII)
 SECURITY_HEADERS = (("Content-Type", "application/json; charset=utf-8"), ("Cache-Control", "no-store"),
                     ("X-Content-Type-Options", "nosniff"), ("Content-Security-Policy", "default-src 'none'"),
@@ -104,6 +115,39 @@ def _cited(hypothesis):
     ids |= {e for p in hypothesis["prerequisites"] for o in p["orderings"] for e in (o["a"], o["b"])}
     ids |= {e for c in hypothesis["contradictions"] for e in c["evidence_ids"]}
     return sorted(ids)
+
+
+def _summary(run_id, verified, preview):
+    """A compact digest of one verified result: only fields read from the verified document."""
+    r = verified.result
+    entries = r["timeline"]["entries"]
+    by_source = {}
+    seen = set()
+    for e in entries:
+        if e["evidence_id"] in seen:
+            continue
+        seen.add(e["evidence_id"])
+        by_source.setdefault(e["source_id"], {"records": 0, "gaps": 0})["records"] += 1
+    for gap in r["gaps"]:
+        by_source.setdefault(gap["source_id"], {"records": 0, "gaps": 0})["gaps"] += 1
+    cited = set(r["outcome"]["evidence_ids"])
+    statuses = {}
+    for h in r["hypotheses"]:
+        cited.update(_cited(h))
+        statuses[h["status"]] = statuses.get(h["status"], 0) + 1
+    item = {"run_id": run_id, "state": "preview" if preview else "verified", "verified": not preview,
+            "result_digest": verified.result_digest, "plan_id": r["inputs"]["plan_id"],
+            "window": r["inputs"]["window"],
+            "outcome": {"status": r["outcome"]["status"], "mechanism": r["outcome"]["mechanism"],
+                        "reasons": r["outcome"]["reasons"]},
+            "manifest": {"status": r["inputs"]["manifest_status"], "limitations": r["inputs"]["manifest_limitations"]},
+            "evidence": {"records": len(seen), "cited": len(cited & seen), "by_source": by_source},
+            "gaps": {"total": len(r["gaps"]), "mandatory": sum(1 for g in r["gaps"] if g["mandatory"]),
+                     "reasons": sorted({reason for g in r["gaps"] for reason in g["reasons"]})},
+            "hypotheses": statuses,
+            "ordering": {"unplaced": sum(1 for e in entries if not e["reference_ms"]),
+                         "unordered_pairs": sum(1 for o in r["timeline"]["adjacent_orderings"] if o["order"] != "before")}}
+    return item
 
 
 def _views(result):
@@ -157,6 +201,8 @@ class ApiService:
                 return method, "/v1/runs/{run_id}/" + _RUN_ROUTE.fullmatch(path).group(2)
             if _EVIDENCE_ROUTE.fullmatch(path):
                 return method, "/v1/runs/{run_id}/evidence/{evidence_hex}"
+            if _SUMMARY_ROUTE.fullmatch(path):
+                return method, "/v1/summaries/{page}"
         return method, "<rejected>"
 
     def handle(self, method, path, headers, header_bytes=0):
@@ -188,6 +234,10 @@ class ApiService:
                 return _json(200, {"api_version": API_VERSION, "status": "ready"})
             response, overloaded = self._admitted(self._ready, probe)
             return overloaded or response
+
+        summary_match = _SUMMARY_ROUTE.fullmatch(path)
+        if summary_match:
+            return self._summaries(summary_match.group(1), headers)
 
         match = _RUN_ROUTE.fullmatch(path)
         evidence_match = _EVIDENCE_ROUTE.fullmatch(path)
@@ -241,3 +291,44 @@ class ApiService:
                                                     "cited_by_hypothesis_ids": cited_by,
                                                     "record": member["record"]}})
         return _json(200, {**envelope, "data": _views(verified.result)[match.group(2)]})
+
+    def _summaries(self, page_text, headers):
+        if page_text.startswith("0"):
+            return _error(400, "invalid_page")
+        grant = self.grants.authenticate(headers.get("Authorization"))
+        if grant is None:
+            return _error(401, "invalid_token", (("WWW-Authenticate", 'Bearer realm="cloud-autopsy-local"'),))
+        runs = sorted(grant.run_ids)  # only this grant's runs, in a deterministic order
+        pages = max(1, -(-len(runs) // SUMMARY_PAGE_SIZE))
+        page = int(page_text)
+        if page > pages:
+            return _error(404, "page_not_found")
+        chunk = runs[(page - 1) * SUMMARY_PAGE_SIZE: page * SUMMARY_PAGE_SIZE]
+
+        def summarize():
+            items = []
+            for run_id in chunk:  # one at a time: one database connection, inside one gate slot
+                try:
+                    verified = self.load_verified(run_id)
+                except Unavailable:
+                    items.append({"run_id": run_id, "state": "not_found"})
+                except Unverifiable as exc:
+                    items.append({"run_id": run_id, "state": "unverifiable", "reason": exc.code})
+                except BackendDown:
+                    items.append({"run_id": run_id, "state": "unavailable"})
+                else:
+                    items.append(_summary(run_id, verified, self.preview))
+            return items
+
+        items, overloaded = self._admitted(self._work, summarize)
+        if overloaded:
+            return overloaded
+        document = {"api_version": API_VERSION, "granted_total": len(runs), "page": page, "pages": pages,
+                    "page_size": SUMMARY_PAGE_SIZE, "order": "run_id", "items": items,
+                    "verification": ("synthetic preview: computed in memory from fixtures; not read from or verified "
+                                     "against a sealed database run") if self.preview else
+                                    ("each available item was re-executed from its sealed run and is byte-identical "
+                                     "to the stored result; other items carry only their state")}
+        if self.preview:
+            document["data_source"] = "synthetic-preview"
+        return _json(200, document)

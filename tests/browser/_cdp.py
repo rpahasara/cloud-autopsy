@@ -126,12 +126,18 @@ class Browser:
         self.proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         port_file = Path(self.profile) / "DevToolsActivePort"
         deadline = time.time() + 30
-        while not port_file.exists() or not port_file.read_text().strip():
-            if time.time() > deadline or self.proc.poll() is not None:
-                self.close()
-                raise RuntimeError("browser did not start")
-            time.sleep(0.1)
-        port = int(port_file.read_text().split()[0])
+        port = None
+        while port is None:
+            try:  # the browser may still be writing (or holding) the file; Windows then denies the read
+                text = port_file.read_text()
+                port = int(text.split()[0]) if text.strip() else None
+            except (OSError, ValueError, IndexError):
+                port = None
+            if port is None:
+                if time.time() > deadline or self.proc.poll() is not None:
+                    self.close()
+                    raise RuntimeError("browser did not start")
+                time.sleep(0.1)
         for _ in range(100):
             with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=5) as r:
                 pages = [t for t in json.load(r) if t.get("type") == "page"]

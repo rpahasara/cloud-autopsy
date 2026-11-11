@@ -25,7 +25,7 @@ _TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8"
           ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml"}
 ASSETS = {"/": "index.html", "/ui/app.css": "app.css", "/ui/app.js": "app.js", "/ui/dom.js": "dom.js",
           "/ui/motion.js": "motion.js", "/ui/topology.js": "topology.js", "/ui/views.js": "views.js",
-          "/ui/model.js": "model.js", "/ui/icon.svg": "icon.svg"}
+          "/ui/model.js": "model.js", "/ui/home.js": "home.js", "/ui/icon.svg": "icon.svg"}
 
 
 def load_assets():

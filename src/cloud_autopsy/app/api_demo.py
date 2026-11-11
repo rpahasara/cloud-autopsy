@@ -90,6 +90,11 @@ def run(database, out_dir):
         checks["healthz"] = _get(port, "/healthz")[0] == 200
         checks["readyz"] = _get(port, "/readyz")[0] == 200
         checks["dashboard"] = all(_page(port, path) == (200, ui.UI_CSP) for path in ui.ASSETS)
+        status, body, _ = _get(port, "/v1/summaries/1", token)  # CA-P2-006d: the token's own runs, each verified
+        states = {i["run_id"]: i["state"] for i in body.get("items", [])} if status == 200 else {}
+        checks["summaries"] = (status == 200 and set(states) == set(runs.values()) | {missing}
+                               and all(states[runs[v]] == "verified" for v in scenario.VARIANTS)
+                               and states[missing] == "not_found")
         for variant in scenario.VARIANTS:
             run_id, inv = runs[variant], stored[variant]
             status, body, size = _get(port, f"/v1/runs/{run_id}/result", token)
