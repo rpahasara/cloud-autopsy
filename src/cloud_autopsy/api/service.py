@@ -33,7 +33,10 @@ Run summaries (CA-P2-006d): ``/v1/summaries/{page}`` pages through the run IDs i
 own grant (never any other run), in run-ID order, ``SUMMARY_PAGE_SIZE`` per page. Every run on
 the page is loaded through the same verify-on-read loader before anything about it is returned;
 a run that fails is reported only by state (``unverifiable`` with its reason, ``not_found`` or
-``unavailable``), never with data. One page request holds a single slot of the verified-read
+``unavailable``), never with data. Any other failure while one run is verified or summarized is
+contained to that run: it is listed as ``error`` (no reason, no data, never verified), the rest of
+the page is still served, and only the exception's class name is logged (never its message, the
+run ID, a token or any evidence). One page request holds a single slot of the verified-read
 gate and verifies its runs one after another, so the work per request is bounded and the
 existing concurrency limits still hold. There is no unrestricted listing and no aggregation
 beyond the page: totals across pages are left to the client, which knows how much it examined.
@@ -172,11 +175,12 @@ class ApiService:
     ``Unverifiable`` or ``BackendDown``. ``check_ready()`` returns or raises ``BackendDown``."""
 
     def __init__(self, grants, load_verified, check_ready, max_in_flight=DEFAULT_MAX_IN_FLIGHT, ui=None,
-                 preview=False):
+                 preview=False, log=None):
         if not 1 <= int(max_in_flight) <= 64:
             raise ValueError("max_in_flight must be between 1 and 64")
         self.grants, self.load_verified, self.check_ready = grants, load_verified, check_ready
         self.ui, self.preview = dict(ui or {}), bool(preview)
+        self.log = log  # ``log(line)`` for safe diagnostics; the loopback transport supplies its own
         self._work = threading.BoundedSemaphore(int(max_in_flight))
         self._ready = threading.BoundedSemaphore(READY_MAX_IN_FLIGHT)
 
@@ -305,6 +309,12 @@ class ApiService:
             return _error(404, "page_not_found")
         chunk = runs[(page - 1) * SUMMARY_PAGE_SIZE: page * SUMMARY_PAGE_SIZE]
 
+        def failed(run_id, exc):
+            # Contained to this run: a generic state, no data, never verified. Logged by class only.
+            if self.log:
+                self.log(f"api summary_item_error {type(exc).__name__}")
+            return {"run_id": run_id, "state": "error"}
+
         def summarize():
             items = []
             for run_id in chunk:  # one at a time: one database connection, inside one gate slot
@@ -312,12 +322,20 @@ class ApiService:
                     verified = self.load_verified(run_id)
                 except Unavailable:
                     items.append({"run_id": run_id, "state": "not_found"})
+                    continue
                 except Unverifiable as exc:
                     items.append({"run_id": run_id, "state": "unverifiable", "reason": exc.code})
+                    continue
                 except BackendDown:
                     items.append({"run_id": run_id, "state": "unavailable"})
-                else:
+                    continue
+                except Exception as exc:  # noqa: BLE001 -- contained to this run and logged by class
+                    items.append(failed(run_id, exc))
+                    continue
+                try:
                     items.append(_summary(run_id, verified, self.preview))
+                except Exception as exc:  # noqa: BLE001 -- a result that cannot be summarized shows no data
+                    items.append(failed(run_id, exc))
             return items
 
         items, overloaded = self._admitted(self._work, summarize)

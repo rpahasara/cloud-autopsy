@@ -102,6 +102,8 @@ class LoopbackServer(http.server.ThreadingHTTPServer):
         if host != LOOPBACK:
             raise ValueError("the local API binds to 127.0.0.1 only")
         self.service, self.quiet, self.log = service, quiet, log
+        if getattr(service, "log", False) is None:
+            service.log = self.log_line  # the service's safe per-item diagnostics share this log
         super().__init__((LOOPBACK, int(port)), _Handler)
 
     def log_line(self, line):

@@ -39,6 +39,7 @@ MISSING_RUN = str(uuid.uuid5(uuid.NAMESPACE_URL, "ca-dashboard-browser/missing")
 # Distinct run IDs that serve a scenario's result: the "other" grant (disjoint from the viewer's) and a
 # long list for the Investigations table.
 OTHER_RUN = str(uuid.uuid5(uuid.NAMESPACE_URL, "ca-dashboard-browser/other"))
+FAULTY_RUN = str(uuid.uuid5(uuid.NAMESPACE_URL, "ca-dashboard-browser/faulty"))  # its loader fails unexpectedly
 CROWD_RUNS = [str(uuid.uuid5(uuid.NAMESPACE_URL, f"ca-dashboard-browser/crowd-{i}")) for i in range(30)]
 CSP_RECORDER = ("window.__csp = []; document.addEventListener('securitypolicyviolation', "
                 "e => window.__csp.push(e.violatedDirective + ' ' + e.blockedURI));")
@@ -60,11 +61,14 @@ def serve():
     aliases = {OTHER_RUN: preview.RUNS["config-cause"], **{r: variants[i % len(variants)] for i, r in enumerate(CROWD_RUNS)}}
 
     def load_with_hostile(run_id):
+        if run_id == FAULTY_RUN:
+            raise RuntimeError("unexpected loader failure")
         return hostile if run_id == HOSTILE_RUN else load(aliases.get(run_id, run_id))
 
     secret_dir = Path(tempfile.mkdtemp(prefix="ca-dashboard-browser-"))
     record, tokens = G.issue({"viewer": list(preview.RUNS.values()) + [HOSTILE_RUN, MISSING_RUN], "other": [OTHER_RUN],
-                              "crowd": list(preview.RUNS.values()) + CROWD_RUNS})
+                              "crowd": list(preview.RUNS.values()) + CROWD_RUNS,
+                              "faulty": [preview.RUNS["config-cause"], preview.RUNS["no-symptom"], FAULTY_RUN]})
     G.write_private(secret_dir / "grants.json", json.dumps(record).encode("utf-8"))
     service = ApiService(G.load(secret_dir / "grants.json"), load_with_hostile, ready, ui=ui.load_assets(), preview=True)
     server = LoopbackServer(service, quiet=True)
@@ -1046,6 +1050,28 @@ class HomeBrowserTests(unittest.TestCase):
             self.assertFalse(b.js("document.querySelector('#inspector').classList.contains('is-leaving')"))
             b.js("document.querySelector('[data-view=home]').click(); 1"); b.wait_for(self.PAGES_SETTLED)
         self.assertEqual(b.js("window.__visAnims"), [], "the inspector's animations must not animate visibility")
+
+    def test_a_run_that_fails_unexpectedly_is_listed_as_an_error_never_as_an_outcome(self):
+        """Summaries reliability: the failing run does not hide the others, and Home counts it only as needing attention."""
+        b = self.b
+        b.js("document.querySelector('#rail-lock').click(); 1")
+        b.wait_for("!document.querySelector('#connect').hidden")
+        self.sign_in(self.server.tokens["faulty"], wait_granted=3)
+        got = b.js("""({granted: document.querySelector('.h-granted .m-value').textContent,
+          resolved: document.querySelector('.h-resolved .m-value').textContent, abstained: document.querySelector('.h-abstained .m-value').textContent,
+          unverifiable: document.querySelector('.h-attention .m-value').textContent, foot: document.querySelector('.h-attention .m-foot').textContent,
+          grantedFoot: document.querySelector('.h-granted .m-foot').textContent})""")
+        self.assertEqual((got["granted"], got["resolved"], got["abstained"], got["unverifiable"]), ("3", "1", "1", "0"))
+        self.assertIn("1 failed", got["foot"])
+        self.assertIn("2 preview", got["grantedFoot"])
+        b.js("document.querySelector('[data-view=investigations]').click(); 1"); b.wait_for(self.PAGES_SETTLED)
+        row = b.js(f"[...document.querySelector('.inv-row[data-run=\"{FAULTY_RUN}\"]').querySelectorAll('[role=cell]')].map(c => c.innerText.trim())")
+        self.assertEqual(row[1:5], ["—"] * 4, "a failed run shows no window, outcome, evidence or hypotheses")
+        self.assertEqual(row[5], "Error")
+        for k, n in (("resolved", 1), ("abstained", 1), ("attention", 1)):
+            b.js(f"document.querySelector('#home [data-filter={k}]').click(); 1"); time.sleep(0.2)
+            self.assertEqual(b.js("document.querySelectorAll('.inv-row[data-run]').length"), n, k)
+        self.assertEqual(b.console_errors(), [])
 
     def test_home_fits_small_screens(self):
         for width in (390, 768, 1024):

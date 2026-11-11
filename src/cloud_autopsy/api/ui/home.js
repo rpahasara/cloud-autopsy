@@ -1,17 +1,18 @@
 // Home: an overview of the runs granted to the current token, built only from
 // /v1/summaries/{page}. Every figure is computed from the runs this page actually examined, and
 // says so: nothing is extrapolated to runs that were not loaded, and runs that are unverifiable,
-// not found or unavailable are counted as such, never as outcomes.
+// not found, unavailable or failed ("error": a server-side failure, no data) are counted as such,
+// never as outcomes.
 
 import { fmtDate, fmtTime, h, icon, plural, replace, s, shortRun } from "./dom.js";
 import { animate, cancelAll, finished, prefersReducedMotion, rectIn } from "./motion.js";
 import { say } from "./views.js";
 
 const AUTO_PAGES = 5;            // pages loaded without asking (each page is one bounded request)
-const ATTENTION = new Set(["unverifiable", "not_found", "unavailable"]);
+const ATTENTION = new Set(["unverifiable", "not_found", "unavailable", "error"]);
 const HAS_RESULT = new Set(["verified", "preview"]);
 const STATE_LABEL = { verified: "Verified", preview: "Preview \u00b7 not verified", unverifiable: "Unverifiable",
-                      not_found: "Not found", unavailable: "Unavailable" };
+                      not_found: "Not found", unavailable: "Unavailable", error: "Error" };
 const CARD_IDS = ["hero", "granted", "resolved", "abstained", "attention", "trend", "band"];
 
 export function createHome(env) {
@@ -107,6 +108,7 @@ export function createHome(env) {
       unverifiable: group((i) => i.state === "unverifiable"),
       notFound: group((i) => i.state === "not_found"),
       unavailable: group((i) => i.state === "unavailable"),
+      failed: group((i) => i.state === "error"),
       attention: group((i) => ATTENTION.has(i.state)),
       records, cited, sources: [...sources.values()].sort((a, b) => b.records - a.records || a.id.localeCompare(b.id)),
       reasons: [...reasons.entries()].sort((a, b) => b[1] - a[1]),
@@ -320,7 +322,7 @@ export function createHome(env) {
           tile("resolved", "Resolved", f.resolved, h("p", { class: "tile-line" }, icon("clock"), `${avg(f.resolved)} evidence / run`)),
           tile("abstained", "Abstained", f.abstained, h("p", { class: "tile-line" }, icon("clock"), `${avg(f.abstained)} evidence / run`)),
           tile("attention", "Needs attention", f.attention, h("p", { class: "tile-line" }, icon("alert"),
-            `${f.unverifiable.length} unverif. \u00b7 ${f.notFound.length + f.unavailable.length} missing`)))),
+            `${f.unverifiable.length} unverif. \u00b7 ${f.notFound.length + f.unavailable.length + f.failed.length} missing`)))),
       h("div", { class: "band-col" },
         h("div", { class: "band-head" }, h("h3", null, "Recent investigations"),
           h("button", { type: "button", class: "link-light", onclick: (e) => { e.stopPropagation(); setView("investigations"); } }, "View all")),
@@ -404,7 +406,7 @@ export function createHome(env) {
     else if (id === "abstained") replace(c, metricCard("abstained", "Abstained", f.abstained.length, `${pct(f.abstained.length, f.examined)}%`, f, (i) => kindOf(i) === "abstained",
       "no cause asserted"));
     else if (id === "attention") replace(c, metricCard("attention", "Unverifiable", f.unverifiable.length, f.attention.length ? `${f.attention.length} need attention` : "none", f,
-      (i) => kindOf(i) === "attention", `${f.notFound.length} not found \u00b7 ${f.unavailable.length} unavailable`));
+      (i) => kindOf(i) === "attention", `${f.notFound.length} not found \u00b7 ${f.unavailable.length} unavailable${f.failed.length ? ` \u00b7 ${f.failed.length} failed` : ""}`));
     else if (id === "trend") {
       const box = c.querySelector(".trend-plot");
       const size = box && box.clientWidth > 40 ? [box.clientWidth, box.clientHeight] : [640, 200];

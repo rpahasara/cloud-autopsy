@@ -1,6 +1,6 @@
 """One command for the CA-P2-006b local API demonstration (synthetic data only).
 
-  python -I tools/api_demo.py [--out out/ca-p2-006b] [--port 55443]
+  python -I tools/api_demo.py [--out out/ca-p2-006b] [--port 0]
 
 Run it with the interpreter that has the hash-locked driver tree (requirements-db.txt). Like
 tools/investigation_demo.py it creates a private per-session secret directory, starts the
@@ -21,7 +21,8 @@ import investigation_demo  # noqa: E402  (same directory)
 def main():
     parser = argparse.ArgumentParser(description="CA-P2-006b one-command local API demonstration")
     parser.add_argument("--out", default=str(investigation_demo.REPO / "out" / "ca-p2-006b"))
-    parser.add_argument("--port", default=os.environ.get("CA_PG_DEMO_PORT", "55443"))
+    parser.add_argument("--port", default=os.environ.get("CA_PG_DEMO_PORT", "0"),
+                        help="host port on 127.0.0.1; 0 (default) lets Docker choose a free one")
     args = parser.parse_args()
 
     def run():

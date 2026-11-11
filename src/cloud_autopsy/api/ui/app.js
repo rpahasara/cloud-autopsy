@@ -811,7 +811,7 @@ function renderRunList() {
     const outcome = run.result ? run.result.data.outcome.status : sum ? sum.outcome.status : null;
     const label = run.status === "ready" || (run.status === "pending" && sum) ? (outcome === "resolved" ? "Resolved" : "Abstained")
       : run.status === "error" ? (ERRORS[run.error.code] || ["Error"])[0] : run.status === "loading" ? "Verifying\u2026"
-        : run.summary ? ({ unverifiable: "Unverifiable", not_found: "Not found", unavailable: "Unavailable" }[run.summary.state] || "Not loaded") : "Not loaded";
+        : run.summary ? ({ unverifiable: "Unverifiable", not_found: "Not found", unavailable: "Unavailable", error: "Error" }[run.summary.state] || "Not loaded") : "Not loaded";
     return h("li", null, h("button", { type: "button", class: ["run-item", run.id === state.active ? "is-on" : null], dataset: { run: run.id }, onclick: () => (app.dataset.page === "run" ? selectRun(run.id) : openRun(run.id)) },
       h("span", { class: ["run-dot", outcome ? `is-${outcome}` : run.summary ? "is-error" : `is-${run.status}`] }),
       h("span", { class: "run-id mono" }, shortRun(run.id)),
