@@ -41,8 +41,10 @@ import re
 import uuid
 
 from ..contracts import canonical
+from ..contracts import errors as E
+from ..contracts import evidence as ev
 from ..contracts import frozen_input as fi
-from ..contracts.errors import ContractError
+from ..contracts.errors import ContractError, RecordError
 from .adapter import with_retry
 
 MAX_SEAL_ATTEMPTS = 3  # PROVISIONAL: lease acquisitions before a run left in 'sealing' is failed
@@ -85,6 +87,7 @@ def seal_run(sealer_db, run_id, plan, registry, worker=None, lease_seconds=300, 
     try:
         records = _load_batches(sealer_db, run_id)
         frozen = fi.seal(plan, registry, records)
+        _verify_stored_evidence(sealer_db, frozen, plan, registry)
         with_retry(lambda: _phase_b(sealer_db, run_id, plan, registry, worker, version, frozen, fail_before_commit))
     except ContractError as exc:  # deterministic: repeating the seal gives the same error
         reason = failure_reason(exc)
@@ -142,6 +145,22 @@ def _phase_b(db, run_id, plan, registry, worker, version, frozen, fail_before_co
             raise InjectedFailure("injected failure after publishing rows, before commit")
         db.run("UPDATE ca.run SET state = 'sealed', state_version = state_version + 1, lease_owner = NULL, "
                "lease_expires_at = NULL WHERE run_id = CAST(:r AS uuid) AND state_version = :v", r=run_id, v=version)
+
+
+def _verify_stored_evidence(db, frozen, plan, registry):
+    """CA-P2-004d: every sealed member's *stored* record must decode under this run's registry and
+    kind registry version. Stored evidence is deduplicated by (evidence_id, content_digest) and keeps
+    the bytes of its first delivery, which carry that delivery's source-binding digest; a run binding
+    the same object through a different registry must not seal (it could never verify on read).
+    A mismatch is a deterministic contract error: the run fails as ``seal:record_inconsistent``."""
+    members = [(m["evidence_id"], m["content_digest"]) for m in fi.collection_items(frozen, "evidence")]
+    with db.transaction(isolation="REPEATABLE READ", read_only=True):
+        for evidence_id, digest in members:
+            row = db.one("SELECT record_bytes FROM ca.evidence_version WHERE evidence_id = :e AND content_digest = :d",
+                         e=evidence_id, d=digest)
+            if row is None or row[0] is None:
+                raise RecordError(E.RECORD_INCONSISTENT, "a sealed evidence member has no stored record")
+            ev.ObservedEvidence.from_record(canonical.loads(bytes(row[0])), registry, plan.kind_registry_version)
 
 
 def _hold_lease(db, run_id, worker, version, action):

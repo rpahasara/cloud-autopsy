@@ -1,6 +1,6 @@
 # Proposed follow-up: `k8s_event` and `configmap_metadata` as first-class observation kinds
 
-**Status:** proposed, not started and not approved. This plan comes from [CA-P2-004c](ca-p2-004c.md), where Kubernetes Events and ConfigMap metadata are validated and counted but classified `unsupported_conversion`, because `ca-observation-kinds/0.1-provisional` has no kind for them. It needs a separate product-owner decision and an independent contract review before any implementation.
+**Status:** implemented in [CA-P2-004d](ca-p2-004d.md) (draft, unreviewed); this plan is kept as written. Proposed at the time, not started and not approved. This plan comes from [CA-P2-004c](ca-p2-004c.md), where Kubernetes Events and ConfigMap metadata are validated and counted but classified `unsupported_conversion`, because `ca-observation-kinds/0.1-provisional` has no kind for them. It needs a separate product-owner decision and an independent contract review before any implementation.
 
 ## Why this is a contract change, not an adapter change
 

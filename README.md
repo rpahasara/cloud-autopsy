@@ -25,6 +25,7 @@ The implementation was built under the product owner's [pre-gate development aut
 | Creating investigations from evidence bundles (offline, or database-verified on a disposable database) | `src/cloud_autopsy/app/bundle.py`, `create.py`, `tools/create_investigation.py`, `examples/bundles/` | [CA-P2-004a](docs/phase2/ca-p2-004/ca-p2-004a.md) |
 | Run lifecycle: failed seals end `failed`, bounded recovery after lease expiry, fenced stale workers, run-scoped status in the API and dashboard | `src/cloud_autopsy/db/seal.py`, `status.py`, migration `0005`, `api/grants.py`, `api/service.py` | [CA-P2-004b](docs/phase2/ca-p2-004/ca-p2-004b.md) |
 | Offline adapter for recorded Kubernetes responses (Pods, ReplicaSets, Deployment rollouts; Events and ConfigMaps counted as `unsupported_conversion`) | `src/cloud_autopsy/app/k8s_recording.py`, `tools/convert_k8s_recording.py`, `examples/k8s-recordings/` | [CA-P2-004c](docs/phase2/ca-p2-004/ca-p2-004c.md) |
+| Observation kinds 0.2 (`k8s_event`, `configmap_metadata`) beside 0.1; migration `0006`; snapshot-only coverage for recordings | `src/cloud_autopsy/contracts/evidence.py`, `db/migrations/0006_kind_registry_versions.sql`, `app/k8s_recording.py` | [CA-P2-004d](docs/phase2/ca-p2-004/ca-p2-004d.md) |
 
 **Not implemented:**
 - collectors or any live cluster access (CA-P2-004);
