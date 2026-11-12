@@ -174,6 +174,11 @@ def _store_evidence(db, run_id, batch, evidence):
     inserted = db.run("INSERT INTO ca.evidence_version (evidence_id, content_digest, contract_version, record_bytes) "
                       "VALUES (:e, :d, :v, :b) ON CONFLICT DO NOTHING RETURNING 1",
                       e=evidence.evidence_id, d=evidence.content_digest, v="ca-evidence/0.1-provisional", b=record_bytes)
+    # Migration 0007: the record as delivered under this source binding (the first-stored row above
+    # may carry another registry's binding digest; it is never rewritten).
+    db.run("INSERT INTO ca.evidence_binding_record (evidence_id, content_digest, source_binding_digest, record_bytes) "
+           "VALUES (:e, :d, :s, :b) ON CONFLICT DO NOTHING",
+           e=evidence.evidence_id, d=evidence.content_digest, s=evidence.source_binding_digest, b=record_bytes)
     if inserted:
         for t in evidence.times:
             db.run("INSERT INTO ca.evidence_time (evidence_id, content_digest, timestamp_kind, clock_domain_id, "

@@ -156,8 +156,13 @@ def _verify_stored_evidence(db, frozen, plan, registry):
     members = [(m["evidence_id"], m["content_digest"]) for m in fi.collection_items(frozen, "evidence")]
     with db.transaction(isolation="REPEATABLE READ", read_only=True):
         for evidence_id, digest in members:
-            row = db.one("SELECT record_bytes FROM ca.evidence_version WHERE evidence_id = :e AND content_digest = :d",
-                         e=evidence_id, d=digest)
+            source_id = db.one("SELECT source_id FROM ca.evidence_identity WHERE evidence_id = :e", e=evidence_id)
+            binding = registry.get(source_id[0]).binding_digest if source_id else None
+            # The record the engine will read (migration 0007): bound to this run's registry, else the first.
+            row = db.one("SELECT COALESCE(b.record_bytes, v.record_bytes) FROM ca.evidence_version v "
+                         "LEFT JOIN ca.evidence_binding_record b ON b.evidence_id = v.evidence_id "
+                         "AND b.content_digest = v.content_digest AND b.source_binding_digest = :s "
+                         "WHERE v.evidence_id = :e AND v.content_digest = :d", e=evidence_id, d=digest, s=binding)
             if row is None or row[0] is None:
                 raise RecordError(E.RECORD_INCONSISTENT, "a sealed evidence member has no stored record")
             ev.ObservedEvidence.from_record(canonical.loads(bytes(row[0])), registry, plan.kind_registry_version)
