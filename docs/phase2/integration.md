@@ -53,3 +53,45 @@ When `main` contains a PR's head commit, GitHub marks a PR whose base is `main` 
 Either way, no branch is deleted.
 
 **PR #14** (the held-out evaluation kit) is **not** part of this integration. It stays a separate draft. Its two conflicts with `main` (`.github/workflows/spike-ci.yml` and `.gitignore`) are to be resolved later on its own branch with a merge commit, not a rebase, and only when a held-out evaluation with its custody rules is arranged.
+
+## Second integration: PRs #28–#33 (2026-11-12)
+
+**Decision (2026-11-12):** the product owner (solo founder) approved fast-forwarding `main` from `594fc78` to `d19893d`, the head of PR #33. The same limits apply as above: this is a solo product-owner decision about repository history, not a specialist approval, gate disposition, CA-DEC acceptance or production-readiness claim.
+
+**What was integrated:**
+- **PRs #28–#33:** CA-P2-004a (evidence bundles), 004b (lifecycle), 004c (recorded Kubernetes), 004d (observation kinds 0.2), and the 004e plan and collector. That is 28 commits.
+- **The browser-harness fix from PR #34** (`8ca3ec0`). It had been merged up the stack with one merge commit per branch: `4e812e1`, `d19a3d6`, `164525d`, `26f0704`, `ac0bb89` and `d19893d`. Each has the previous head as its first parent.
+- **The one conflict**, in `.github/workflows/spike-ci.yml`, came from two steps added at the same place. It was resolved in `164525d` by keeping both steps.
+
+**History preserved:**
+- No commit was squashed, rebased or rewritten.
+- `main` was updated with `git push origin d19893d…:refs/heads/main`, without `--force`.
+- No branch was deleted.
+
+**Before the push:**
+- **Heads:** every head matched the approved values. `main` was an ancestor of `d19893d` (0 behind, 28 ahead), and every commit listed on PRs #28–#34 was reachable.
+- **CI:** green on every head, with `collector-kind` green on `d19893d`.
+- **Prototype:** `prototype/` was unchanged since `c21b50d`, and the three truth pins verified.
+- **Digests:** the six pinned result digests were byte-identical to `main`.
+- **Migrations:** `0001`–`0004` were unchanged, and `0005`–`0007` were added in order.
+- **Workflow:** the diff only added lines.
+- **Annotated tags:** `ca/main-before-integration-594fc78`, `ca/pr-28-4e812e1`, `ca/pr-29-d19a3d6`, `ca/pr-30-164525d`, `ca/pr-31-26f0704`, `ca/pr-32-ac0bb89`, `ca/pr-33-d19893d` and `ca/pr-34-8ca3ec0`.
+- **Backup bundle:** `cloud-autopsy-pre-integration-2026-11-12.bundle`, SHA-256 `ca868a324ccf7521c440b1c56452566f9e1cd7296883d627c81366cef60a3799`, 78 refs. It was kept outside the repository and test-restored with `git fsck --full`.
+
+**Pull request statuses:**
+- PRs #29–#33 were retargeted to `main` before the push.
+- GitHub recorded all of #28–#33 as merged by the push. GitHub fills in the "merge commit" field itself for merges done outside the merge button; the integration commit is `d19893d`.
+- PR #34 was already recorded as merged into `phase2/ca-p2-004a-bundles`.
+
+**After the push:**
+- **Heads and tags:** `origin/main` is `d19893d`. Every `ca/pr-*` tag except `ca/pr-14-890a03d` is reachable from `main`.
+- **Prototype, pins and digests:** the prototype is unchanged, and the truth pins and the six result digests pass on `main`.
+- **CI:** 
+  - The push run [43249444188](https://github.com/rpahasara/cloud-autopsy/actions/runs/43249444188) passed `offline-checks` and `db-integration` (83 tests). Its `collector-kind` job is skipped on pushes by design.
+  - The manual run [43250465682](https://github.com/rpahasara/cloud-autopsy/actions/runs/43250465682) passed all three jobs. In `collector-kind`, the disposable cluster refused 22 forbidden requests with 403; all four lists were consistent, with Events over 9 pages; the investigation abstained offline and database-verified; and the four fault runs became gaps.
+
+**Final SHA of `main`:** `d19893d6327c3b9907d6b48fb60600019e97a2e5`.
+
+**PR #14** is still not part of either integration. It stays a separate, unmerged draft on `spike/ca-scenario-001`.
+
+Branch protection on `main` is not applied yet. A ruleset is proposed separately for the product owner's approval.
