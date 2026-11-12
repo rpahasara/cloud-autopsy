@@ -85,7 +85,7 @@ def build_input(frozen, plan, registry, evidence_records, clock_declaration, exp
         raise InputError("limit_exceeded", f"more than {MAX_EVIDENCE} evidence records")
     members = {}
     for item in records:
-        evidence = ObservedEvidence.from_record(_record(item), registry)
+        evidence = ObservedEvidence.from_record(_record(item), registry, plan.kind_registry_version)
         expected = sealed.get(evidence.evidence_id)
         if expected is None:
             raise InputError("evidence_not_in_manifest", "an evidence record is not a member of the sealed manifest")

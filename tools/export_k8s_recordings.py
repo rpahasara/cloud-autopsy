@@ -21,7 +21,7 @@ def main(argv=None):
     parser.add_argument("--out", type=Path, default=REPO / "examples" / "k8s-recordings")
     args = parser.parse_args(argv)
     args.out.mkdir(parents=False, exist_ok=False)
-    for name in R.RECORDINGS:
+    for name in R.RECORDINGS + R.RECORDINGS_V2:
         K.export_example(args.out / name, name)
         print(f"wrote {args.out / name}")
     return 0

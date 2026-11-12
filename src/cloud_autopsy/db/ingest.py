@@ -11,7 +11,7 @@ are classified later, per run, by views and by the seal.
 import uuid
 from dataclasses import dataclass
 
-from ..contracts import CONTRACT_VERSIONS, canonical
+from ..contracts import ADDITIONAL_CONTRACT_VERSIONS, CONTRACT_VERSIONS, canonical
 from ..contracts import acquisition as acq
 from ..contracts import frozen_input as fi
 from .adapter import DbError, with_retry
@@ -43,6 +43,12 @@ def check_environment(db):
     pins = dict(db.run("SELECT contract_name, contract_version FROM ca.contract_pin"))
     if pins != expected_contract_pins():
         raise EnvironmentMismatch("database contract pins differ from this package's contract versions")
+    # CA-P2-004d (migration 0006): the additionally supported versions must be exactly this package's.
+    supported = {}
+    for name, version in db.run("SELECT contract_name, contract_version FROM ca.contract_version_supported"):
+        supported.setdefault(name, set()).add(version)
+    if supported != {k: set(v) for k, v in ADDITIONAL_CONTRACT_VERSIONS.items()}:
+        raise EnvironmentMismatch("database supported contract versions differ from this package's")
 
 
 def register_registry(planner_db, registry):

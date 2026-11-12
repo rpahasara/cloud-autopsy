@@ -71,7 +71,8 @@ from ..contracts.sources import SOURCE_REGISTRY_VERSION, SourceRegistry
 from ..engine import clocks, required_rule_versions
 from . import bundle as B
 
-RECORDING_VERSION = "ca-k8s-recording/0.1-provisional"
+RECORDING_VERSION = "ca-k8s-recording/0.1-provisional"      # responses declare a coverage window
+RECORDING_VERSION_V2 = "ca-k8s-recording/0.2-provisional"   # responses record their snapshot instant
 REPORT_VERSION = "ca-k8s-conversion-report/0.1-provisional"
 MANIFEST = "recording.json"
 MAX_MANIFEST_BYTES = 65_536
@@ -80,6 +81,17 @@ UNSUPPORTED_CONVERSION = "unsupported_conversion"
 # Converted query -> recorded resources it needs (all of them, for a complete acquisition).
 QUERIES = {"k8s.deployments": ("deployments", "replicasets"), "k8s.pods": ("pods",)}
 UNSUPPORTED = ("configmaps", "events")
+# CA-P2-004d: under a plan pinning observation kinds 0.2, Events and ConfigMap metadata are converted
+# too, as optional acquisitions (an Event list is short-lived and ConfigMap metadata is context).
+QUERIES_V2 = {**QUERIES, "k8s.configmaps": ("configmaps",), "k8s.events": ("events",)}
+MANDATORY = {"k8s.deployments": True, "k8s.pods": True, "k8s.configmaps": False, "k8s.events": False}
+# Coverage basis (CA-P2-004d coverage audit). A list response is a point-in-time snapshot: it shows
+# what existed at one instant, not what happened across a window. So:
+#   snapshot_instant          (recording 0.2) complete/empty coverage of [snapshot_at, snapshot_at + 1 ms)
+#   recorder_declared_window  (recording 0.1) a window the recorder *declared*; it cannot prove
+#                             continuous history, so the acquisition is partial (continuity_lost) and
+#                             its window is never counted as covered.
+SNAPSHOT_INSTANT, DECLARED_WINDOW = "snapshot_instant", "recorder_declared_window"
 RESOURCES = {  # resource -> (accepted apiVersions, list kind, item kind)
     "pods": (("v1",), "PodList", "Pod"),
     "replicasets": (("apps/v1",), "ReplicaSetList", "ReplicaSet"),
@@ -94,6 +106,7 @@ REVISION_ANNOTATION = "deployment.kubernetes.io/revision"
 _MANIFEST_KEYS = {"contract_version", "recording_id", "data_classification", "source_id", "cluster_id",
                   "namespace", "window", "clock", "responses"}
 _RESPONSE_KEYS = {"resource", "file", "sha256", "http_status", "error", "coverage"}
+_RESPONSE_KEYS_V2 = {"resource", "file", "sha256", "http_status", "error", "snapshot_at"}
 _CLOCK_KEYS = {"clock_domain_id", "status", "offset_ms", "offset_uncertainty_ms", "continuity"}
 _ERRORS = ("timeout", "rate_limited", "unavailable")
 _ID = re.compile(r"[a-z0-9][a-z0-9._-]{0,47}", re.ASCII)  # leaves room for derived identifiers
@@ -206,11 +219,20 @@ def _window(value, field):
     return start, end
 
 
+def _ms_text(epoch_ms):
+    """RFC 3339 UTC text with exact milliseconds."""
+    import datetime
+    t = datetime.datetime.fromtimestamp(epoch_ms / 1000, tz=datetime.timezone.utc)
+    return t.strftime("%Y-%m-%dT%H:%M:%S.") + f"{epoch_ms % 1000:03d}Z"
+
+
 def _validate_manifest(manifest):
     if not isinstance(manifest, dict) or set(manifest) != _MANIFEST_KEYS:
         raise RecordingError("recording_manifest_invalid", "the manifest must have exactly the documented fields")
-    if manifest["contract_version"] != RECORDING_VERSION:
+    if manifest["contract_version"] not in (RECORDING_VERSION, RECORDING_VERSION_V2):
         raise RecordingError("recording_version_unsupported")
+    snapshot = manifest["contract_version"] == RECORDING_VERSION_V2
+    response_keys = _RESPONSE_KEYS_V2 if snapshot else _RESPONSE_KEYS
     if manifest["data_classification"] != "synthetic":
         raise RecordingError("recording_classification_refused", "only synthetic recordings are accepted")
     for field in ("recording_id", "source_id", "cluster_id"):
@@ -225,7 +247,7 @@ def _validate_manifest(manifest):
         raise RecordingError("recording_manifest_invalid", "responses must be a short list")
     seen, files = {}, []
     for i, r in enumerate(responses):
-        if not isinstance(r, dict) or set(r) != _RESPONSE_KEYS:
+        if not isinstance(r, dict) or set(r) != response_keys:
             raise RecordingError("recording_manifest_invalid", f"responses[{i}] must have exactly the documented fields")
         resource = r["resource"]
         if resource == "secrets" or (isinstance(resource, str) and "secret" in resource.lower()):
@@ -245,14 +267,25 @@ def _validate_manifest(manifest):
                 raise RecordingError("recording_path_refused", f"responses[{i}] needs a responses/<name>.json file and sha256")
             if path in files:
                 raise RecordingError("recording_manifest_conflict", f"responses[{i}] repeats a file")
-            coverage = _window(r["coverage"], f"responses[{i}].coverage")
-            if not window[0] <= coverage[0] < coverage[1] <= window[1]:
-                raise RecordingError("recording_manifest_invalid", f"responses[{i}].coverage must lie inside the window")
+            if snapshot:
+                try:
+                    at = pl.exact_ms(r["snapshot_at"], f"responses[{i}].snapshot_at")
+                except ContractError:
+                    raise RecordingError("recording_manifest_invalid",
+                                         f"responses[{i}].snapshot_at must be RFC 3339 UTC") from None
+                if not window[0] <= at < window[1]:
+                    raise RecordingError("recording_manifest_invalid", f"responses[{i}].snapshot_at must lie inside the window")
+                r = {**r, "_basis": SNAPSHOT_INSTANT, "_coverage_ms": (at, at + 1)}
+            else:
+                coverage = _window(r["coverage"], f"responses[{i}].coverage")
+                if not window[0] <= coverage[0] < coverage[1] <= window[1]:
+                    raise RecordingError("recording_manifest_invalid", f"responses[{i}].coverage must lie inside the window")
+                r = {**r, "_basis": DECLARED_WINDOW, "_coverage_ms": coverage}
             files.append(path)
-        elif (path, digest, r["coverage"]) != (None, None, None):
+        elif (path, digest, r["snapshot_at" if snapshot else "coverage"]) != (None, None, None):
             raise RecordingError("recording_manifest_invalid", f"responses[{i}]: a failed response has no file or coverage")
         seen[resource] = r
-    return seen, files
+    return seen, files, snapshot
 
 
 # --------------------------------------------------------------------------- object checks
@@ -497,6 +530,71 @@ def _configmaps(items, ctx):
     return {"configmaps": len(items), "data_keys": keys, "values_excluded": True}
 
 
+# CA-P2-004d converters, used only under a plan pinning observation kinds 0.2.
+
+def _event_observations(items, ctx):
+    """Kubernetes Events -> ``k8s_event``. The free-text message (and note) is never read."""
+    _events(items, ctx)  # the same validation and namespace isolation as the counted path
+    observations = []
+    for item in items:
+        meta = _metadata(item, ctx["namespace"])
+        involved = item.get("involvedObject") or item.get("regarding")
+        series = item.get("series") if isinstance(item.get("series"), dict) else {}
+        count = next((c for c in (item.get("count"), item.get("deprecatedCount"), series.get("count"))
+                      if c is not None), None)
+        if type(count) is not int or count < 1:
+            raise _ItemInvalid("event_count_invalid")
+        last = next((t for t in (item.get("lastTimestamp"), item.get("eventTime"), series.get("lastObservedTime"))
+                     if t is not None), None)
+        if not isinstance(last, str):
+            raise _ItemInvalid("event_time_missing")
+        first = item.get("firstTimestamp") or item.get("deprecatedFirstTimestamp")
+        times = [_time(last, ctx["clock"])]
+        if isinstance(first, str):
+            times.append(_time(first, ctx["clock"], "first_seen"))
+        source = item.get("source") if isinstance(item.get("source"), dict) else {}
+        component = source.get("component") or item.get("reportingComponent") or item.get("reportingController")
+        observations.append(_observation(
+            "k8s_event", f"k8s:event/{ctx['namespace']}/{meta['name']}@{meta['resource_version']}", meta["uid"],
+            meta["resource_version"], "Event", ctx["namespace"], meta["name"], times,
+            {"involved_kind": involved.get("kind"), "involved_name": involved.get("name"), "type": item.get("type"),
+             "reason": item.get("reason"), "count": count, "reporting_component": component or None}))
+    return observations
+
+
+def _configmap_observations(items, ctx):
+    """ConfigMaps -> ``configmap_metadata``: key *names* only. Values are never read, hashed or copied;
+    credential-like key names are withheld and only counted."""
+    observations = []
+    for item in items:
+        meta = _metadata(item, ctx["namespace"])
+        names, withheld = {}, 0
+        for field in ("data", "binaryData"):
+            data = item.get(field)
+            if data is None:
+                names[field] = []
+                continue
+            if not isinstance(data, dict):
+                raise _ItemInvalid("configmap_data_invalid")
+            kept = []
+            for key in data:  # iterates key names only
+                if ev._CREDENTIAL_KEY.search(key):
+                    withheld += 1
+                else:
+                    kept.append(key)
+            names[field] = sorted(kept)
+        immutable = item.get("immutable", False)
+        if type(immutable) is not bool:
+            raise _ItemInvalid("configmap_immutable_invalid")
+        observations.append(_observation(
+            "configmap_metadata", f"k8s:configmap/{ctx['namespace']}/{meta['name']}@{meta['resource_version']}",
+            meta["uid"], meta["resource_version"], "ConfigMap", ctx["namespace"], meta["name"],
+            [_time(meta["created"], ctx["clock"])],
+            {"data_key_names": names["data"], "binary_key_names": names["binaryData"], "withheld_key_count": withheld,
+             "immutable": immutable}))
+    return observations
+
+
 # ------------------------------------------------------------------------------- responses
 
 def _load_response(root, response, resource):
@@ -572,11 +670,45 @@ def _sort(observations):
 
 # ---------------------------------------------------------------------------------- convert
 
-def convert(directory):
-    """Convert one recording directory. Raises ``RecordingError`` when the recording is refused."""
+
+def _coverage(responses, needed):
+    """(adjustment, coverage, basis, item error) for resources that all answered HTTP 200.
+
+    Recording 0.2: every needed resource must share one snapshot instant; the acquisition then covers
+    exactly [snapshot_at, snapshot_at + 1 ms). Different instants cannot be joined into one verified
+    view: partial (continuity_lost). Recording 0.1: the recorder-declared window cannot prove
+    continuous history: partial (continuity_lost), with the declared window as unverified coverage."""
+    spans = [responses[r]["_coverage_ms"] for r in needed]
+    basis = responses[needed[0]]["_basis"]
+    start, end = max(s for s, _ in spans), min(e for _, e in spans)
+    if basis == SNAPSHOT_INSTANT:
+        if len(set(spans)) == 1:
+            return None, {"start": _ms_text(start), "end": _ms_text(end)}, basis, None
+        lo, hi = min(s for s, _ in spans), max(e for _, e in spans)
+        return "continuity_lost", {"start": _ms_text(lo), "end": _ms_text(hi)}, basis, None
+    if start >= end:  # the declared windows do not overlap: nothing at all can be stated
+        return "disjoint", None, basis, "coverage_disjoint"
+    return "continuity_lost", {"start": _ms_text(start), "end": _ms_text(end)}, basis, None
+
+
+def convert(directory, kind_registry_version=ev.KIND_REGISTRY_VERSION):
+    """Convert one recording directory into a plan pinning ``kind_registry_version``.
+
+    Observation kinds 0.1 (the default) converts Pods, ReplicaSets and rollouts; Events and ConfigMaps
+    are counted as ``unsupported_conversion``. Observation kinds 0.2 also converts Events
+    (``k8s_event``) and ConfigMap metadata (``configmap_metadata``), and needs a 0.2 (snapshot)
+    recording. Raises ``RecordingError`` when the recording is refused."""
+    if kind_registry_version not in ev.KIND_REGISTRIES:
+        raise RecordingError("recording_kinds_unsupported", "unsupported observation-kind registry version")
+    v2 = kind_registry_version == ev.KIND_REGISTRY_VERSION_V2
+    queries = QUERIES_V2 if v2 else QUERIES
+    unsupported_resources = () if v2 else UNSUPPORTED
     root = Path(os.path.abspath(directory))
     manifest, manifest_sha = _read_manifest(root)
-    responses, files = _validate_manifest(manifest)
+    responses, files, snapshot = _validate_manifest(manifest)
+    if v2 and not snapshot:
+        raise RecordingError("recording_kinds_need_snapshot_recording",
+                             "observation kinds 0.2 needs a ca-k8s-recording/0.2-provisional (snapshot) recording")
     _check_layout(root, files)
     ctx = {"namespace": manifest["namespace"], "source_id": manifest["source_id"],
            "clock": manifest["clock"]["clock_domain_id"]}
@@ -590,7 +722,10 @@ def convert(directory):
         registry_record = {"contract_version": SOURCE_REGISTRY_VERSION, "registry_id": f"{recording_id}-sources",
                            "sources": [{"source_id": ctx["source_id"], "source_kind": "kubernetes_api",
                                         "cluster_id": manifest["cluster_id"], "namespace": ctx["namespace"],
-                                        "clock_domain_ids": [ctx["clock"]], "query_ids": sorted(QUERIES)}]}
+                                        # One binding for every kinds version: records carry the binding
+                                        # digest, so a 0.1 and a 0.2 conversion of the same object must share
+                                        # it to share byte-identical stored evidence (CA-P2-004d).
+                                        "clock_domain_ids": [ctx["clock"]], "query_ids": sorted(QUERIES_V2)}]}
         registry = SourceRegistry.from_record(registry_record)  # also validates the namespace and cluster binding
         clocks.declare(registry, [clock_record])
     except (ContractError, clocks.ClockDeclarationError) as exc:
@@ -598,10 +733,10 @@ def convert(directory):
     plan_record = {"contract_version": pl.RUN_PLAN_VERSION, "plan_id": recording_id, "registry_id": registry.registry_id,
                    "registry_digest": registry.digest,
                    "window": {"start": manifest["window"]["start"], "end": manifest["window"]["end"]},
-                   "expected_acquisitions": [{"source_id": ctx["source_id"], "query_id": q, "mandatory": True}
-                                             for q in sorted(QUERIES)],
-                   "contract_versions": pl.required_contract_versions(), "rule_versions": required_rule_versions(),
-                   "synthesis_mode": "disabled", "limits": dict(LIMITS)}
+                   "expected_acquisitions": [{"source_id": ctx["source_id"], "query_id": q, "mandatory": MANDATORY[q]}
+                                             for q in sorted(queries)],
+                   "contract_versions": pl.required_contract_versions(kind_registry_version),
+                   "rule_versions": required_rule_versions(), "synthesis_mode": "disabled", "limits": dict(LIMITS)}
     try:
         plan = pl.RunPlan.from_record(plan_record, registry)
     except ContractError as exc:
@@ -617,10 +752,10 @@ def convert(directory):
                 loaded[resource] = exc
 
     acquisitions, batches = [], []
-    for query in sorted(QUERIES):
-        needed = QUERIES[query]
+    for query in sorted(queries):
+        needed = queries[query]
         entry = {"query_id": query, "resources": list(needed), "observations": 0, "out_of_scope": {},
-                 "item_errors": {}, "notes": {}}
+                 "item_errors": {}, "notes": {}, "coverage_basis": None}
         failure = None
         for resource in needed:  # the first failed resource decides a failed acquisition
             if resource not in loaded:
@@ -638,17 +773,19 @@ def convert(directory):
             try:
                 if query == "k8s.pods":
                     observations, entry["out_of_scope"]["pods"] = _pods(loaded["pods"][0], ctx)
-                else:
+                elif query == "k8s.deployments":
                     rs_obs, by_deployment, entry["out_of_scope"]["replicasets"] = _replicasets(loaded["replicasets"][0], ctx)
                     rollouts, entry["notes"] = _deployments(loaded["deployments"][0], by_deployment, ctx)
                     observations = rs_obs + rollouts
+                elif query == "k8s.events":
+                    observations = _event_observations(loaded["events"][0], ctx)
+                else:
+                    observations = _configmap_observations(loaded["configmaps"][0], ctx)
                 for observation in observations:  # the evidence contract, before anything is written
                     ev.observe(observation, source_id=ctx["source_id"], registry=registry,
-                               delivery={"query_id": query, "batch_id": "check", "attempt": 1})
-            except _ItemInvalid as exc:
-                failure, observations = (acq.FAILED, "invalid_response"), []
-                entry["item_errors"][exc.code] = entry["item_errors"].get(exc.code, 0) + 1
-            except ContractError as exc:
+                               delivery={"query_id": query, "batch_id": "check", "attempt": 1},
+                               kind_registry_version=kind_registry_version)
+            except (_ItemInvalid, ContractError) as exc:
                 failure, observations = (acq.FAILED, "invalid_response"), []
                 entry["item_errors"][exc.code] = entry["item_errors"].get(exc.code, 0) + 1
         if failure:
@@ -658,17 +795,16 @@ def convert(directory):
             truncated = any(loaded[r][1] for r in needed)
             omitted_counts = [loaded[r][2] for r in needed if loaded[r][1]]
             omitted = sum(omitted_counts) if omitted_counts and None not in omitted_counts else None
-            starts = [pl.exact_ms(responses[r]["coverage"]["start"], "s") for r in needed]
-            ends = [pl.exact_ms(responses[r]["coverage"]["end"], "e") for r in needed]
-            if max(starts) >= min(ends):  # the resources' coverages do not overlap: nothing is verified
+            adjustment, coverage, entry["coverage_basis"], error = _coverage(responses, needed)
+            if adjustment == "disjoint":
                 outcome, reason, coverage, observations, truncated, omitted = acq.FAILED, "invalid_response", None, [], False, None
-                entry["item_errors"]["coverage_disjoint"] = 1
+                entry["item_errors"][error] = 1
+            elif truncated:
+                outcome, reason = acq.PARTIAL, "page_limit"
+            elif adjustment == "continuity_lost":
+                outcome, reason = acq.PARTIAL, "continuity_lost"
             else:
-                bound = max(needed, key=lambda r: pl.exact_ms(responses[r]["coverage"]["start"], "s"))
-                tight = min(needed, key=lambda r: pl.exact_ms(responses[r]["coverage"]["end"], "e"))
-                coverage = {"start": responses[bound]["coverage"]["start"], "end": responses[tight]["coverage"]["end"]}
-                outcome = acq.PARTIAL if truncated else (acq.COMPLETE if observations else acq.EMPTY)
-                reason = "page_limit" if truncated else None
+                outcome, reason = (acq.COMPLETE if observations else acq.EMPTY), None
         observations = _sort(observations)
         entry.update(outcome=outcome, reason=reason, observations=len(observations),
                      coverage_claimed=outcome in (acq.COMPLETE, acq.EMPTY))
@@ -676,7 +812,7 @@ def convert(directory):
         batches += _batches(plan.digest, ctx, query, outcome, reason, coverage, observations, truncated, omitted)
 
     unsupported = []
-    for resource in UNSUPPORTED:
+    for resource in unsupported_resources:
         entry = {"resource": resource, "classification": UNSUPPORTED_CONVERSION, "coverage_claimed": False,
                  "used_as_evidence": False}
         if resource not in responses:
@@ -699,12 +835,21 @@ def convert(directory):
             acq.decode_batch(record, plan, registry)
         except ContractError as exc:
             raise RecordingError("recording_conversion_invalid", exc.code) from None
+    if v2:
+        note = ("observation kinds 0.2: Events become k8s_event (no message) and ConfigMaps become configmap_metadata "
+                "(key names only; values never read). Both are context: no mechanism evaluates them, so they never "
+                "establish a cause, and configmap_metadata is never a configuration change.")
+    else:
+        note = ("events and configmaps are validated and counted only (unsupported_conversion): observation "
+                "kinds 0.1 has no kind for them. No acquisition is planned for them, no coverage is claimed "
+                "and nothing from them is evidence. ConfigMap values are never read.")
     report = {"contract_version": REPORT_VERSION, "recording_id": recording_id, "recording_sha256": manifest_sha,
+              "recording_version": manifest["contract_version"], "kind_registry_version": kind_registry_version,
               "bundle_id": recording_id, "source_id": ctx["source_id"], "cluster_id": manifest["cluster_id"],
               "namespace": ctx["namespace"], "plan_digest": plan.digest, "acquisitions": acquisitions,
-              "unsupported": unsupported,
-              "note": ("events and configmaps are validated and counted only (unsupported_conversion): observation "
-                       "kinds 0.1 has no kind for them. No acquisition is planned for them, no coverage is claimed "
-                       "and nothing from them is evidence. ConfigMap values are never read.")}
+              "unsupported": unsupported, "note": note,
+              "coverage_note": ("a list response is a point-in-time snapshot: it covers its own instant only "
+                                "(snapshot_instant), and a recorder-declared window never proves continuous "
+                                "history (recorder_declared_window: partial, continuity_lost)")}
     canonical.canonical_bytes(report)  # the report itself is canonical JSON
     return Conversion(recording_id, registry_record, plan_record, (clock_record,), tuple(batches), report)

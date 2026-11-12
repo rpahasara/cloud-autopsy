@@ -58,10 +58,21 @@ def exact_ms(raw, name):
     return parsed.epoch_ns // ti.NS_PER_MS
 
 
-def required_contract_versions():
-    """Exact contract versions a plan must pin (imported lazily to avoid an import cycle)."""
-    from . import CONTRACT_VERSIONS
-    return dict(CONTRACT_VERSIONS)
+def required_contract_versions(kind_registry_version=None):
+    """Exact contract versions a plan pins: the baseline (observation kinds 0.1) by default, or the
+    profile with ``kind_registry_version`` (imported lazily to avoid an import cycle)."""
+    from . import CONTRACT_PROFILES, CONTRACT_VERSIONS
+    if kind_registry_version is None:
+        return dict(CONTRACT_VERSIONS)
+    for profile in CONTRACT_PROFILES:
+        if profile["observation-kinds"] == kind_registry_version:
+            return dict(profile)
+    raise ManifestError(E.CONTRACT_VERSION_MISMATCH, "no contract profile pins that kind registry version")
+
+
+def supported_contract_profiles():
+    from . import CONTRACT_PROFILES
+    return [dict(p) for p in CONTRACT_PROFILES]
 
 
 @dataclass(frozen=True)
@@ -84,6 +95,11 @@ class RunPlan:
 
     def expects(self, source_id, query_id):
         return any(s == source_id and q == query_id for s, q, _ in self.expected_acquisitions)
+
+    @property
+    def kind_registry_version(self):
+        """The observation-kind registry this plan pins; its evidence is decoded under exactly this."""
+        return dict(self.contract_versions)["observation-kinds"]
 
     def to_record(self):
         return {"contract_version": RUN_PLAN_VERSION, "plan_id": self.plan_id, "registry_id": self.registry_id,
@@ -150,8 +166,9 @@ class RunPlan:
         if len({(s, q) for s, q, _ in rows}) != len(rows):
             raise _invalid("expected acquisitions must be unique")
 
-        if record["contract_versions"] != required_contract_versions():
-            raise ManifestError(E.CONTRACT_VERSION_MISMATCH, "contract_versions must pin exactly this package")
+        if record["contract_versions"] not in supported_contract_profiles():
+            raise ManifestError(E.CONTRACT_VERSION_MISMATCH,
+                                "contract_versions must pin exactly one of this package's contract profiles")
         rules = record["rule_versions"]
         if not isinstance(rules, dict) or len(rules) > MAX_RULE_VERSIONS:
             raise _invalid(f"rule_versions must be an object of at most {MAX_RULE_VERSIONS} entries")

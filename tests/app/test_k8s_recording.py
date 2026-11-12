@@ -39,16 +39,16 @@ EXAMPLES = REPO / "examples" / "k8s-recordings"
 LEAKS = ("synthetic-placeholder-not-a-secret", "maxConnections=4", "Back-off", "ScalingReplicaSet", "ConfigChanged",
          "configuration changed", "secretKeyRef", "checkout-db\"", "last-applied")
 # Pinned for determinism: SHA-256 of bundle.json and of the canonical report, and the offline result digest.
-PINS = {
-    "rollout-complete": ("b0ab16f0bae6da89dc703478c07be41e5da159191acf2b731b4e1ed2b4998070",
-                         "bb60f69da4df84232f65357347422496e3a7d864573c04c8514ba94e8155ffc6",
-                         "7630383de1c3addfd523d9c6a5b74f297ea72bbe3f8d037b7c0d0fb8100299bc"),
-    "degraded": ("9bb957876e543463bad14bb8f9905871f88834d7012ec58fb26a31be880a22d9",
-                 "492a553e67f9e47fd737f892869c8d6fca9771ab4bae1241ce9e3a65dfe10169",
-                 "5a335d6c44ff0ab1c43b9bad8055b5156fd547b40ee1fa15e94ece96f2a8a381"),
-    "events-only": ("e0f2db15e76fc2435f882fdc6956d2fd11a1f2d943317c985f0ed8603bad2da6",
-                    "e80c6eda51dfc36e59a5ae65c3f0ea928b7bdf03b1ea7e75b80ef1879cd16b2b",
-                    "22960bd7682fbf7450fd4c44e02c24466508c32eebae4fe319c611d7a78c4c00"),
+PINS = {  # re-pinned in CA-P2-004d: declared windows are partial (continuity_lost); one registry binding
+    "rollout-complete": ("110781368a7e61e12abfa634a75fbd82df6d4f16f7d264c5191e0ca2a9d96716",
+                         "9568cba850b84fe5027dc65c91a586f15e76704ce5def87d0e009fc1e60bae66",
+                         "b0ee1e1283b0a68e8c53fd32ab590944316827e07767ed0c069b4dc06768a218"),
+    "degraded": ("71e50717aaa51eab571b63c4c5c642ef7617704bac5d490cb4d69234112ac2af",
+                 "9cb1163372742640dfd329c7c0c25bc6783a9ed2e07d84798c0f972e4f75360b",
+                 "88900ac589b32a917cb9e3ba0c94b75978c11217d8ffb143e452bd1ec63d5e28"),
+    "events-only": ("b96cc8d16ee254a1f8916ee780ba944b2f95594098ac9ea2069d99fc589bebda",
+                    "d760b86f7c2793f7664e27fb0a59008fd5ac9080ef67a90030358101b90c445f",
+                    "ce066b4f193986d44589abd190a3b8741529ed820f31dc9eb7156f531f51505a"),
 }
 
 
@@ -182,7 +182,11 @@ class UnsupportedTests(Workspace):
                 loaded = B.load(self.bundle(conversion))
                 queries = sorted(a["query_id"] for a in conversion.plan_record["expected_acquisitions"])
                 self.assertEqual(queries, ["k8s.deployments", "k8s.pods"])
-                self.assertEqual(sorted(loaded.registry.sources[0].query_ids), ["k8s.deployments", "k8s.pods"])
+                # CA-P2-004d: the registry binding is the same for every kinds version (so stored evidence
+                # is shared byte-identically); what is planned, batched and covered is the plan's business.
+                self.assertEqual(sorted(loaded.registry.sources[0].query_ids),
+                                 ["k8s.configmaps", "k8s.deployments", "k8s.events", "k8s.pods"])
+                self.assertEqual(sorted(q for _, q, _ in loaded.plan.expected_acquisitions), queries)
                 self.assertTrue(all(b["query_id"] in queries for b in loaded.batches))
                 frozen = fi.seal(loaded.plan, loaded.registry, list(loaded.batches))
                 self.assertEqual(sorted(a["query_id"] for a in frozen.root()["acquisitions"]), queries)
@@ -339,7 +343,24 @@ class HonestFailureTests(Workspace):
         body["items"][0]["metadata"]["annotations"]["deployment.kubernetes.io/revision"] = "1"
         self.set_body(root, "deployments", body)
         a = self.acquisition(self.convert(root), "k8s.deployments")
-        self.assertEqual((a["outcome"], a["observations"], a["notes"]), ("complete", 2, {"no_previous_revision": 1}))
+        # CA-P2-004d coverage correction: a 0.1 recording's declared window is partial, never complete
+        self.assertEqual((a["outcome"], a["reason"], a["observations"], a["notes"]),
+                         ("partial", "continuity_lost", 2, {"no_previous_revision": 1}))
+
+    def test_a_recorder_declared_window_never_claims_coverage(self):
+        """CA-P2-004d regression: a declared window cannot prove continuous history (false completeness)."""
+        for name in R.RECORDINGS:
+            conversion = self.convert(EXAMPLES / name)
+            for a in conversion.report["acquisitions"]:
+                with self.subTest(recording=name, query=a["query_id"]):
+                    self.assertFalse(a["coverage_claimed"])
+                    self.assertNotIn(a["outcome"], ("complete", "empty"))
+                    if a["coverage_basis"] is not None:
+                        self.assertEqual(a["coverage_basis"], K.DECLARED_WINDOW)
+            loaded = B.load(self.bundle(conversion))
+            frozen = fi.seal(loaded.plan, loaded.registry, list(loaded.batches))
+            self.assertTrue(all(a["verified_ms"] == 0 for a in frozen.root()["acquisitions"]), name)
+            self.assertEqual(frozen.root()["status"], "incomplete", name)
 
     def test_disjoint_coverage_is_not_verified(self):
         root = self.copy()

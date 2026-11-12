@@ -69,6 +69,10 @@ jobs:
             name="$(basename "$rec")"
             python -I tools/convert_k8s_recording.py "$rec" --out "$RUNNER_TEMP/k8s/$name" --report "$RUNNER_TEMP/k8s/$name.report.json"
           done
+          for rec in examples/k8s-recordings/snapshot-*; do  # CA-P2-004d: observation kinds 0.2
+            name="$(basename "$rec")-kinds-0.2"
+            python -I tools/convert_k8s_recording.py "$rec" --kinds 0.2 --out "$RUNNER_TEMP/k8s/$name" --report "$RUNNER_TEMP/k8s/$name.report.json"
+          done
           python -I tools/create_investigation.py --offline "$RUNNER_TEMP"/k8s/*/
 
       # CA-P2-006c: the read-only dashboard in the runner's preinstalled Chrome (headless, temporary

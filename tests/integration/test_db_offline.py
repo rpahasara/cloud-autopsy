@@ -46,7 +46,8 @@ class MigrationDiscoveryTests(unittest.TestCase):
         self.assertEqual([m.filename for m in found], ["0001_core.sql", "0002_ingest_requires_collecting.sql",
                                                       "0003_engine_read_views.sql",
                                                       "0004_investigation_results.sql",
-                                                      "0005_run_status_view.sql"])
+                                                      "0005_run_status_view.sql",
+                                                      "0006_kind_registry_versions.sql"])
         for m in found:
             self.assertEqual(len(m.sha256), 64)
             self.assertTrue(m.sql.isascii())

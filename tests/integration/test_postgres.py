@@ -80,7 +80,7 @@ class PostgresCase(unittest.TestCase):
 class MigrationTests(PostgresCase):
     def test_migrations_applied_once_and_environment_checked(self):  # CA-IT-001, CA-IT-025, CA-IT-031
         self.assertEqual(self.fx.applied, [m.filename for m in migrate.discover()])
-        self.assertEqual(len(self.fx.applied), 5)
+        self.assertEqual(len(self.fx.applied), 6)
         self.assertEqual(migrate.apply(self.owner), [])
         ingest.check_environment(self.reader)
         self.assertEqual(sqlstate(self.owner.run, "UPDATE ca.data_classification SET classification = 'x'"),

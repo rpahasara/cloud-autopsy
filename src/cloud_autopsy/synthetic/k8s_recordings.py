@@ -162,8 +162,48 @@ def manifest(name, listed, files):
             "responses": sorted(({"sha256": None, **e} for e in listed), key=lambda e: e["resource"])}
 
 
+# CA-P2-004d: recordings in ca-k8s-recording/0.2-provisional record each list's snapshot instant.
+#   snapshot-complete  all five lists at one instant (usable with observation kinds 0.1 or 0.2)
+#   snapshot-skewed    deployments and replicasets listed at different instants; events timed out;
+#                      configmaps denied
+RECORDINGS_V2 = ("snapshot-complete", "snapshot-skewed")
+SNAPSHOT_AT = "2026-10-15T08:29:59Z"
+
+
+def _snap(resource, file, at=SNAPSHOT_AT):
+    return {"resource": resource, "file": f"responses/{file}.json", "http_status": 200, "error": None, "snapshot_at": at}
+
+
+def _snap_fail(resource, status, error=None):
+    return {"resource": resource, "file": None, "sha256": None, "http_status": status, "error": error,
+            "snapshot_at": None}
+
+
+def responses_v2(name):
+    b = bodies()
+    if name == "snapshot-complete":
+        listed = [_snap(r, r) for r in ("pods", "replicasets", "deployments", "events", "configmaps")]
+        files = {r: b[r] for r in ("pods", "replicasets", "deployments", "events", "configmaps")}
+    elif name == "snapshot-skewed":
+        listed = [_snap("pods", "pods"), _snap("replicasets", "replicasets"),
+                  _snap("deployments", "deployments", "2026-10-15T08:29:58Z"),
+                  _snap_fail("events", 504, "timeout"), _snap_fail("configmaps", 403)]
+        files = {r: b[r] for r in ("pods", "replicasets", "deployments")}
+    else:
+        raise ValueError("unknown recording")
+    return listed, files
+
+
 def recording_files(name):
     """{relative path: bytes} for one recording; written by ``k8s_recording.export_example``."""
+    if name in RECORDINGS_V2:
+        listed, files = responses_v2(name)
+        doc = manifest(name, listed, files)
+        doc["contract_version"] = K.RECORDING_VERSION_V2
+        doc["responses"] = sorted(({"sha256": None, **e} for e in listed), key=lambda e: e["resource"])
+        out = {f"responses/{file}.json": body_bytes(body) for file, body in files.items()}
+        out[K.MANIFEST] = body_bytes(doc)
+        return out
     listed, files = responses(name)
     doc = manifest(name, listed, files)
     out = {f"responses/{file}.json": body_bytes(body) for file, body in files.items()}

@@ -34,12 +34,16 @@ def main(argv=None):
     parser.add_argument("recording", type=Path)
     parser.add_argument("--out", type=Path, required=True, help="new bundle directory")
     parser.add_argument("--report", type=Path, help="new conversion report file (canonical JSON)")
+    parser.add_argument("--kinds", choices=("0.1", "0.2"), default="0.1",
+                        help="observation kinds the plan pins (0.2 converts Events and ConfigMap metadata; "
+                             "needs a snapshot recording)")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     if args.report and args.report.exists():
         parser.error("--report must name a new file")
+    kinds = K.ev.KIND_REGISTRY_VERSION_V2 if args.kinds == "0.2" else K.ev.KIND_REGISTRY_VERSION
     try:
-        conversion = K.convert(args.recording)
+        conversion = K.convert(args.recording, kinds)
     except K.RecordingError as exc:
         print(json.dumps({"status": "refused", "code": exc.code}) if args.json else f"REFUSED: {exc.code}")
         return 1

@@ -47,7 +47,8 @@ from .versioning import check_envelope
 
 OBSERVATION_VERSION = "ca-observation/0.1-provisional"
 EVIDENCE_VERSION = "ca-evidence/0.1-provisional"
-KIND_REGISTRY_VERSION = "ca-observation-kinds/0.1-provisional"
+KIND_REGISTRY_VERSION = "ca-observation-kinds/0.1-provisional"      # the baseline; unchanged
+KIND_REGISTRY_VERSION_V2 = "ca-observation-kinds/0.2-provisional"   # CA-P2-004d: 0.1 plus two Kubernetes kinds
 ID_ALGORITHM = "ca-evidence-id-sha256/0.1-provisional"
 CONTENT_ALGORITHM = "ca-evidence-content-sha256/0.1-provisional"
 ORIGIN_OBSERVED = "observed"
@@ -193,6 +194,7 @@ class KindSpec:
     required_times: tuple
     optional_times: tuple
     attributes: _Object
+    since: str = "ca-observation-kinds/0.1-provisional"  # the kind registry version that introduced this kind
 
 
 KINDS = {spec.observation_kind: spec for spec in (
@@ -224,6 +226,55 @@ KINDS = {spec.observation_kind: spec for spec in (
         "rule": (RULE, True), "rule_version": (DIGITS, True), "expr_series": (METRIC, True),
         "threshold": (DECIMAL, True), "for": (DURATION, True)})),
 )}
+
+# ``ca-observation-kinds/0.2-provisional`` (CA-P2-004d): every 0.1 kind, unchanged, plus two kinds.
+# A record's ``kind_registry_version`` is the version that *introduced* its kind (``KindSpec.since``),
+# not the version of the plan it was delivered under. So a 0.1 kind produces byte-identical records
+# under a 0.1 or a 0.2 plan, and stored evidence is never re-labelled or reinterpreted; a 0.2 kind
+# is refused under a 0.1 plan.
+EVENT_TYPE = _Text(7, r"Normal|Warning")
+EVENT_REASON = _Text(128, r"[A-Za-z][A-Za-z0-9]{0,127}")
+OBJECT_KIND = _Text(63, r"[A-Z][A-Za-z0-9]{0,62}")
+COMPONENT = _Text(128, r"[A-Za-z0-9][A-Za-z0-9._/:-]{0,127}")
+
+
+class _ConfigKeyNames(_List):
+    """ConfigMap key *names* only, as a set. Credential-like names are refused here: an adapter
+    must withhold them and count them (``withheld_key_count``), never store them."""
+
+    def __init__(self):
+        super().__init__(CONFIG_KEY, max_items=256, as_set=True)
+
+    def check(self, value, path):
+        names = super().check(value, path)
+        if any(_CREDENTIAL_KEY.search(n) for n in names):
+            raise EvidenceError(E.ATTRIBUTE_FORBIDDEN, f"{path} has a credential-like key name")
+        return names
+
+
+KINDS_ADDED_IN_V2 = {spec.observation_kind: spec for spec in (
+    # A Kubernetes Event, without its free-text message. It is context: no mechanism in the 0.1
+    # catalog evaluates it, so it can never establish a cause by itself.
+    KindSpec("k8s_event", "K8S-EVENT", "kubernetes_api", "Event", ("event",), ("first_seen",), _Object({
+        "involved_kind": (OBJECT_KIND, True), "involved_name": (K8S_NAME, True), "type": (EVENT_TYPE, True),
+        "reason": (EVENT_REASON, True), "count": (_Int(1, 1_000_000_000), True),
+        "reporting_component": (_Nullable(COMPONENT), True)}), since=KIND_REGISTRY_VERSION_V2),
+    # ConfigMap metadata: key names and flags only. No values and no value digests (a digest of a
+    # low-entropy value reveals it). It is not a configuration change and is never treated as one.
+    KindSpec("configmap_metadata", "K8S-CONFIG-METADATA", "kubernetes_api", "ConfigMap", ("event",), (), _Object({
+        "data_key_names": (_ConfigKeyNames(), True), "binary_key_names": (_ConfigKeyNames(), True),
+        "withheld_key_count": (_Int(0, 512), True), "immutable": (_Bool(), True)}), since=KIND_REGISTRY_VERSION_V2),
+)}
+KIND_REGISTRIES = {KIND_REGISTRY_VERSION: KINDS, KIND_REGISTRY_VERSION_V2: {**KINDS, **KINDS_ADDED_IN_V2}}
+
+
+def kinds_for(kind_registry_version):
+    """The kinds a plan pinning ``kind_registry_version`` accepts; any other version is refused."""
+    kinds = KIND_REGISTRIES.get(kind_registry_version)
+    if kinds is None:
+        raise EvidenceError(E.OBSERVATION_KIND_UNSUPPORTED, "the kind registry version is not supported")
+    return kinds
+
 
 _OBSERVATION_FIELDS = ("source_ref", "observation_kind", "source_uid", "source_version", "entity", "times",
                        "attributes")
@@ -344,8 +395,11 @@ class ObservedEvidence:
                 "times": [_time_input(t) for t in self.times], "attributes": _thaw(self.attributes)}
 
     @classmethod
-    def from_record(cls, record, registry):
-        """Strictly decode a stored record and re-derive identity, digest and every derived field."""
+    def from_record(cls, record, registry, kind_registry_version=KIND_REGISTRY_VERSION):
+        """Strictly decode a stored record and re-derive identity, digest and every derived field.
+
+        ``kind_registry_version`` is the version the run's plan pins. The record must be of a kind
+        that version accepts, and must carry exactly the version that introduced its kind."""
         if not isinstance(registry, SourceRegistry):
             raise RecordError(E.RECORD_FIELD_INVALID, "a SourceRegistry is required")
         if not isinstance(record, dict):
@@ -363,7 +417,7 @@ class ObservedEvidence:
              "observation_kind": record["observation_kind"], "source_uid": record["source_uid"],
              "source_version": record["source_version"], "entity": record["entity"],
              "times": [_time_input(t) for t in stored_times], "attributes": record["attributes"]},
-            source_id=record["source_id"], registry=registry)
+            source_id=record["source_id"], registry=registry, kind_registry_version=kind_registry_version)
         if record["evidence_id"] != rebuilt.evidence_id:
             raise EvidenceError(E.EVIDENCE_ID_MISMATCH, "evidence_id does not match the identity fields")
         if record["content_digest"] != rebuilt.content_digest:
@@ -378,8 +432,10 @@ def _time_input(timestamp):
             "clock_domain_id": timestamp.clock_domain_id, "declared_precision_ns": timestamp.declared_precision_ns}
 
 
-def observe(observation, *, source_id, registry, delivery=None):
+def observe(observation, *, source_id, registry, delivery=None, kind_registry_version=KIND_REGISTRY_VERSION):
     """Validate an untrusted observation for a registered source and build its evidence record.
+
+    ``kind_registry_version`` is the version the plan pins (0.1 unless a plan says otherwise).
 
     ``delivery`` (query_id, batch_id, attempt) is validated against the source binding when
     given and then discarded. Invalid timestamp text is retained with its parse status; it
@@ -399,9 +455,10 @@ def observe(observation, *, source_id, registry, delivery=None):
     check_envelope(observation, OBSERVATION_VERSION)
     _exact_fields({k: v for k, v in observation.items() if k != "contract_version"}, _OBSERVATION_FIELDS,
                   "observation")
-    spec = KINDS.get(observation["observation_kind"]) if isinstance(observation["observation_kind"], str) else None
+    kinds = kinds_for(kind_registry_version)
+    spec = kinds.get(observation["observation_kind"]) if isinstance(observation["observation_kind"], str) else None
     if spec is None:
-        raise EvidenceError(E.OBSERVATION_KIND_UNSUPPORTED, f"observation_kind is not in {KIND_REGISTRY_VERSION}")
+        raise EvidenceError(E.OBSERVATION_KIND_UNSUPPORTED, "observation_kind is not in the plan's kind registry")
     source = registry.get(source_id)
     if source.source_kind != spec.source_kind:
         raise EvidenceError(E.SOURCE_SCOPE_MISMATCH, "observation_kind is not produced by this source kind")
@@ -453,7 +510,7 @@ def observe(observation, *, source_id, registry, delivery=None):
                                                             source_version)),
         origin=ORIGIN_OBSERVED, source_id=source.source_id, cluster_id=source.cluster_id,
         namespace=source.namespace, source_binding_digest=source.binding_digest,
-        kind_registry_version=KIND_REGISTRY_VERSION, observation_kind=spec.observation_kind,
+        kind_registry_version=spec.since, observation_kind=spec.observation_kind,
         evidence_class=spec.evidence_class, source_ref=source_ref, source_uid=source_uid,
         source_version=source_version, entity=entity, times=tuple(stamps), attributes=attributes,
         content_digest=_sha_id(CONTENT_ALGORITHM, content))
@@ -469,6 +526,9 @@ def _cross_checks(spec, entity, attributes):
         for side in ("before", "after"):
             if _sha256_text(change[f"{side}_value"]) != change[f"{side}_value_sha256"]:
                 raise _attr_error(f"attributes.{side}_value_sha256", "does not match the value")
+    if spec.observation_kind == "configmap_metadata" \
+            and set(attributes["data_key_names"]) & set(attributes["binary_key_names"]):
+        raise _attr_error("attributes.binary_key_names", "must not repeat a data key name")
     if spec.observation_kind == "log_line":
         if attributes["pod"] != entity["name"]:
             raise _attr_error("attributes.pod", "must equal entity.name")

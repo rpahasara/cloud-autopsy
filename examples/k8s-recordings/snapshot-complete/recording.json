@@ -1,0 +1,61 @@
+{
+  "contract_version": "ca-k8s-recording/0.2-provisional",
+  "recording_id": "ca-k8s-rec-snapshot-complete",
+  "data_classification": "synthetic",
+  "source_id": "k8s-api",
+  "cluster_id": "ca-kind-synthetic",
+  "namespace": "ca-demo",
+  "window": {
+    "start": "2026-10-15T08:00:00Z",
+    "end": "2026-10-15T08:30:00Z"
+  },
+  "clock": {
+    "clock_domain_id": "k8s-apiserver",
+    "status": "declared",
+    "offset_ms": 0,
+    "offset_uncertainty_ms": 1000,
+    "continuity": "declared_continuous"
+  },
+  "responses": [
+    {
+      "sha256": "4a5d928a1fe5e766e66b3ad3347f5a9edcb5334a0a1104cd2e0046881de6661d",
+      "resource": "configmaps",
+      "file": "responses/configmaps.json",
+      "http_status": 200,
+      "error": null,
+      "snapshot_at": "2026-10-15T08:29:59Z"
+    },
+    {
+      "sha256": "a895d1e022cb508fc2f0fd66d0a7b722aa8470576cc79bdb3eae93a41474213b",
+      "resource": "deployments",
+      "file": "responses/deployments.json",
+      "http_status": 200,
+      "error": null,
+      "snapshot_at": "2026-10-15T08:29:59Z"
+    },
+    {
+      "sha256": "d122693d62df74ea1aaf945abefdb36a08dfdfdb22e900369601bd75a53f8347",
+      "resource": "events",
+      "file": "responses/events.json",
+      "http_status": 200,
+      "error": null,
+      "snapshot_at": "2026-10-15T08:29:59Z"
+    },
+    {
+      "sha256": "837ba13fc66d080e8934d1e8525af1dbddf273271b73d3f024f4901c1bb58295",
+      "resource": "pods",
+      "file": "responses/pods.json",
+      "http_status": 200,
+      "error": null,
+      "snapshot_at": "2026-10-15T08:29:59Z"
+    },
+    {
+      "sha256": "1b330ce5c325983f0bc1a0dad7a0ec189ec2e67b815f24ad759de17ac827a834",
+      "resource": "replicasets",
+      "file": "responses/replicasets.json",
+      "http_status": 200,
+      "error": null,
+      "snapshot_at": "2026-10-15T08:29:59Z"
+    }
+  ]
+}

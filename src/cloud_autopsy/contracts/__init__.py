@@ -10,7 +10,7 @@ Contracts perform no I/O beyond the bytes or values passed to them.
 from .acquisition import BATCH_VERSION
 from .canonical import CANON_VERSION, DIGEST_ALGORITHM
 from .evidence import (CONTENT_ALGORITHM, EVIDENCE_VERSION, ID_ALGORITHM, KIND_REGISTRY_VERSION,
-                       OBSERVATION_VERSION)
+                       KIND_REGISTRY_VERSION_V2, OBSERVATION_VERSION)
 from .frozen_input import FROZEN_INPUT_VERSION, GAP_POLICY_VERSION, MANIFEST_ALGORITHM
 from .plan import RUN_PLAN_VERSION
 from .sources import SOURCE_REGISTRY_VERSION
@@ -33,4 +33,14 @@ CONTRACT_VERSIONS = {
     "frozen-input-digest": MANIFEST_ALGORITHM,
     "gap-policy": GAP_POLICY_VERSION,
 }
-CONTRACT_STATUS = "provisional: unreviewed; not RFC 8785 conformance evidence"
+# CA-P2-004d: the exact contract-version sets a run plan may pin. ``CONTRACT_VERSIONS`` above is
+# the baseline (observation kinds 0.1) and stays the default, so existing plans, frozen inputs and
+# results are byte-identical. The only other profile differs in observation kinds alone (0.2).
+# There is no mixing: a plan pins one whole profile, and its evidence is decoded under that profile.
+CONTRACT_PROFILES = (
+    CONTRACT_VERSIONS,
+    {**CONTRACT_VERSIONS, "observation-kinds": KIND_REGISTRY_VERSION_V2},
+)
+# Versions a database must list as additionally supported (migration 0006), per contract.
+ADDITIONAL_CONTRACT_VERSIONS = {"observation-kinds": (KIND_REGISTRY_VERSION_V2,)}
+CONTRACT_STATUS ="provisional: unreviewed; not RFC 8785 conformance evidence"

@@ -155,7 +155,8 @@ def decode_batch(record, plan, registry):
             raise _invalid("an empty batch has no observations")
 
     delivery_meta = {"query_id": record["query_id"], "batch_id": record["batch_key"], "attempt": delivery["attempt"]}
-    evidence = tuple(ev.observe(obs, source_id=record["source_id"], registry=registry, delivery=delivery_meta)
+    evidence = tuple(ev.observe(obs, source_id=record["source_id"], registry=registry, delivery=delivery_meta,
+                                kind_registry_version=plan.kind_registry_version)
                      for obs in observations)
     return AcquisitionBatch(record["source_id"], record["query_id"], record["batch_key"], sequence, outcome, reason,
                             coverage_ms, cursor["before"], cursor["after"], truncation["truncated"], evidence,
