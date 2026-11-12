@@ -94,4 +94,23 @@ Either way, no branch is deleted.
 
 **PR #14** is still not part of either integration. It stays a separate, unmerged draft on `spike/ca-scenario-001`.
 
-Branch protection on `main` is not applied yet. A ruleset is proposed separately for the product owner's approval.
+## Protection of `main` (2026-11-12)
+
+After the second integration, the product owner approved a repository ruleset for `main`, and it is now active:
+- **Ruleset:** ID `27133931`, named "main protection". It is a branch ruleset defined at repository level, with enforcement `active`.
+- **Target:** `refs/heads/main` only. It names the branch rather than "the default branch", so other branches are not affected.
+- **Bypass actors:** none. GitHub reports that bypass is "never" possible.
+- **Rules:**
+  - **`deletion`:** `main` cannot be deleted.
+  - **`non_fast_forward`:** force pushes and other non-fast-forward updates are refused.
+  - **`required_status_checks`:**
+    - `offline-checks` and `db-integration`, both from GitHub Actions (integration ID `15368`);
+    - "require branches to be up to date" is off;
+    - enforced on branch creation as well.
+- **Not required:**
+  - **Pull-request reviews:** a solo founder cannot approve their own PRs, and GitHub's merge button cannot do the plain fast-forward that keeps every SHA.
+  - **`collector-kind`:** it does not run on pushes to `main`. It is still run on pull requests and by manual dispatch.
+
+**Effect on integration:** a plain, non-force fast-forward of `main` stays possible, once both required checks have passed on the commit being integrated, as they do on its PR branch. History on `main` cannot be rewritten or deleted.
+
+**Scope:** this is repository governance chosen by the product owner. It is not a production authorization, a security approval, a gate disposition or a production-readiness claim.
