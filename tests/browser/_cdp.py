@@ -78,6 +78,29 @@ def _describe(error):
     return f"{type(error).__name__}: {error}"[:200]
 
 
+def _stop_group(pgid, timeout=5.0):
+    """POSIX: kill what is left of the browser's process group and wait until it is gone."""
+    import signal
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except ProcessLookupError:
+        return []
+    except OSError as error:
+        return [f"process group: {_describe(error)}"]
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            return []
+        except OSError:
+            break
+        time.sleep(0.02)
+    # Killed members waiting to be reaped by init still answer signal 0, so no problem is reported
+    # here; the profile removal that follows is checked instead.
+    return []
+
+
 def _list_targets(port, timeout):
     """GET /json/list on 127.0.0.1 with plain http.client: no proxy environment is consulted."""
     con = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
@@ -203,7 +226,10 @@ class Browser:
             if os.environ.get("CA_BROWSER_NO_SANDBOX") == "1":
                 args.insert(1, "--no-sandbox")  # CI runners whose kernel forbids the sandbox's namespaces
             self._stderr = tempfile.TemporaryFile()
-            self.proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=self._stderr)
+            # POSIX: its own process group, so helpers that outlive the main process can be stopped
+            # before the profile is removed (otherwise they recreate it).
+            group = {"start_new_session": True} if os.name == "posix" else {}
+            self.proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=self._stderr, **group)
             phase = "DevToolsActivePort"
             port = self._wait_for_port(deadline)
             phase = "/json/list"
@@ -348,6 +374,8 @@ class Browser:
                     proc.wait(10)
                 except Exception as error2:
                     problems.append(f"kill: {_describe(error2)}")
+            if os.name == "posix":
+                problems += _stop_group(proc.pid)
         stderr, self._stderr = getattr(self, "_stderr", None), None
         if stderr:
             try:

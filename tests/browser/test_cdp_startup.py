@@ -55,6 +55,9 @@ class StartupReliabilityTests(unittest.TestCase):
             if proc.poll() is None:
                 subprocess.Popen.kill(proc)
                 proc.wait(10)
+        helper = Path(self.state) / "helper.pid"
+        if helper.exists() and os.name == "posix" and not _gone(int(helper.read_text())):
+            os.kill(int(helper.read_text()), 9)
         for profile in self.profiles():
             _rmtree(profile)
         _rmtree(self.state)
@@ -172,6 +175,16 @@ class StartupReliabilityTests(unittest.TestCase):
         self.assertIn("CDP setup failed", message)
         self.assert_nothing_left()
 
+    @unittest.skipUnless(os.name == "posix", "process groups are POSIX; Chrome on Windows ends its own helpers")
+    def test_helpers_that_outlive_the_browser_cannot_recreate_the_profile(self):
+        """Seen in CI: profile directories reappeared after close() because helper processes kept writing."""
+        b = self.start("straggler")
+        helper = int((Path(self.state) / "helper.pid").read_text())
+        self.assertFalse(b.close())
+        time.sleep(1.5)  # past the moment the helper would write
+        self.assert_nothing_left()
+        self.assertTrue(_gone(helper), "a helper process survived close()")
+
     def test_close_is_idempotent(self):
         b = self.start("ok")
         self.assertFalse(b.close())
@@ -216,6 +229,21 @@ class StartupReliabilityTests(unittest.TestCase):
 class _FlakyTerminate(subprocess.Popen):
     def terminate(self):
         raise OSError("terminate refused (simulated)")
+
+
+def _gone(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    return _is_zombie(pid)
+
+
+def _is_zombie(pid):
+    try:
+        return Path(f"/proc/{pid}/stat").read_text().split(")")[-1].split()[0] == "Z"
+    except OSError:
+        return False
 
 
 def _rmtree(path):

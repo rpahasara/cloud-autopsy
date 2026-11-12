@@ -77,6 +77,9 @@ def main():
         print(f"startup+evaluate seconds: median={statistics.median(durations):.2f} max={max(durations):.2f}")
     for line in failures:
         print("FAILURE:", line)
+    for path in sorted(left):  # what reappeared, to tell a late writer from a failed removal
+        entries = sorted(os.listdir(path))[:10] if os.path.isdir(path) else []
+        print(f"LEFT: {os.path.basename(path)} entries={entries}")
     return 1 if failures or left else 0
 
 

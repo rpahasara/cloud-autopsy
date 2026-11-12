@@ -15,6 +15,7 @@ runners are reproduced on request:
       exit_before_port=C    exit with code C before writing the port
       exit_after_port=C     write the port, then exit with code C
       ws_refuse             refuse the WebSocket upgrade
+      straggler             start a helper that outlives the process and later writes into the profile
       noisy                 write a DevTools URL, the profile path and control characters to stderr
   --fake-state=DIR          each launch records its argv as DIR/launch-N.json
 
@@ -149,6 +150,12 @@ def main():
         sys.stderr.write(f"DevTools listening on ws://127.0.0.1:{port}/devtools/browser/{SECRET}\n")
         sys.stderr.write(f"[0101/000000.000:ERROR:fake] cannot lock {profile}{os.sep}SingletonLock \x1b[31mred\x07\n")
         sys.stderr.flush()
+    if opts.get("straggler"):  # a helper that outlives this process and then writes into the profile
+        import subprocess
+        code = ("import os, sys, time; time.sleep(1.0); os.makedirs(sys.argv[1], exist_ok=True); "
+                "open(os.path.join(sys.argv[1], 'late-write'), 'w').close(); time.sleep(60)")
+        helper = subprocess.Popen([sys.executable, "-I", "-c", code, str(profile)])
+        (Path(next(a.split("=", 1)[1] for a in argv if a.startswith("--fake-state="))) / "helper.pid").write_text(str(helper.pid))
     time.sleep(opts.get("port_delay", 0))
     if "exit_before_port" in opts:
         sys.exit(int(opts["exit_before_port"]))
