@@ -164,8 +164,10 @@ def run(args):
         for needed in ("pod", "replicaset", "deployment_rollout", "k8s_event"):
             if needed not in kinds:
                 fail(f"no {needed} evidence from the cluster")
-        if report["collections"][0]["collection_resource_version"] is None:
+        if any(c["collection_resource_version"] is None for c in report["collections"]):
             fail("no collection resourceVersion recorded")
+        if max(c["pages"] for c in report["collections"]) < 2:
+            fail("no collection paginated: the resourceVersion check across pages was not exercised")
     elif expect == "truncated":
         if not {"truncated"} & set(outcomes.values()):
             fail(f"expected a truncated collection: {outcomes}")

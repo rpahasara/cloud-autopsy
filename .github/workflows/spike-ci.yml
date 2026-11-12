@@ -293,7 +293,7 @@ jobs:
         run: |
           set -eu
           python -I tools/collect_k8s.py --server "$SERVER" --ca-file "$CRED/ca.crt" --token-file "$CRED/token" \
-            --namespace ca-demo --cluster-id ca-kind-synthetic --recording-id ca-kind-collect --out "$RUNNER_TEMP/run-ok" --page-limit 2
+            --namespace ca-demo --cluster-id ca-kind-synthetic --recording-id ca-kind-collect --out "$RUNNER_TEMP/run-ok" --page-limit 5 --max-pages 100
           python -I tests/kind/kind_checks.py run --out "$RUNNER_TEMP/run-ok" --token-file "$CRED/token" --expect consistent
           python -I tools/create_investigation.py --offline "$RUNNER_TEMP/run-ok/bundle"
 
