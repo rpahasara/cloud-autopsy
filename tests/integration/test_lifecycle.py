@@ -10,6 +10,7 @@ Synthetic data only.
 """
 
 import threading
+import time
 import unittest
 
 import _db
@@ -151,6 +152,87 @@ class LifecycleTests(PostgresCase):
         self.assertEqual(sorted(outcomes), ["conflict"] * 3 + ["ok"])
         self.assertEqual(self.count("frozen_input", run_id), 1)
         self.assertEqual(self.row(run_id)[0], "sealed")
+
+    # --- a lease that expires during publication (PR #29 review) ----------------------------
+
+    def publish_while_lease_expires(self, fail_before_commit):
+        """Worker A checks its 1-second lease at the start of phase B. Inside the same publication
+        transaction (after the pages and rows are inserted, before the final 'sealed' update) it is
+        held until the lease has expired and worker B, started only after expiry, is waiting to take
+        the run over. Returns (A's outcome, B's outcome, whether B was seen blocked on the run lock)."""
+        plan, run_id = self.fresh_run()
+        admin = _db.superuser(self.fx.name)
+        self.addCleanup(admin.close)
+        real_verify, started, seen = seal._verify_published, threading.Event(), {}
+        outcomes = {}
+
+        def slow_verify(db, *args):
+            if not seen:  # worker A's first publication only
+                seen["lease_expires_at"] = db.one("SELECT lease_expires_at FROM ca.run WHERE run_id = CAST(:r AS uuid)",
+                                                  r=run_id)[0]
+                while db.one("SELECT clock_timestamp() > CAST(:t AS timestamptz)", t=seen["lease_expires_at"])[0] is not True:
+                    time.sleep(0.05)
+                started.set()
+                deadline = time.monotonic() + 4  # under the 5 s lock_timeout
+                while time.monotonic() < deadline and not seen.get("blocked"):
+                    seen["blocked"] = admin.one(
+                        "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() "
+                        "AND wait_event_type = 'Lock' AND usename = 'ca_sealer'")[0] > 0
+                    time.sleep(0.05)
+            return real_verify(db, *args)
+
+        def worker_b():
+            started.wait(30)
+            db = self.fx.connect("ca_sealer")
+            try:
+                seal.seal_run(db, run_id, plan, M.REGISTRY, worker="B")
+                outcomes["B"] = "sealed"
+            except seal.SealConflict as exc:
+                outcomes["B"] = f"conflict: {exc}"
+            finally:
+                db.close()
+
+        b = threading.Thread(target=worker_b)
+        b.start()
+        seal._verify_published = slow_verify
+        try:
+            seal.seal_run(self.sealer, run_id, plan, M.REGISTRY, worker="A", lease_seconds=1,
+                          fail_before_commit=fail_before_commit)
+            outcomes["A"] = "sealed"
+        except seal.InjectedFailure:
+            outcomes["A"] = "rolled back"
+        finally:
+            seal._verify_published = real_verify
+            started.set()
+            b.join(60)
+        return run_id, outcomes, seen.get("blocked", False)
+
+    def test_a_lease_expiring_mid_publication_is_fenced_by_the_row_lock(self):
+        reference = self.reference_seal()
+        run_id, outcomes, blocked = self.publish_while_lease_expires(fail_before_commit=False)
+        self.assertTrue(blocked, "worker B never waited on the run lock")
+        # A held the run lock from its lease check to commit, so B could not take over meanwhile; when
+        # B got the lock, the run was already sealed. One publication, byte-identical, no takeover.
+        self.assertEqual(outcomes, {"A": "sealed", "B": "conflict: run is sealed"})
+        self.assertEqual(self.row(run_id), ("sealed", 2, None, None))
+        stored = seal.read_frozen_input(self.reader, run_id)
+        self.assertEqual((stored.root_bytes, stored.page_bytes), (reference.root_bytes, reference.page_bytes))
+        self.assertEqual(self.count("frozen_input", run_id), 1)
+
+    def test_a_publication_failing_after_lease_expiry_rolls_back_and_is_recovered(self):
+        reference = self.reference_seal()
+        run_id, outcomes, blocked = self.publish_while_lease_expires(fail_before_commit=True)
+        self.assertTrue(blocked, "worker B never waited on the run lock")
+        # A's whole publication rolled back; B then took over the expired lease and sealed.
+        self.assertEqual(outcomes, {"A": "rolled back", "B": "sealed"})
+        self.assertEqual(self.row(run_id), ("sealed", 3, None, None))
+        stored = seal.read_frozen_input(self.reader, run_id)
+        self.assertEqual((stored.root_bytes, stored.page_bytes), (reference.root_bytes, reference.page_bytes))
+        # exactly one publication's rows: A's rolled-back inserts left nothing behind
+        root = reference.root()
+        self.assertEqual(self.count("frozen_input", run_id), 1)
+        self.assertEqual(self.count("run_evidence", run_id), root["collections"]["evidence"]["item_count"])
+        self.assertEqual(self.count("run_acquisition", run_id), len(root["acquisitions"]))
 
     def test_recovery_is_bounded_and_counted_durably_across_crashes(self):
         plan, run_id = self.fresh_run()

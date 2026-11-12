@@ -26,6 +26,15 @@ Run lifecycle and recovery (CA-P2-004b, R4):
   that the run is still ``sealing`` at this worker's ``state_version``, owned by this worker, and
   that the lease has not expired (checked against ``clock_timestamp()``, not the transaction
   start). A worker whose lease expired or was taken over gets ``SealConflict`` and changes nothing.
+- **A lease that expires during publication is safe.** The lease is checked once, but under a
+  ``FOR UPDATE`` lock on the run row that phase B holds until it commits or rolls back. Every other
+  change to the run (a takeover in phase A, or a move to ``failed``) must take the same row lock
+  first, so none can happen while the publication transaction is open. If the lease expires
+  mid-publication, a would-be taker waits on the lock (``lock_timeout``, then a bounded retry) and
+  then sees either ``sealed`` (and gets ``SealConflict``) or, after a rollback, an expired
+  ``sealing`` run it may take over. The lease bounds how long a *crashed* worker blocks recovery;
+  the row lock is what serializes publication. A second check just before the final update would
+  add nothing: no takeover can be committed in between. Tested in ``test_lifecycle``.
 """
 
 import re
