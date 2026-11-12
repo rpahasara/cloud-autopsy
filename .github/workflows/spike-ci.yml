@@ -268,17 +268,20 @@ jobs:
           yes list replicasets.apps -n ca-demo
           for r in secrets configmaps; do no get "$r" -n ca-demo; no list "$r" -n ca-demo; done
           no watch pods -n ca-demo
-          no create pods/exec -n ca-demo
-          no get pods/log -n ca-demo
-          no create pods/portforward -n ca-demo
-          no get deployments.apps/scale -n ca-demo
+          # Subresources need --subresource: "pods/log" alone would mean a pod named "log".
+          no create pods --subresource=exec -n ca-demo
+          no get pods --subresource=log -n ca-demo
+          no create pods --subresource=portforward -n ca-demo
+          no get pods --subresource=proxy -n ca-demo
+          no get deployments.apps --subresource=scale -n ca-demo
+          no update deployments.apps --subresource=status -n ca-demo
           for v in create update patch delete deletecollection; do
             no "$v" pods -n ca-demo; no "$v" deployments.apps -n ca-demo; no "$v" replicasets.apps -n ca-demo
           done
           no list pods -n ca-other
           no list nodes
           no get namespaces
-          no create serviceaccounts/token -n ca-collector
+          no create serviceaccounts --subresource=token -n ca-collector
           echo "can-i: every forbidden verb/resource is 'no'; the four permitted lists are 'yes'"
 
       - name: Negative RBAC with the real token (raw requests must get 403)
