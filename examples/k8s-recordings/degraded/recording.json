@@ -1,0 +1,67 @@
+{
+  "contract_version": "ca-k8s-recording/0.1-provisional",
+  "recording_id": "ca-k8s-rec-degraded",
+  "data_classification": "synthetic",
+  "source_id": "k8s-api",
+  "cluster_id": "ca-kind-synthetic",
+  "namespace": "ca-demo",
+  "window": {
+    "start": "2026-10-15T08:00:00Z",
+    "end": "2026-10-15T08:30:00Z"
+  },
+  "clock": {
+    "clock_domain_id": "k8s-apiserver",
+    "status": "declared",
+    "offset_ms": 0,
+    "offset_uncertainty_ms": 1000,
+    "continuity": "declared_continuous"
+  },
+  "responses": [
+    {
+      "sha256": null,
+      "resource": "configmaps",
+      "file": null,
+      "http_status": 403,
+      "error": null,
+      "coverage": null
+    },
+    {
+      "sha256": "a895d1e022cb508fc2f0fd66d0a7b722aa8470576cc79bdb3eae93a41474213b",
+      "resource": "deployments",
+      "file": "responses/deployments.json",
+      "http_status": 200,
+      "error": null,
+      "coverage": {
+        "start": "2026-10-15T08:00:00Z",
+        "end": "2026-10-15T08:30:00Z"
+      }
+    },
+    {
+      "sha256": null,
+      "resource": "events",
+      "file": null,
+      "http_status": 504,
+      "error": "timeout",
+      "coverage": null
+    },
+    {
+      "sha256": "d29894d3417da9b20df226c17683b57cdcc8acd6f5dcc35d607ee06180e06468",
+      "resource": "pods",
+      "file": "responses/pods.json",
+      "http_status": 200,
+      "error": null,
+      "coverage": {
+        "start": "2026-10-15T08:00:00Z",
+        "end": "2026-10-15T08:30:00Z"
+      }
+    },
+    {
+      "sha256": null,
+      "resource": "replicasets",
+      "file": null,
+      "http_status": 503,
+      "error": "unavailable",
+      "coverage": null
+    }
+  ]
+}

@@ -24,10 +24,11 @@ The implementation was built under the product owner's [pre-gate development aut
 | Local dashboard and Home overview, including a labelled synthetic preview | `src/cloud_autopsy/api/ui/`, `tools/dashboard_preview.py` | [CA-P2-006c](docs/phase2/ca-p2-006/ca-p2-006c.md), [006d](docs/phase2/ca-p2-006/ca-p2-006d.md) |
 | Creating investigations from evidence bundles (offline, or database-verified on a disposable database) | `src/cloud_autopsy/app/bundle.py`, `create.py`, `tools/create_investigation.py`, `examples/bundles/` | [CA-P2-004a](docs/phase2/ca-p2-004/ca-p2-004a.md) |
 | Run lifecycle: failed seals end `failed`, bounded recovery after lease expiry, fenced stale workers, run-scoped status in the API and dashboard | `src/cloud_autopsy/db/seal.py`, `status.py`, migration `0005`, `api/grants.py`, `api/service.py` | [CA-P2-004b](docs/phase2/ca-p2-004/ca-p2-004b.md) |
+| Offline adapter for recorded Kubernetes responses (Pods, ReplicaSets, Deployment rollouts; Events and ConfigMaps counted as `unsupported_conversion`) | `src/cloud_autopsy/app/k8s_recording.py`, `tools/convert_k8s_recording.py`, `examples/k8s-recordings/` | [CA-P2-004c](docs/phase2/ca-p2-004/ca-p2-004c.md) |
 
 **Not implemented:**
 - collectors or any live cluster access (CA-P2-004);
-- live evidence acquisition: investigations can be created only from synthetic evidence bundles;
+- live evidence acquisition: investigations can be created only from synthetic evidence bundles and synthetic recorded Kubernetes responses;
 - export, retention, purge or audit logging;
 - AI synthesis;
 - an independent evaluation scorer or held-out truth (CA-P2-007, and the separate [held-out kit](https://github.com/rpahasara/cloud-autopsy/pull/14), PR #14);

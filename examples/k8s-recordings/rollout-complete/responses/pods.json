@@ -1,0 +1,160 @@
+{
+  "apiVersion": "v1",
+  "kind": "PodList",
+  "metadata": {
+    "resourceVersion": "3000"
+  },
+  "items": [
+    {
+      "metadata": {
+        "name": "checkout-api-7c9f8-b1",
+        "namespace": "ca-demo",
+        "uid": "0b8e7c1e-0000-4000-8000-0000000b0001",
+        "resourceVersion": "2101",
+        "creationTimestamp": "2026-10-15T08:11:02Z",
+        "ownerReferences": [
+          {
+            "apiVersion": "apps/v1",
+            "kind": "ReplicaSet",
+            "name": "checkout-api-7c9f8",
+            "uid": "0b8e7c1e-0000-4000-8000-0000000a0002",
+            "controller": true,
+            "blockOwnerDeletion": true
+          }
+        ]
+      },
+      "spec": {
+        "containers": [
+          {
+            "name": "checkout-api",
+            "image": "registry.invalid/ca-demo/checkout-api:1.8.3",
+            "env": [
+              {
+                "name": "DB_PASSWORD",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "name": "checkout-db",
+                    "key": "password"
+                  }
+                }
+              }
+            ],
+            "volumeMounts": [
+              {
+                "name": "pool",
+                "mountPath": "/etc/checkout/pool"
+              }
+            ]
+          }
+        ],
+        "volumes": [
+          {
+            "name": "pool",
+            "configMap": {
+              "name": "checkout-db-pool"
+            }
+          }
+        ],
+        "nodeName": "node-a"
+      },
+      "status": {
+        "phase": "Running",
+        "containerStatuses": [
+          {
+            "name": "checkout-api",
+            "restartCount": 2
+          }
+        ]
+      }
+    },
+    {
+      "metadata": {
+        "name": "checkout-api-7c9f8-b2",
+        "namespace": "ca-demo",
+        "uid": "0b8e7c1e-0000-4000-8000-0000000b0002",
+        "resourceVersion": "2102",
+        "creationTimestamp": "2026-10-15T08:11:03.250Z",
+        "ownerReferences": [
+          {
+            "apiVersion": "apps/v1",
+            "kind": "ReplicaSet",
+            "name": "checkout-api-7c9f8",
+            "uid": "0b8e7c1e-0000-4000-8000-0000000a0002",
+            "controller": true,
+            "blockOwnerDeletion": true
+          }
+        ]
+      },
+      "spec": {
+        "containers": [
+          {
+            "name": "checkout-api",
+            "image": "registry.invalid/ca-demo/checkout-api:1.8.3",
+            "env": [
+              {
+                "name": "DB_PASSWORD",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "name": "checkout-db",
+                    "key": "password"
+                  }
+                }
+              }
+            ],
+            "volumeMounts": [
+              {
+                "name": "pool",
+                "mountPath": "/etc/checkout/pool"
+              }
+            ]
+          }
+        ],
+        "volumes": [
+          {
+            "name": "pool",
+            "configMap": {
+              "name": "checkout-db-pool"
+            }
+          }
+        ],
+        "nodeName": "node-b"
+      },
+      "status": {
+        "phase": "Running",
+        "containerStatuses": [
+          {
+            "name": "checkout-api",
+            "restartCount": 0
+          }
+        ]
+      }
+    },
+    {
+      "metadata": {
+        "name": "debug-shell",
+        "namespace": "ca-demo",
+        "uid": "0b8e7c1e-0000-4000-8000-0000000b0009",
+        "resourceVersion": "2150",
+        "creationTimestamp": "2026-10-15T08:20:00Z"
+      },
+      "spec": {
+        "containers": [
+          {
+            "name": "sh",
+            "image": "registry.invalid/tools/sh:1"
+          }
+        ],
+        "nodeName": "node-a"
+      },
+      "status": {
+        "phase": "Running",
+        "containerStatuses": [
+          {
+            "name": "sh",
+            "restartCount": 0
+          }
+        ]
+      }
+    }
+  ]
+}

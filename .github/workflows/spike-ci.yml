@@ -61,6 +61,16 @@ jobs:
       - name: Example bundles investigate offline (CA-P2-004a)
         run: python -I tools/create_investigation.py --offline examples/bundles/*
 
+      - name: Recorded Kubernetes examples convert and investigate offline (CA-P2-004c)
+        run: |
+          set -eu
+          mkdir -p "$RUNNER_TEMP/k8s"
+          for rec in examples/k8s-recordings/*; do
+            name="$(basename "$rec")"
+            python -I tools/convert_k8s_recording.py "$rec" --out "$RUNNER_TEMP/k8s/$name" --report "$RUNNER_TEMP/k8s/$name.report.json"
+          done
+          python -I tools/create_investigation.py --offline "$RUNNER_TEMP"/k8s/*/
+
       # CA-P2-006c: the read-only dashboard in the runner's preinstalled Chrome (headless, temporary
       # profile, DevTools on 127.0.0.1), served by the real API with the labelled synthetic preview.
       # The sandbox is disabled only because hosted runners may forbid its user namespaces; the

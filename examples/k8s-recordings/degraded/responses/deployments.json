@@ -1,0 +1,81 @@
+{
+  "apiVersion": "apps/v1",
+  "kind": "DeploymentList",
+  "metadata": {
+    "resourceVersion": "3000"
+  },
+  "items": [
+    {
+      "metadata": {
+        "name": "checkout-api",
+        "namespace": "ca-demo",
+        "uid": "0b8e7c1e-0000-4000-8000-00000000d001",
+        "resourceVersion": "2001",
+        "creationTimestamp": "2026-10-01T09:00:00Z",
+        "annotations": {
+          "deployment.kubernetes.io/revision": "2"
+        }
+      },
+      "spec": {
+        "replicas": 2,
+        "template": {
+          "metadata": {
+            "labels": {
+              "app": "checkout-api",
+              "pod-template-hash": "7c9f8"
+            }
+          },
+          "spec": {
+            "containers": [
+              {
+                "name": "checkout-api",
+                "image": "registry.invalid/ca-demo/checkout-api:1.8.3",
+                "env": [
+                  {
+                    "name": "DB_PASSWORD",
+                    "valueFrom": {
+                      "secretKeyRef": {
+                        "name": "checkout-db",
+                        "key": "password"
+                      }
+                    }
+                  }
+                ],
+                "volumeMounts": [
+                  {
+                    "name": "pool",
+                    "mountPath": "/etc/checkout/pool"
+                  }
+                ]
+              }
+            ],
+            "volumes": [
+              {
+                "name": "pool",
+                "configMap": {
+                  "name": "checkout-db-pool"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "status": {
+        "conditions": [
+          {
+            "type": "Available",
+            "status": "True",
+            "reason": "MinimumReplicasAvailable",
+            "lastUpdateTime": "2026-10-15T07:00:30Z"
+          },
+          {
+            "type": "Progressing",
+            "status": "True",
+            "reason": "NewReplicaSetAvailable",
+            "lastUpdateTime": "2026-10-15T08:12:40Z"
+          }
+        ]
+      }
+    }
+  ]
+}

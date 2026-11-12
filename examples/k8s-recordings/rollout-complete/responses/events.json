@@ -1,0 +1,66 @@
+{
+  "apiVersion": "v1",
+  "kind": "EventList",
+  "metadata": {
+    "resourceVersion": "3000"
+  },
+  "items": [
+    {
+      "metadata": {
+        "name": "checkout-api.1",
+        "namespace": "ca-demo",
+        "uid": "0b8e7c1e-0000-4000-8000-0000000e0001",
+        "resourceVersion": "2201",
+        "creationTimestamp": "2026-10-15T08:11:00Z"
+      },
+      "involvedObject": {
+        "kind": "Deployment",
+        "name": "checkout-api",
+        "namespace": "ca-demo"
+      },
+      "type": "Normal",
+      "reason": "ScalingReplicaSet",
+      "message": "Scaled up replica set checkout-api-7c9f8 to 1",
+      "lastTimestamp": "2026-10-15T08:11:00Z",
+      "count": 1
+    },
+    {
+      "metadata": {
+        "name": "checkout-api-7c9f8-b1.1",
+        "namespace": "ca-demo",
+        "uid": "0b8e7c1e-0000-4000-8000-0000000e0002",
+        "resourceVersion": "2202",
+        "creationTimestamp": "2026-10-15T08:14:00Z"
+      },
+      "involvedObject": {
+        "kind": "Pod",
+        "name": "checkout-api-7c9f8-b1",
+        "namespace": "ca-demo"
+      },
+      "type": "Warning",
+      "reason": "BackOff",
+      "message": "Back-off restarting failed container: pool.maxConnections=4 too low (synthetic)",
+      "lastTimestamp": "2026-10-15T08:16:00Z",
+      "count": 3
+    },
+    {
+      "metadata": {
+        "name": "checkout-db-pool.1",
+        "namespace": "ca-demo",
+        "uid": "0b8e7c1e-0000-4000-8000-0000000e0003",
+        "resourceVersion": "2203",
+        "creationTimestamp": "2026-10-15T08:10:00Z"
+      },
+      "involvedObject": {
+        "kind": "ConfigMap",
+        "name": "checkout-db-pool",
+        "namespace": "ca-demo"
+      },
+      "type": "Warning",
+      "reason": "ConfigChanged",
+      "message": "configuration changed by ops (synthetic)",
+      "lastTimestamp": "2026-10-15T08:10:00Z",
+      "count": 1
+    }
+  ]
+}
