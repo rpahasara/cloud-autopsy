@@ -213,12 +213,17 @@ class RunStatusViewTests(PostgresCase):
 
     def test_only_ca_engine_may_read_the_view_and_nothing_else_changed(self):
         from cloud_autopsy.db import bootstrap
-        readers = [role for role in sorted(bootstrap.ROLES) if self.owner.one(
-            "SELECT has_table_privilege(:r, 'ca.run_status', 'SELECT')", r=role)[0]]
+
+        def has(role, priv):  # by OID from pg_class: ca_migrator has no USAGE on schema ca itself
+            return self.owner.one(
+                "SELECT has_table_privilege(:r, c.oid, :p) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+                "WHERE n.nspname = 'ca' AND c.relname = 'run_status'", r=role, p=priv)[0]
+
+        readers = [role for role in sorted(bootstrap.ROLES) if has(role, "SELECT")]
         self.assertEqual([r for r in readers if r != "ca_owner"], ["ca_engine"])
-        self.assertFalse(self.owner.one("SELECT has_table_privilege('public', 'ca.run_status', 'SELECT')")[0])
+        self.assertFalse(has("public", "SELECT"))
         for priv in ("INSERT", "UPDATE", "DELETE", "TRUNCATE"):
-            self.assertFalse(self.owner.one("SELECT has_table_privilege('ca_engine', 'ca.run_status', :p)", p=priv)[0])
+            self.assertFalse(has("ca_engine", priv))
         # ca_engine still has no base-table access: the view is the only lifecycle read path
         self.assertEqual(sqlstate(self.engine.run, "SELECT lease_owner FROM ca.run LIMIT 1"), "42501")
 
