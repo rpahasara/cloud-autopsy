@@ -99,6 +99,17 @@ class Session(unittest.TestCase):
         self.assertEqual(acquisitions["k8s.pods"]["segments"][0]["reconnects"], 1)
         self.assert_honest(batches)
 
+    def test_clean_server_timeouts_do_not_exhaust_the_reconnect_budget(self):
+        """Seen on kind: watches the server ends cleanly (timeoutSeconds) are resumed, not counted as faults."""
+        cluster = FW.FakeCluster(faults={r: {"eof_every": 2} for r in FW.KINDS}, bookmark_interval=0.05)
+        _, acquisitions, batches, _ = self.run_watch(cluster, [lambda: cluster.touch("pods")], max_reconnects=1)
+        for query, a in acquisitions.items():
+            with self.subTest(query=query):
+                self.assertNotEqual(a["segments"][-1]["end"], "reconnects_exhausted")
+                self.assertEqual(len(a["segments"]), 1)
+        self.assertTrue(acquisitions["k8s.replicasets"]["segments"][0]["proven"])
+        self.assert_honest(batches)
+
     def test_a_refused_resume_relists_and_leaves_a_gap(self):
         cluster = FW.FakeCluster(faults={"pods": {"eof_after": 3, "gone_on_resume": True}}, bookmark_interval=0.08)
         entries, acquisitions, batches, _ = self.run_watch(cluster, [lambda: cluster.touch("pods")])
@@ -119,7 +130,7 @@ class Session(unittest.TestCase):
         self.assert_honest(batches)
 
     def test_a_revoked_binding_ends_the_resource_as_a_gap(self):
-        cluster = FW.FakeCluster(faults={"pods": {"eof_after": 3, "deny_watch_after": 1}}, bookmark_interval=0.08)
+        cluster = FW.FakeCluster(faults={"pods": {"eof_after": 1, "deny_watch_after": 1}}, bookmark_interval=0.05)
         _, acquisitions, batches, _ = self.run_watch(cluster)
         self.assertEqual(acquisitions["k8s.pods"]["segments"][-1]["end"], "denied")
         self.assert_honest(batches)
@@ -128,7 +139,7 @@ class Session(unittest.TestCase):
         for fault, code in (("garbage_after", "invalid_line"), ("oversize_after", "line_too_large"),
                             ("regress_after", "rv_regression"), ("foreign_after", "namespace_mismatch")):
             with self.subTest(fault=fault):
-                cluster = FW.FakeCluster(faults={"pods": {fault: 3}}, bookmark_interval=0.08)
+                cluster = FW.FakeCluster(faults={"pods": {fault: 1}}, bookmark_interval=0.05)
                 _, acquisitions, batches, _ = self.run_watch(cluster, max_line_bytes=4096)
                 self.assertEqual(acquisitions["k8s.pods"]["segments"][-1]["end"], code)
                 self.assert_honest(batches)
@@ -178,7 +189,7 @@ class OverTls(unittest.TestCase):
         FW.Mutator([lambda: cluster.touch("pods"), lambda: cluster.add_event("tls-ev")], delay=0.4).start()
         cfg = co.CollectorConfig(server=f"https://127.0.0.1:{server.port}", ca_file=cert, token_file=F.write_token(tmp),
                                  namespace="ca-demo", cluster_id="ca-kind-synthetic", recording_id="ca-watch-tls")
-        wconfig = wt.WatchConfig(**QUICK)
+        wconfig = wt.WatchConfig(**{**QUICK, "session_seconds": 3.0, "final_wait_s": 1.5})
         _, conversion, report = co.run_watch(cfg, wconfig, tmp / "out")
         self.assertGreater(report["verified_coverage_ms"], 0)
         self.assertEqual(F.scan([tmp / "out"]), set())

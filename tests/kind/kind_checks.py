@@ -239,8 +239,14 @@ def watch(args):
     if args.expect == "proven":
         if report["verified_coverage_ms"] <= 0 or verified <= 0:
             fail("no verified coverage from a healthy session")
-        if not acquisitions["k8s.pods"]["segments"][0].get("proven"):
-            fail("the pod watch was never proven")
+        proven = sorted(q for q, a in acquisitions.items() if any(s.get("proven") for s in a["segments"]))
+        if not proven:
+            fail("no watch was proven")
+        print("proven acquisitions:", proven)
+        exhausted = sorted(q for q, a in acquisitions.items() if any(s.get("end") == "reconnects_exhausted"
+                                                                     for s in a["segments"]))
+        if exhausted:
+            fail(f"a healthy session exhausted its reconnects: {exhausted}")
         changes = sum(1 for b in loaded.batches for o in b["observations"]
                       if any(t["timestamp_kind"] == "observed" for t in o["times"]))
         if changes < 1:

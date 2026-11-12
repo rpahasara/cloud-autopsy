@@ -80,7 +80,7 @@ class PostgresCase(unittest.TestCase):
 class MigrationTests(PostgresCase):
     def test_migrations_applied_once_and_environment_checked(self):  # CA-IT-001, CA-IT-025, CA-IT-031
         self.assertEqual(self.fx.applied, [m.filename for m in migrate.discover()])
-        self.assertEqual(len(self.fx.applied), 7)
+        self.assertEqual(len(self.fx.applied), 8)  # 0008 (CA-P2-004f) included
         self.assertEqual(migrate.apply(self.owner), [])
         ingest.check_environment(self.reader)
         self.assertEqual(sqlstate(self.owner.run, "UPDATE ca.data_classification SET classification = 'x'"),
@@ -102,7 +102,7 @@ class MigrationTests(PostgresCase):
                         "INSERT INTO ca.acquisition_batch (run_id, plan_digest, source_id, query_id, batch_key, "
                         "batch_digest, contract_version, sequence, outcome, coverage_start_ms, coverage_end_ms, "
                         "truncated, observation_count, canonical_size, record_bytes) VALUES (CAST(:r AS uuid), :p, "
-                        "'k8s-api', 'k8s.configmaps', 'x', :d, 'ca-acquisition-batch/0.2-provisional', 1, 'empty', "
+                        "'k8s-api', 'k8s.configmaps', 'x', :d, 'ca-acquisition-batch/0.3-provisional', 1, 'empty', "
                         "1, 2, false, 0, 1, :b)", r=run_id, p=plan.digest, d=plan.digest, b=b"{}")
         self.assertEqual(code, "23514")
 

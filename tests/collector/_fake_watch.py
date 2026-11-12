@@ -14,6 +14,7 @@ Faults, per resource (``faults[resource]``):
   gone_on_resume        a resume (a watch not from the list's resourceVersion) answers 410
   error_410_after: n    after n events the stream sends an ERROR (410) with a planted message
   eof_after: n          after n lines the stream ends (once)
+  eof_every: n          every watch ends cleanly after n lines (a short server timeoutSeconds)
   garbage_after: n      after n lines the stream sends a line that is not JSON
   oversize_after: n     after n lines the stream sends a line larger than any bound
   regress_after: n      after n lines the stream sends an event with an older resourceVersion
@@ -154,6 +155,8 @@ class FakeStream:
         if f.get("eof_after") is not None and n >= f["eof_after"]:
             f.pop("eof_after")
             return b""
+        if f.get("eof_every") and n >= f["eof_every"]:
+            return b""  # the server ends every watch after this many lines (like timeoutSeconds)
         if f.get("garbage_after") is not None and n >= f["garbage_after"]:
             return self._line_raw(b"this is not json PLANTED-STATUS-MESSAGE-5e8\n")
         if f.get("oversize_after") is not None and n >= f["oversize_after"]:

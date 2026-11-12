@@ -38,6 +38,7 @@ from . import project
 
 RESOURCES = ("deployments", "events", "pods", "replicasets")
 EVENT_TYPES = ("ADDED", "MODIFIED", "DELETED", "BOOKMARK", "ERROR")
+MAX_CLEAN_RESUMES = 200   # server-closed watches (timeoutSeconds) resumed per segment
 
 
 @dataclass(frozen=True)
@@ -177,12 +178,14 @@ class _Resource:
     def _watch_segment(self, reconnects):
         """Watch until the segment ends. Returns 'relist' after a 410, otherwise 'done'."""
         cfg = self.shared.config
+        clean_resumes = 0
         while True:
             if self._finished():
                 self._end(self.shared.reason)
                 return "done"
-            path = cl.build_watch_path(self.name, self.namespace, self.last_rv,
-                                       self._remaining_s(self.shared.deadline))
+            # While finishing, size timeoutSeconds to the final deadline, not the passed session deadline.
+            deadline = self.shared.final_deadline if self.shared.finishing.is_set() and self.shared.final_deadline                 else self.shared.deadline
+            path = cl.build_watch_path(self.name, self.namespace, self.last_rv, self._remaining_s(deadline))
             sent = self.clock.offset_ns()
             try:
                 status, stream = self.transport.open_stream(path, cfg.idle_timeout_s)
@@ -211,6 +214,14 @@ class _Resource:
                 return "done"
             self._append({"segment": self.segment, "type": "disconnect", "at_ns": self.clock.offset_ns(),
                           "code": code[:64]})
+            if code == "end_of_stream":
+                # The server ended the watch cleanly (its timeoutSeconds): an expected resume, not a fault.
+                # Bounded separately so a server that closes at once cannot spin the reader.
+                clean_resumes += 1
+                if clean_resumes > MAX_CLEAN_RESUMES:
+                    self._end("reconnects_exhausted")
+                    return "done"
+                continue
             reconnects += 1
             if reconnects > cfg.max_reconnects:
                 self._end("reconnects_exhausted")
