@@ -76,7 +76,11 @@ class KindsV2DatabaseTests(unittest.TestCase):
             with self.subTest(role=role):
                 ingest.check_environment(self.fx.connect(role))
         rows = self.admin().run("SELECT contract_name, contract_version FROM ca.contract_version_supported")
-        self.assertEqual([tuple(r) for r in rows], [("observation-kinds", ev.KIND_REGISTRY_VERSION_V2)])
+        # Migration 0006 added kinds 0.2; migration 0008 (CA-P2-004f) adds batch 0.2 and kinds 0.3.
+        from cloud_autopsy.contracts import ADDITIONAL_CONTRACT_VERSIONS
+        expected = sorted((n, v) for n, vs in ADDITIONAL_CONTRACT_VERSIONS.items() for v in vs)
+        self.assertEqual(sorted(tuple(r) for r in rows), expected)
+        self.assertIn(("observation-kinds", ev.KIND_REGISTRY_VERSION_V2), expected)
         pins = dict(self.admin().run("SELECT contract_name, contract_version FROM ca.contract_pin"))
         self.assertEqual(pins["observation-kinds"], ev.KIND_REGISTRY_VERSION)  # the baseline pin is unchanged
 
@@ -96,7 +100,7 @@ class KindsV2DatabaseTests(unittest.TestCase):
     def test_the_database_refuses_a_plan_pinning_an_unsupported_version(self):
         loaded = self.created[ev.KIND_REGISTRY_VERSION_V2][0]
         record = loaded.plan.to_record()
-        record["contract_versions"]["observation-kinds"] = "ca-observation-kinds/0.3-provisional"
+        record["contract_versions"]["observation-kinds"] = "ca-observation-kinds/0.4-provisional"  # 0.3 exists since 0008
         record["plan_id"] = "unsupported-version"
         planner = self.fx.connect("ca_planner")
         with self.assertRaises(DbError) as ctx:

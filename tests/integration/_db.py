@@ -58,7 +58,8 @@ def ensure_roles():
 class Fixture:
     """A freshly created and migrated database, plus per-role connections."""
 
-    def __init__(self):
+    def __init__(self, migrations_dir=None):
+        """``migrations_dir``: apply only the migrations in that directory (default: all of them)."""
         from cloud_autopsy.db import bootstrap, migrate
         self.passwords = ensure_roles()
         self.name = f"ca_it_{uuid.uuid4().hex[:12]}"
@@ -73,7 +74,7 @@ class Fixture:
         finally:
             admin.close()
         self._open = []
-        self.applied = migrate.apply(self.connect("ca_migrator"))
+        self.applied = migrate.apply(self.connect("ca_migrator"), migrations_dir or migrate.MIGRATIONS_DIR)
 
     def connect(self, role):
         from cloud_autopsy.db.adapter import Database

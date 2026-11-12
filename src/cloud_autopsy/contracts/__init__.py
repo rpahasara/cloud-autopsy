@@ -7,10 +7,10 @@ CA-P2-002d adds run plans, acquisition batches and frozen-input manifests.
 Contracts perform no I/O beyond the bytes or values passed to them.
 """
 
-from .acquisition import BATCH_VERSION
+from .acquisition import BATCH_VERSION, BATCH_VERSION_V2
 from .canonical import CANON_VERSION, DIGEST_ALGORITHM
 from .evidence import (CONTENT_ALGORITHM, EVIDENCE_VERSION, ID_ALGORITHM, KIND_REGISTRY_VERSION,
-                       KIND_REGISTRY_VERSION_V2, OBSERVATION_VERSION)
+                       KIND_REGISTRY_VERSION_V2, KIND_REGISTRY_VERSION_V3, OBSERVATION_VERSION)
 from .frozen_input import FROZEN_INPUT_VERSION, GAP_POLICY_VERSION, MANIFEST_ALGORITHM
 from .plan import RUN_PLAN_VERSION
 from .sources import SOURCE_REGISTRY_VERSION
@@ -37,10 +37,14 @@ CONTRACT_VERSIONS = {
 # the baseline (observation kinds 0.1) and stays the default, so existing plans, frozen inputs and
 # results are byte-identical. The only other profile differs in observation kinds alone (0.2).
 # There is no mixing: a plan pins one whole profile, and its evidence is decoded under that profile.
+# CA-P2-004f adds profile 3 (collector watch plans only): profile 2 with acquisition batch 0.2 and
+# observation kinds 0.3. Profiles 1 and 2 are unchanged.
 CONTRACT_PROFILES = (
     CONTRACT_VERSIONS,
     {**CONTRACT_VERSIONS, "observation-kinds": KIND_REGISTRY_VERSION_V2},
+    {**CONTRACT_VERSIONS, "observation-kinds": KIND_REGISTRY_VERSION_V3, "acquisition-batch": BATCH_VERSION_V2},
 )
-# Versions a database must list as additionally supported (migration 0006), per contract.
-ADDITIONAL_CONTRACT_VERSIONS = {"observation-kinds": (KIND_REGISTRY_VERSION_V2,)}
+# Versions a database must list as additionally supported (migrations 0006 and 0008), per contract.
+ADDITIONAL_CONTRACT_VERSIONS = {"observation-kinds": (KIND_REGISTRY_VERSION_V2, KIND_REGISTRY_VERSION_V3),
+                                "acquisition-batch": (BATCH_VERSION_V2,)}
 CONTRACT_STATUS ="provisional: unreviewed; not RFC 8785 conformance evidence"

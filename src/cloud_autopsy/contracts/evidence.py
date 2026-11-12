@@ -49,6 +49,7 @@ OBSERVATION_VERSION = "ca-observation/0.1-provisional"
 EVIDENCE_VERSION = "ca-evidence/0.1-provisional"
 KIND_REGISTRY_VERSION = "ca-observation-kinds/0.1-provisional"      # the baseline; unchanged
 KIND_REGISTRY_VERSION_V2 = "ca-observation-kinds/0.2-provisional"   # CA-P2-004d: 0.1 plus two Kubernetes kinds
+KIND_REGISTRY_VERSION_V3 = "ca-observation-kinds/0.3-provisional"   # CA-P2-004f: observed times, deletions
 ID_ALGORITHM = "ca-evidence-id-sha256/0.1-provisional"
 CONTENT_ALGORITHM = "ca-evidence-content-sha256/0.1-provisional"
 ORIGIN_OBSERVED = "observed"
@@ -190,7 +191,7 @@ class KindSpec:
     observation_kind: str
     evidence_class: str
     source_kind: str
-    entity_kind: str
+    entity_kind: object      # one entity kind, or a tuple of them (k8s_object_deleted only)
     required_times: tuple
     optional_times: tuple
     attributes: _Object
@@ -265,7 +266,27 @@ KINDS_ADDED_IN_V2 = {spec.observation_kind: spec for spec in (
         "data_key_names": (_ConfigKeyNames(), True), "binary_key_names": (_ConfigKeyNames(), True),
         "withheld_key_count": (_Int(0, 512), True), "immutable": (_Bool(), True)}), since=KIND_REGISTRY_VERSION_V2),
 )}
-KIND_REGISTRIES = {KIND_REGISTRY_VERSION: KINDS, KIND_REGISTRY_VERSION_V2: {**KINDS, **KINDS_ADDED_IN_V2}}
+# ``ca-observation-kinds/0.3-provisional`` (CA-P2-004f): every 0.2 kind, plus
+# - the optional timestamp kind ``observed`` for the four Kubernetes object kinds below, allowed only
+#   under a plan pinning 0.3. It is a collector-clock bracket: the commit of the observed change lies
+#   in ``[raw, raw + declared precision)`` (the unchanged time contract's meaning; see the CA-P2-004f
+#   plan section 6.2 and tests/contracts/test_observed_bracket.py);
+# - ``k8s_object_deleted``: a Kubernetes DELETED watch event, with a required ``observed`` time.
+# Labelling (rev. 2 of the 004d rule): a record carries the earliest registry version under which that
+# exact record is valid. A record without ``observed`` keeps its 0.1 or 0.2 label and stays
+# byte-identical; a record with ``observed`` is labelled 0.3 and refused under 0.1 and 0.2 plans.
+OBSERVED_TIME = "observed"
+OBSERVED_TIME_KINDS = frozenset({"pod", "replicaset", "deployment_rollout", "k8s_event"})
+DELETED_OBJECT_KINDS = ("Pod", "ReplicaSet", "Deployment", "Event")
+KINDS_ADDED_IN_V3 = {spec.observation_kind: spec for spec in (
+    # A deletion seen on a watch: which object, the deletion's resourceVersion (source_version) and
+    # when it was observed. Nothing else of the deleted object is carried.
+    KindSpec("k8s_object_deleted", "K8S-DELETE", "kubernetes_api", DELETED_OBJECT_KINDS, (OBSERVED_TIME,), (),
+             _Object({"object_kind": (_Text(10, r"Pod|ReplicaSet|Deployment|Event"), True)}),
+             since=KIND_REGISTRY_VERSION_V3),
+)}
+KIND_REGISTRIES = {KIND_REGISTRY_VERSION: KINDS, KIND_REGISTRY_VERSION_V2: {**KINDS, **KINDS_ADDED_IN_V2},
+                   KIND_REGISTRY_VERSION_V3: {**KINDS, **KINDS_ADDED_IN_V2, **KINDS_ADDED_IN_V3}}
 
 
 def kinds_for(kind_registry_version):
@@ -471,8 +492,9 @@ def observe(observation, *, source_id, registry, delivery=None, kind_registry_ve
 
     entity = observation["entity"]
     _exact_fields(entity, ("kind", "namespace", "name"), "entity")
-    if entity["kind"] != spec.entity_kind:
-        raise _attr_error("entity.kind", f"must be {spec.entity_kind} for this observation kind")
+    entity_kinds = spec.entity_kind if isinstance(spec.entity_kind, tuple) else (spec.entity_kind,)
+    if entity["kind"] not in entity_kinds:
+        raise _attr_error("entity.kind", "is not allowed for this observation kind")
     if not isinstance(entity["namespace"], str) or not NAMESPACE.fullmatch(entity["namespace"]):
         raise _attr_error("entity.namespace", "must be a DNS-1123 label")
     if entity["namespace"] != source.namespace:
@@ -486,7 +508,7 @@ def observe(observation, *, source_id, registry, delivery=None, kind_registry_ve
     stamps = []
     for item in times:
         _exact_fields(item, _TIME_FIELDS, "times[]")
-        if item["timestamp_kind"] not in spec.required_times + spec.optional_times:
+        if item["timestamp_kind"] not in spec.required_times + spec.optional_times + _extra_times(spec, kind_registry_version):
             raise _attr_error("times[].timestamp_kind", "is not allowed for this observation kind")
         if item["clock_domain_id"] not in source.clock_domain_ids:
             raise EvidenceError(E.SOURCE_SCOPE_MISMATCH, "clock_domain_id is not bound to this source")
@@ -510,10 +532,24 @@ def observe(observation, *, source_id, registry, delivery=None, kind_registry_ve
                                                             source_version)),
         origin=ORIGIN_OBSERVED, source_id=source.source_id, cluster_id=source.cluster_id,
         namespace=source.namespace, source_binding_digest=source.binding_digest,
-        kind_registry_version=spec.since, observation_kind=spec.observation_kind,
+        kind_registry_version=_label(spec, kinds), observation_kind=spec.observation_kind,
         evidence_class=spec.evidence_class, source_ref=source_ref, source_uid=source_uid,
         source_version=source_version, entity=entity, times=tuple(stamps), attributes=attributes,
         content_digest=_sha_id(CONTENT_ALGORITHM, content))
+
+
+def _extra_times(spec, kind_registry_version):
+    """Timestamp kinds a later registry version adds to an existing kind (only under that version)."""
+    if kind_registry_version == KIND_REGISTRY_VERSION_V3 and spec.observation_kind in OBSERVED_TIME_KINDS:
+        return (OBSERVED_TIME,)
+    return ()
+
+
+def _label(spec, timestamp_kinds):
+    """The earliest registry version under which this exact record is valid."""
+    if spec.observation_kind in OBSERVED_TIME_KINDS and OBSERVED_TIME in timestamp_kinds:
+        return KIND_REGISTRY_VERSION_V3
+    return spec.since
 
 
 def _sha256_text(text):
@@ -526,6 +562,8 @@ def _cross_checks(spec, entity, attributes):
         for side in ("before", "after"):
             if _sha256_text(change[f"{side}_value"]) != change[f"{side}_value_sha256"]:
                 raise _attr_error(f"attributes.{side}_value_sha256", "does not match the value")
+    if spec.observation_kind == "k8s_object_deleted" and attributes["object_kind"] != entity["kind"]:
+        raise _attr_error("attributes.object_kind", "must equal entity.kind")
     if spec.observation_kind == "configmap_metadata" \
             and set(attributes["data_key_names"]) & set(attributes["binary_key_names"]):
         raise _attr_error("attributes.binary_key_names", "must not repeat a data key name")

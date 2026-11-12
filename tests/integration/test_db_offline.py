@@ -48,7 +48,8 @@ class MigrationDiscoveryTests(unittest.TestCase):
                                                       "0004_investigation_results.sql",
                                                       "0005_run_status_view.sql",
                                                       "0006_kind_registry_versions.sql",
-                                                      "0007_evidence_binding_records.sql"])
+                                                      "0007_evidence_binding_records.sql",
+                                                      "0008_watch_contract_versions.sql"])
         for m in found:
             self.assertEqual(len(m.sha256), 64)
             self.assertTrue(m.sql.isascii())

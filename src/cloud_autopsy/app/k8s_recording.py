@@ -98,6 +98,7 @@ SNAPSHOT_INSTANT, DECLARED_WINDOW = "snapshot_instant", "recorder_declared_windo
 #                             (continuity_lost), with the client bracket as unverified coverage.
 CLIENT_BRACKET = "client_bracket"
 RECORDING_VERSION_V3 = "ca-k8s-recording/0.3-provisional"   # collector provenance (CA-P2-004e)
+RECORDING_VERSION_V4 = "ca-k8s-recording/0.4-provisional"   # collector list + watch (CA-P2-004f)
 RESOURCES = {  # resource -> (accepted apiVersions, list kind, item kind)
     "pods": (("v1",), "PodList", "Pod"),
     "replicasets": (("apps/v1",), "ReplicaSetList", "ReplicaSet"),
@@ -388,14 +389,17 @@ def _refuse_secrets(value, depth=0):
             _refuse_secrets(item, depth + 1)
 
 
-def _metadata(item, namespace):
+def _metadata(item, namespace, rv_pattern=None):
+    """``rv_pattern`` is the item resourceVersion rule: recordings 0.1-0.3 keep ``_DIGITS``; recording 0.4
+    passes the CA-P2-004f decimal rule (``contracts.resourceversion``)."""
     meta = _obj(item.get("metadata"), "metadata_missing")
     if meta.get("namespace") != namespace:
         # Namespace isolation: a recording binds exactly one namespace.
         raise RecordingError("recording_namespace_mismatch", "a recorded object is outside the recording's namespace")
     return {"name": _text(meta.get("name"), "name_invalid", re.compile(r"[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?")),
             "uid": _text(meta.get("uid"), "uid_invalid", re.compile(r"[A-Za-z0-9-]{1,128}")),
-            "resource_version": _text(meta.get("resourceVersion"), "resource_version_invalid", _DIGITS),
+            "resource_version": _text(meta.get("resourceVersion"), "resource_version_invalid", rv_pattern or _DIGITS,
+                                      max_len=128),
             "created": _text(meta.get("creationTimestamp"), "timestamp_invalid", max_len=64),
             "owners": meta.get("ownerReferences") or [], "annotations": meta.get("annotations") or {}}
 
@@ -453,7 +457,7 @@ def _config_refs(spec):
 def _pods(items, ctx):
     observations, out_of_scope = [], 0
     for item in items:
-        meta = _metadata(item, ctx["namespace"])
+        meta = _metadata(item, ctx["namespace"], ctx.get("rv_pattern"))
         try:
             owner, _ = _controller(meta, "ReplicaSet")
         except _OutOfScope:
@@ -494,7 +498,7 @@ def _replicasets(items, ctx):
     """ReplicaSets owned by a Deployment: (observations, {deployment uid: [(revision, rs)]}, out_of_scope)."""
     observations, by_deployment, out_of_scope = [], {}, 0
     for item in items:
-        meta = _metadata(item, ctx["namespace"])
+        meta = _metadata(item, ctx["namespace"], ctx.get("rv_pattern"))
         try:
             owner, owner_uid = _controller(meta, "Deployment")
         except _OutOfScope:
@@ -538,7 +542,7 @@ def _changed_fields(old, new):
 def _deployments(items, replicasets, ctx):
     observations, notes = [], {"no_previous_revision": 0}
     for item in items:
-        meta = _metadata(item, ctx["namespace"])
+        meta = _metadata(item, ctx["namespace"], ctx.get("rv_pattern"))
         revision = int(_text(_obj(meta["annotations"], "annotations_invalid").get(REVISION_ANNOTATION),
                              "revision_missing", _DIGITS))
         owned = sorted(replicasets.get(meta["uid"], []), key=lambda r: r["revision"])
@@ -572,7 +576,7 @@ def _events(items, ctx):
     """Validated, counted, never converted: {"<involved kind>/<type>": count}."""
     counts = {}
     for item in items:
-        _metadata(item, ctx["namespace"])
+        _metadata(item, ctx["namespace"], ctx.get("rv_pattern"))
         involved = _obj(item.get("involvedObject") or item.get("regarding"), "involved_object_missing")
         if involved.get("namespace") not in (None, ctx["namespace"]):
             raise RecordingError("recording_namespace_mismatch", "an event concerns another namespace")
@@ -589,7 +593,7 @@ def _configmaps(items, ctx):
     """Metadata only, never converted: the number of ConfigMaps and of data keys. Values are not read."""
     keys = 0
     for item in items:
-        _metadata(item, ctx["namespace"])
+        _metadata(item, ctx["namespace"], ctx.get("rv_pattern"))
         for field in ("data", "binaryData"):
             data = item.get(field)
             if data is None:
@@ -607,7 +611,7 @@ def _event_observations(items, ctx):
     _events(items, ctx)  # the same validation and namespace isolation as the counted path
     observations = []
     for item in items:
-        meta = _metadata(item, ctx["namespace"])
+        meta = _metadata(item, ctx["namespace"], ctx.get("rv_pattern"))
         involved = item.get("involvedObject") or item.get("regarding")
         series = item.get("series") if isinstance(item.get("series"), dict) else {}
         count = next((c for c in (item.get("count"), item.get("deprecatedCount"), series.get("count"))
@@ -637,7 +641,7 @@ def _configmap_observations(items, ctx):
     credential-like key names are withheld and only counted."""
     observations = []
     for item in items:
-        meta = _metadata(item, ctx["namespace"])
+        meta = _metadata(item, ctx["namespace"], ctx.get("rv_pattern"))
         names, withheld = {}, 0
         for field in ("data", "binaryData"):
             data = item.get(field)
@@ -781,11 +785,18 @@ def convert(directory, kind_registry_version=ev.KIND_REGISTRY_VERSION):
     recording. Raises ``RecordingError`` when the recording is refused."""
     if kind_registry_version not in ev.KIND_REGISTRIES:
         raise RecordingError("recording_kinds_unsupported", "unsupported observation-kind registry version")
+    root = Path(os.path.abspath(directory))
+    manifest, manifest_sha = _read_manifest(root)
+    watch = isinstance(manifest, dict) and manifest.get("contract_version") == RECORDING_VERSION_V4
+    if (kind_registry_version == ev.KIND_REGISTRY_VERSION_V3) != watch:
+        raise RecordingError("recording_kinds_unsupported", "observation kinds 0.3 is used with, and only with, a "
+                                                            "ca-k8s-recording/0.4-provisional (watch) recording")
+    if watch:  # CA-P2-004f: list + watch recordings have their own converter
+        from . import k8s_watch_recording
+        return k8s_watch_recording.convert(root, manifest, manifest_sha)
     v2 = kind_registry_version == ev.KIND_REGISTRY_VERSION_V2
     queries = QUERIES_V2 if v2 else QUERIES
     unsupported_resources = () if v2 else UNSUPPORTED
-    root = Path(os.path.abspath(directory))
-    manifest, manifest_sha = _read_manifest(root)
     responses, files, snapshot = _validate_manifest(manifest)
     if v2 and not snapshot:
         raise RecordingError("recording_kinds_need_snapshot_recording",

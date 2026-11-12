@@ -110,15 +110,19 @@ class VersionSeparationTests(unittest.TestCase):
             ev.ObservedEvidence.from_record(old, reg, V2)
 
     def test_unknown_registry_versions_are_refused(self):
+        # 0.3 exists since CA-P2-004f; 0.4 is still unknown.
         with self.assertRaises(ContractError):
-            observe("event", "ca-observation-kinds/0.3-provisional")
+            observe("event", "ca-observation-kinds/0.4-provisional")
         with self.assertRaises(ContractError):
-            pl.required_contract_versions("ca-observation-kinds/0.3-provisional")
+            pl.required_contract_versions("ca-observation-kinds/0.4-provisional")
 
     def test_plans_pin_exactly_one_whole_profile(self):
-        self.assertEqual(len(CONTRACT_PROFILES), 2)
+        # CA-P2-004f appended profile 3 (batch 0.2 and kinds 0.3); profiles 1 and 2 are unchanged.
+        self.assertEqual(len(CONTRACT_PROFILES), 3)
         diff = {k for k in CONTRACT_PROFILES[0] if CONTRACT_PROFILES[0][k] != CONTRACT_PROFILES[1][k]}
         self.assertEqual(diff, {"observation-kinds"})
+        diff3 = {k for k in CONTRACT_PROFILES[1] if CONTRACT_PROFILES[1][k] != CONTRACT_PROFILES[2][k]}
+        self.assertEqual(diff3, {"observation-kinds", "acquisition-batch"})
         vectors = json.loads((Path(ev.__file__).parent / "vectors" / "ca-evidence-0.1-provisional.json").read_text())
         reg = SourceRegistry.from_record({**vectors["registry"], "sources": [
             {**vectors["registry"]["sources"][0], "query_ids": ["k8s.events"]}]})

@@ -148,7 +148,7 @@ def _ingest_once(db, run_id, plan, batch, stored_bytes, attempt):
                    "batch_digest, contract_version, sequence, outcome, coverage_start_ms, coverage_end_ms, "
                    "truncated, observation_count, canonical_size, record_bytes) VALUES (CAST(:r AS uuid), :p, :s, "
                    ":q, :k, :d, :v, :n, :o, :cs, :ce, :t, :c, :z, :b)",
-                   **key, p=plan.digest, d=batch.digest, v=acq.BATCH_VERSION, n=batch.sequence,
+                   **key, p=plan.digest, d=batch.digest, v=acq.plan_batch_version(plan), n=batch.sequence,
                    o=batch.outcome, cs=coverage[0], ce=coverage[1], t=batch.truncated, c=len(batch.evidence),
                    z=batch.canonical_size, b=stored_bytes)
             for evidence in sorted(batch.evidence, key=lambda e: (e.evidence_id, e.content_digest)):
