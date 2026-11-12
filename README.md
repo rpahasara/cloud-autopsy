@@ -27,9 +27,10 @@ The implementation was built under the product owner's [pre-gate development aut
 | Offline adapter for recorded Kubernetes responses (Pods, ReplicaSets, Deployment rollouts; Events and ConfigMaps counted as `unsupported_conversion`) | `src/cloud_autopsy/app/k8s_recording.py`, `tools/convert_k8s_recording.py`, `examples/k8s-recordings/` | [CA-P2-004c](docs/phase2/ca-p2-004/ca-p2-004c.md) |
 | Observation kinds 0.2 (`k8s_event`, `configmap_metadata`) beside 0.1; migration `0006`; snapshot-only coverage for recordings | `src/cloud_autopsy/contracts/evidence.py`, `db/migrations/0006_kind_registry_versions.sql`, `app/k8s_recording.py` | [CA-P2-004d](docs/phase2/ca-p2-004/ca-p2-004d.md) |
 | Read-only Kubernetes collector (stdlib HTTPS, allowlisted GET lists, sanitizing projection, recording 0.3, fail-closed `partial` batches); disposable `kind` CI job with negative RBAC tests | `src/cloud_autopsy/collector/`, `tools/collect_k8s.py`, `deploy/kind/` | [CA-P2-004e](docs/phase2/ca-p2-004/ca-p2-004e.md) |
+| List + watch collection with consistent-read progress probes: coverage verified only between a list and a proven probe, every other period a gap; recording 0.4 (facts only, replay-checked); batch 0.2, observation kinds 0.3, contract profile 3, migration `0008`; optional `collector-watch-kind` CI job | `src/cloud_autopsy/collector/watch.py`, `app/k8s_watch_recording.py`, `contracts/resourceversion.py`, `db/migrations/0008_watch_contract_versions.sql`, `deploy/kind/rbac-watch.yaml` | [CA-P2-004f](docs/phase2/ca-p2-004/ca-p2-004f.md) |
 
 **Not implemented:**
-- collectors for any real, shared or existing cluster (CA-P2-004e collects only from a disposable `kind` cluster inside CI);
+- collectors for any real, shared or existing cluster (CA-P2-004e and 004f collect only from disposable `kind` clusters inside CI);
 - live evidence acquisition: investigations can be created only from synthetic evidence bundles and synthetic recorded Kubernetes responses;
 - export, retention, purge or audit logging;
 - AI synthesis;

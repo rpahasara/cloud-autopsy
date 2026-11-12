@@ -11,6 +11,10 @@ Written, into a new output directory:
 Every successful collection becomes a ``partial`` / ``continuity_lost`` batch (``page_limit`` when
 truncated): observations kept, no coverage counted, so investigations abstain. Nothing here can
 mark an investigation resolved.
+
+CA-P2-004f adds ``run_watch``: one list + watch session (``watch.run_session``) written as a
+``ca-k8s-recording/0.4-provisional`` recording (facts only), converted under contract profile 3,
+re-checked by replay (``k8s_watch_recording.verify_bundle``) and reported.
 """
 
 import hashlib
@@ -20,14 +24,19 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..app import k8s_recording as K
+from ..app import k8s_watch_recording as W
 from ..contracts import canonical
 from ..contracts import evidence as ev
 from ..contracts.sources import IDENTIFIER, NAMESPACE
 from . import client as cl
+from . import watch as wt
 
 RESOURCES = ("deployments", "events", "pods", "replicasets")
 REPORT_VERSION = "ca-k8s-collection-report/0.1-provisional"
 CLOCK_DOMAIN = "k8s-apiserver"
+COLLECTOR_CLOCK_DOMAIN = "ca-collector"
+WATCH_REPORT_VERSION = "ca-k8s-watch-collection-report/0.1-provisional"
+MAX_PART_BYTES = 900_000
 
 
 @dataclass(frozen=True)
@@ -146,3 +155,81 @@ def run(config, out_dir, transport=None, wall_ms=None, monotonic=None):
     doc = report(config, collections, conversion)
     _write_new(out / "report.json", canonical.canonical_bytes(doc))
     return collections, conversion, doc
+
+
+# ------------------------------------------------------------------------- CA-P2-004f: watch
+
+def watch_recording_files(config, entries, clock, step_threshold_ms=250):
+    """{relative path: bytes} of the 0.4 recording: the manifest and canonical stream parts."""
+    files, streams = {}, []
+    for resource in sorted(entries):
+        parts, current, size = [], [], 0
+        for entry in entries[resource]:
+            n = len(canonical.canonical_bytes(entry)) + 1
+            if current and size + n > MAX_PART_BYTES:
+                parts.append(current)
+                current, size = [], 0
+            current.append(entry)
+            size += n
+        parts.append(current)
+        if len(parts) > W.MAX_PARTS:
+            raise cl.CollectorError("recording_too_large")
+        listed = []
+        for number, part in enumerate(parts, 1):
+            rel = f"streams/{resource}-{number:04d}.json"
+            data = canonical.canonical_bytes({"resource": resource, "part": number, "entries": part})
+            if len(data) > K.MAX_RESPONSE_BYTES:
+                raise cl.CollectorError("recording_too_large")
+            files[rel] = data
+            listed.append({"file": rel, "sha256": hashlib.sha256(data).hexdigest()})
+        streams.append({"resource": resource, "parts": listed})
+    manifest = {"contract_version": K.RECORDING_VERSION_V4, "recording_id": config.recording_id,
+                "data_classification": "synthetic", "provenance": "collector", "source_id": config.source_id,
+                "cluster_id": config.cluster_id, "namespace": config.namespace, "session_id": config.recording_id,
+                "rv_comparison": W.rv.RV_COMPARISON,
+                "clocks": {"collector": {"clock_domain_id": COLLECTOR_CLOCK_DOMAIN,
+                                         "anchor_wall": W._ns_text(clock.anchor_wall_ns),
+                                         "max_drift_ms": clock.max_drift_ms,
+                                         "step_detected": clock.max_drift_ms > step_threshold_ms},
+                           "api_server": {"clock_domain_id": CLOCK_DOMAIN}},
+                "streams": streams}
+    files[K.MANIFEST] = _bytes(manifest)
+    return files
+
+
+def watch_report(config, wconfig, conversion, counts):
+    return {"contract_version": WATCH_REPORT_VERSION, "recording_id": config.recording_id,
+            "cluster_id": config.cluster_id, "namespace": config.namespace, "source_id": config.source_id,
+            "api_server_clock": "unknown", "session_ms": int(wconfig.session_seconds * 1000),
+            "bounds": {"max_events": wconfig.max_events, "max_line_bytes": wconfig.max_line_bytes,
+                       "max_buffer_bytes": wconfig.max_buffer_bytes, "max_reconnects": wconfig.max_reconnects,
+                       "max_relists": wconfig.max_relists, "probe_interval_ms": int(wconfig.probe_interval_s * 1000)},
+            "withheld_or_dropped": counts, "verified_coverage_ms": conversion.report["verified_coverage_ms"],
+            "conversion": conversion.report,
+            "note": ("Coverage is verified only from the receipt of a consistent list to the send time of a "
+                     "consistent-read probe that the watch later reached. Bookmarks, events or an open connection "
+                     "alone cover nothing; withheld or unconverted changes make a segment partial; every other "
+                     "period is a gap. Collector data alone has no symptom source, so investigations abstain.")}
+
+
+def run_watch(config, wconfig, out_dir, transport=None, clock=None, stop=None, on_signal=None):
+    """One list + watch session into a new ``out_dir``: ``recording/``, ``bundle/`` and ``report.json``."""
+    config.check()
+    wconfig.check()
+    transport = transport or cl.HttpsTransport(config.server, config.ca_file, config.token_file, config.timeout_s)
+    entries, clock, counts = wt.run_session(transport, config.namespace, wconfig, clock=clock, stop=stop,
+                                            on_signal=on_signal)
+    out = Path(out_dir)
+    out.mkdir(parents=False, exist_ok=False)
+    recording = out / "recording"
+    recording.mkdir()
+    files = watch_recording_files(config, entries, clock, wconfig.step_threshold_ms)
+    for rel, data in sorted(files.items()):
+        (recording / rel).parent.mkdir(exist_ok=True)
+        _write_new(recording / rel, data)
+    conversion = K.convert(recording, ev.KIND_REGISTRY_VERSION_V3)
+    conversion.write_bundle(out / "bundle")
+    W.verify_bundle(recording, out / "bundle")  # the bundle is exactly the recording's derivation
+    doc = watch_report(config, wconfig, conversion, counts)
+    _write_new(out / "report.json", canonical.canonical_bytes(doc))
+    return entries, conversion, doc

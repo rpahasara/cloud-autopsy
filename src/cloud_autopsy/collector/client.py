@@ -20,6 +20,14 @@ A list collection (``collect_list``):
 - client wall-clock times of the attempt's first request and last response, and its monotonic
   elapsed time, are recorded. They are client facts only: nothing places the collection at an
   API-server instant.
+
+CA-P2-004f adds, for the watch collector only:
+- ``build_watch_path``: the same four namespaced paths with exactly ``watch=1``, a decimal
+  ``resourceVersion`` (F3 rule), ``allowWatchBookmarks=true`` and ``timeoutSeconds`` (1..600);
+- ``HttpsTransport.open_stream``: a GET whose body is read line by line under a size bound; a
+  non-200 body is discarded unread beyond a small bound and never surfaced;
+- ``collect_list(..., clock_ns=...)``: the send time of the first request, and the receipt times of
+  the first and last pages, on the collector's session clock.
 """
 
 import http.client
@@ -32,6 +40,7 @@ from pathlib import Path
 from urllib.parse import quote, urlsplit
 
 from ..contracts import canonical
+from ..contracts import resourceversion as rv
 from ..contracts.errors import ContractError
 from ..contracts.sources import NAMESPACE
 from . import project
@@ -77,6 +86,48 @@ def build_path(resource, namespace, limit, continue_token=None):
             raise CollectorError("continue_token_invalid")
         path += "&continue=" + quote(continue_token, safe="")
     return path
+
+
+def build_watch_path(resource, namespace, resource_version, timeout_seconds):
+    """The only watch paths this collector can form (CA-P2-004f)."""
+    if resource not in LIST_PATHS:
+        raise CollectorError("resource_not_allowed")
+    if not isinstance(namespace, str) or not NAMESPACE.fullmatch(namespace):
+        raise CollectorError("namespace_invalid")
+    if not rv.is_valid(resource_version):
+        raise CollectorError("resource_version_invalid")
+    if type(timeout_seconds) is not int or not 1 <= timeout_seconds <= 600:
+        raise CollectorError("timeout_invalid")
+    return (LIST_PATHS[resource][0].format(ns=namespace) + f"?watch=1&resourceVersion={resource_version}"
+            f"&allowWatchBookmarks=true&timeoutSeconds={timeout_seconds}")
+
+
+class Stream:
+    """An open watch response. ``readline(limit)`` returns bytes ('' at the end of the stream)."""
+
+    def __init__(self, connection, response):
+        self._con, self._response = connection, response
+
+    def readline(self, limit):
+        try:
+            return self._response.readline(limit)
+        except (socket.timeout, TimeoutError):
+            raise CollectorError("timeout") from None
+        except (ssl.SSLError, ConnectionError, OSError, ValueError, http.client.HTTPException):
+            raise CollectorError("unavailable") from None
+
+    def close(self):
+        """Close from any thread: unblocks a pending ``readline``."""
+        try:
+            sock = self._con.sock
+            if sock is not None:
+                sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        try:
+            self._con.close()
+        except OSError:
+            pass
 
 
 def check_server(server):
@@ -137,6 +188,30 @@ class HttpsTransport:
         finally:
             con.close()
 
+    def open_stream(self, path, idle_timeout):
+        """(status, Stream or None). Non-200 bodies are discarded; nothing of them is returned."""
+        if not isinstance(path, str) or not path.startswith("/") or not _printable(path, 9000):
+            raise CollectorError("path_invalid")
+        con = http.client.HTTPSConnection(self.host, self.port, context=self._context, timeout=idle_timeout)
+        try:
+            con.request("GET", path, headers={"Authorization": f"Bearer {self._token}", "Accept": "application/json",
+                                              "User-Agent": USER_AGENT})
+            response = con.getresponse()
+        except (socket.timeout, TimeoutError):
+            con.close()
+            raise CollectorError("timeout") from None
+        except (ssl.SSLError, ConnectionError, OSError, http.client.HTTPException):
+            con.close()
+            raise CollectorError("unavailable") from None
+        if response.status != 200:
+            try:
+                response.read(65_536)
+            except (OSError, http.client.HTTPException):
+                pass
+            con.close()
+            return response.status, None
+        return 200, Stream(con, response)
+
 
 def _wall_ms():
     return time.time_ns() // 1_000_000
@@ -157,6 +232,9 @@ class Collection:
     remaining_item_count: object = None
     error: object = None                             # a fixed code
     counts: dict = field(default_factory=dict)       # withheld / dropped counts from the projection
+    first_request_ns: object = None                  # CA-P2-004f session clock (only with clock_ns)
+    first_page_ns: object = None
+    last_response_ns: object = None
 
 
 def _failure(status):
@@ -170,7 +248,7 @@ def _failure(status):
 
 
 def collect_list(transport, resource, namespace, page_limit=100, max_pages=20, max_restarts=1,
-                 wall_ms=_wall_ms, monotonic=time.monotonic):
+                 wall_ms=_wall_ms, monotonic=time.monotonic, clock_ns=None):
     """List one resource collection; never raises for a server or transport failure."""
     if resource not in LIST_PATHS:
         raise CollectorError("resource_not_allowed")
@@ -180,6 +258,8 @@ def collect_list(transport, resource, namespace, page_limit=100, max_pages=20, m
         result = Collection(resource, "consistent", restarts=restarts)
         token, rv, seen = None, None, set()
         result.first_request_ms, started = wall_ms(), monotonic()
+        if clock_ns:
+            result.first_request_ns = clock_ns()
         expired = False
         while True:
             if result.pages == max_pages:
@@ -192,6 +272,10 @@ def collect_list(transport, resource, namespace, page_limit=100, max_pages=20, m
                 break
             finally:
                 result.last_response_ms = wall_ms()
+                if clock_ns:
+                    result.last_response_ns = clock_ns()
+            if clock_ns and result.first_page_ns is None:
+                result.first_page_ns = result.last_response_ns
             result.http_status = status
             if status == 410:
                 expired = True  # this attempt's token and pages are discarded; nothing from the 410 body is used

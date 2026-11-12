@@ -341,3 +341,197 @@ jobs:
           "${KIND:-kind}" delete cluster --name "${CLUSTER:-none}" || true
           rm -rf "${CRED:-/nonexistent}" "$RUNNER_TEMP"/run-* "$RUNNER_TEMP/db.json"
           if docker ps --format '{{.Names}}' | grep -q "${CLUSTER:-none}"; then echo "FAIL: cluster container left behind"; exit 1; fi
+
+  # CA-P2-004f: the list + watch collector against its own disposable kind cluster, created and deleted
+  # in this job only (synthetic workloads; never a real, shared or existing cluster). Same pinned,
+  # checksum-verified tools and digest-pinned images as collector-kind. The collector's Role adds only
+  # `watch` (deploy/kind/rbac-watch.yaml); its 30-minute token lives in a 0700 temp directory.
+  # Optional: not a required check on main. Network use as collector-kind.
+  collector-watch-kind:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    env:
+      KIND_VERSION: v0.33.0
+      KIND_SHA256: aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d
+      KUBECTL_VERSION: v1.37.0
+      KUBECTL_SHA256: 6129359f4e1f3848a5572ccb0b26cf28b8ca08cef38c95a765b2f64a2c961a2f
+      SA: system:serviceaccount:ca-collector:ca-collector
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Run only when collector or contract paths changed (or on manual dispatch)
+        id: paths
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$EVENT" = "workflow_dispatch" ]; then echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if git diff --name-only "$BASE" HEAD | grep -Eq '^(src/cloud_autopsy/collector/|src/cloud_autopsy/app/k8s_(watch_)?recording\.py|src/cloud_autopsy/contracts/|src/cloud_autopsy/db/migrations/|deploy/kind/|tools/collect_k8s\.py|tests/collector/|tests/kind/|\.github/workflows/)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        if: steps.paths.outputs.run == 'true'
+        with:
+          python-version: "3.13"
+
+      - name: Download pinned kind and kubectl and verify their SHA-256
+        if: steps.paths.outputs.run == 'true'
+        run: |
+          set -eu
+          bin="$RUNNER_TEMP/ca-bin"
+          mkdir -p "$bin"
+          curl -fsSLo "$bin/kind" "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
+          echo "${KIND_SHA256}  $bin/kind" | sha256sum -c -
+          curl -fsSLo "$bin/kubectl" "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          echo "${KUBECTL_SHA256}  $bin/kubectl" | sha256sum -c -
+          chmod 0755 "$bin/kind" "$bin/kubectl"
+          echo "KIND=$bin/kind" >> "$GITHUB_ENV"
+          echo "KUBECTL=$bin/kubectl" >> "$GITHUB_ENV"
+          echo "CLUSTER=ca-watch-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
+          echo "KUBECONFIG=$RUNNER_TEMP/ca-admin.kubeconfig" >> "$GITHUB_ENV"
+
+      - name: Create the disposable cluster (127.0.0.1 only, digest-pinned node image)
+        if: steps.paths.outputs.run == 'true'
+        run: |
+          set -eu
+          "$KIND" create cluster --name "$CLUSTER" --config deploy/kind/cluster.yaml --wait 180s \
+            || { "$KIND" delete cluster --name "$CLUSTER" || true; "$KIND" create cluster --name "$CLUSTER" --config deploy/kind/cluster.yaml --wait 180s; }
+          "$KUBECTL" config view -o jsonpath='{.clusters[0].cluster.server}' | grep -Eq '^https://127\.0\.0\.1:[0-9]+$'
+
+      - name: Synthetic workloads
+        if: steps.paths.outputs.run == 'true'
+        run: |
+          set -eu
+          "$KUBECTL" apply -f deploy/kind/workloads.yaml
+          "$KUBECTL" -n ca-demo rollout status deployment/checkout-api --timeout=180s
+          "$KUBECTL" -n ca-demo get deployments,replicasets,pods -o wide
+
+      - name: Watch collector identity (Role adds only watch) and a 30-minute token outside Git
+        if: steps.paths.outputs.run == 'true'
+        run: |
+          set -eu
+          umask 077
+          dir="$(mktemp -d "$RUNNER_TEMP/ca-collector-cred.XXXXXX")"
+          "$KUBECTL" apply -f deploy/kind/rbac-watch.yaml
+          "$KUBECTL" create token ca-collector -n ca-collector --duration=30m > "$dir/token"
+          echo "::add-mask::$(cat "$dir/token")"
+          "$KUBECTL" config view --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' | base64 -d > "$dir/ca.crt"
+          echo "CRED=$dir" >> "$GITHUB_ENV"
+          echo "SERVER=$("$KUBECTL" config view -o jsonpath='{.clusters[0].cluster.server}')" >> "$GITHUB_ENV"
+          test "$(stat -c '%a' "$dir")" = 700 && test "$(stat -c '%a' "$dir/token")" = 600
+
+      - name: Negative RBAC (kubectl auth can-i as the collector)
+        if: steps.paths.outputs.run == 'true'
+        run: |
+          set -eu
+          no() { out="$("$KUBECTL" auth can-i "$@" --as="$SA" 2>/dev/null || true)"; [ "$out" = "no" ] || { echo "FAIL: can-i $* -> $out"; exit 1; }; }
+          yes() { out="$("$KUBECTL" auth can-i "$@" --as="$SA" 2>/dev/null || true)"; [ "$out" = "yes" ] || { echo "FAIL: can-i $* -> $out"; exit 1; }; }
+          for r in pods events deployments.apps replicasets.apps; do yes list "$r" -n ca-demo; yes watch "$r" -n ca-demo; done
+          for r in secrets configmaps; do no get "$r" -n ca-demo; no list "$r" -n ca-demo; no watch "$r" -n ca-demo; done
+          no watch pods -n ca-other
+          no watch deployments.apps -n ca-other
+          no watch pods --all-namespaces
+          no watch events --all-namespaces
+          no watch nodes
+          no watch namespaces
+          no get pods -n ca-demo --subresource=log
+          no create pods -n ca-demo --subresource=exec
+          no create pods -n ca-demo --subresource=portforward
+          no get deployments.apps -n ca-demo --subresource=scale
+          for v in create update patch delete deletecollection; do
+            no "$v" pods -n ca-demo; no "$v" deployments.apps -n ca-demo; no "$v" replicasets.apps -n ca-demo
+          done
+          no list nodes
+          no get namespaces
+          no create serviceaccounts/token -n ca-collector
+          echo "can-i: the four list+watch grants are 'yes'; every other verb, resource, namespace and scope is 'no'"
+
+      - name: Negative RBAC with the real token (raw requests must get 403; the permitted watch 200)
+        if: steps.paths.outputs.run == 'true'
+        run: python -I tests/kind/kind_checks.py rbac --server "$SERVER" --ca-file "$CRED/ca.crt" --token-file "$CRED/token" --watch-role
+
+      - name: "Run 1: a watch session while the cluster changes (rollout, scale, crash loop)"
+        if: steps.paths.outputs.run == 'true'
+        run: |
+          set -eu
+          c() { python -I tools/collect_k8s.py --server "$SERVER" --ca-file "$CRED/ca.crt" --token-file "$CRED/token" --namespace ca-demo --cluster-id ca-kind-synthetic "$@"; }
+          c --recording-id ca-watch-run1 --out "$RUNNER_TEMP/run-watch1" --watch-seconds 150 --probe-interval 5 --final-wait 75 &
+          pid=$!
+          sleep 25
+          "$KUBECTL" -n ca-demo rollout restart deployment/checkout-api
+          "$KUBECTL" -n ca-demo rollout status deployment/checkout-api --timeout=120s
+          "$KUBECTL" -n ca-demo scale deployment/checkout-api --replicas=3
+          sleep 20
+          "$KUBECTL" -n ca-demo scale deployment/checkout-api --replicas=2
+          wait "$pid"
+          python -I tests/kind/kind_checks.py watch --out "$RUNNER_TEMP/run-watch1" --token-file "$CRED/token" --expect proven
+          python -I tools/create_investigation.py --offline "$RUNNER_TEMP/run-watch1/bundle"
+
+      - name: Install the hash-locked database driver tree
+        if: steps.paths.outputs.run == 'true'
+        run: |
+          python -m venv .venv-db
+          .venv-db/bin/python -m pip install --disable-pip-version-check --require-hashes --no-deps \
+            --only-binary=:all: -r requirements-db.txt
+
+      - name: Database-verified replay of the watch bundle (profile 3, migration 0008, its own disposable PostgreSQL)
+        if: steps.paths.outputs.run == 'true'
+        env:
+          CA_PG_DEMO_PORT: "0"
+        run: |
+          set -eu
+          .venv-db/bin/python -I tools/create_investigation.py "$RUNNER_TEMP/run-watch1/bundle" --json > "$RUNNER_TEMP/db-watch.json"
+          python -I tests/kind/kind_checks.py db --json "$RUNNER_TEMP/db-watch.json"
+
+      - name: "Run 2: the API server restarts mid-session (recorded as whatever happened)"
+        if: steps.paths.outputs.run == 'true'
+        run: |
+          set -eu
+          c() { python -I tools/collect_k8s.py --server "$SERVER" --ca-file "$CRED/ca.crt" --token-file "$CRED/token" --namespace ca-demo --cluster-id ca-kind-synthetic "$@"; }
+          c --recording-id ca-watch-run2 --out "$RUNNER_TEMP/run-watch2" --watch-seconds 120 --probe-interval 5 --final-wait 60 --max-reconnects 10 &
+          pid=$!
+          sleep 25
+          docker exec "$CLUSTER-control-plane" sh -c 'crictl stop $(crictl ps -q --name kube-apiserver)'
+          for i in $(seq 1 60); do "$KUBECTL" get --raw /readyz >/dev/null 2>&1 && break; sleep 2; done
+          "$KUBECTL" -n ca-demo scale deployment/checkout-api --replicas=3
+          wait "$pid"
+          python -I tests/kind/kind_checks.py watch --out "$RUNNER_TEMP/run-watch2" --token-file "$CRED/token" --expect any
+
+      - name: "Run 3: a revoked binding ends the session as a gap"
+        if: steps.paths.outputs.run == 'true'
+        run: |
+          set -eu
+          c() { python -I tools/collect_k8s.py --server "$SERVER" --ca-file "$CRED/ca.crt" --token-file "$CRED/token" --namespace ca-demo --cluster-id ca-kind-synthetic "$@"; }
+          c --recording-id ca-watch-run3 --out "$RUNNER_TEMP/run-watch3" --watch-seconds 90 --probe-interval 5 --final-wait 30 --watch-timeout 15 &
+          pid=$!
+          sleep 25
+          "$KUBECTL" -n ca-demo delete rolebinding ca-collector-watch
+          wait "$pid"
+          python -I tests/kind/kind_checks.py watch --out "$RUNNER_TEMP/run-watch3" --token-file "$CRED/token" --expect denied
+          "$KUBECTL" apply -f deploy/kind/rbac-watch.yaml
+
+      - name: "Run 4: the event bound ends the session as a truncated gap"
+        if: steps.paths.outputs.run == 'true'
+        run: |
+          set -eu
+          c() { python -I tools/collect_k8s.py --server "$SERVER" --ca-file "$CRED/ca.crt" --token-file "$CRED/token" --namespace ca-demo --cluster-id ca-kind-synthetic "$@"; }
+          c --recording-id ca-watch-run4 --out "$RUNNER_TEMP/run-watch4" --watch-seconds 60 --probe-interval 5 --final-wait 20 --max-events 3 &
+          pid=$!
+          sleep 15
+          "$KUBECTL" -n ca-demo rollout restart deployment/checkout-api
+          wait "$pid"
+          python -I tests/kind/kind_checks.py watch --out "$RUNNER_TEMP/run-watch4" --token-file "$CRED/token" --expect event_limit
+
+      - name: Delete the cluster and the credentials
+        if: always() && steps.paths.outputs.run == 'true'
+        run: |
+          "${KIND:-kind}" delete cluster --name "${CLUSTER:-none}" || true
+          rm -rf "${CRED:-/nonexistent}" "$RUNNER_TEMP"/run-watch* "$RUNNER_TEMP/db-watch.json"
+          if docker ps --format '{{.Names}}' | grep -q "${CLUSTER:-none}"; then echo "FAIL: cluster container left behind"; exit 1; fi

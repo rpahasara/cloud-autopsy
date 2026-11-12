@@ -58,8 +58,8 @@ def pod(observed=None, version="1205"):
 
 
 def deleted(kind="Pod", object_kind="Pod", with_time=True):
-    times = [{"timestamp_kind": "observed", "raw": "2026-11-12T10:01:00.000000000Z", "clock_domain_id": COLLECTOR,
-              "declared_precision_ns": 2_000_000}] if with_time else []
+    bracket = {"raw": "2026-11-12T10:01:00.000000000Z", "clock_domain_id": COLLECTOR, "declared_precision_ns": 2_000_000}
+    times = [{"timestamp_kind": "event", **bracket}, {"timestamp_kind": "observed", **bracket}] if with_time         else [{"timestamp_kind": "event", **bracket}]
     return {"contract_version": ev.OBSERVATION_VERSION, "source_ref": "k8s:deleted/ca-demo/api-1@1300",
             "observation_kind": "k8s_object_deleted", "source_uid": "uid-pod-1", "source_version": "1300",
             "entity": {"kind": kind, "namespace": "ca-demo", "name": "api-1"}, "times": times,

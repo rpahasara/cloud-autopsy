@@ -10,6 +10,13 @@
       coverage), honest abstention, and that no planted value or the token appears in anything written.
   kind_checks.py db    --json FILE
       Checks the database-verified creation output: verified, byte-identical, abstained.
+  kind_checks.py rbac  ... --watch-role
+      CA-P2-004f: the watch Role. The permitted watch must open (200) and every watch outside it must
+      be refused (403): Secrets, ConfigMaps, another namespace, cluster-wide, nodes and namespaces.
+  kind_checks.py watch --out DIR --token-file TOKEN --expect proven|denied|event_limit [--min-segments N]
+      Checks a list + watch run: coverage only with a coherent basis, nothing withheld counted, the
+      bundle re-derived byte-identically from the recording, abstention, and no planted value,
+      Event text, token or continue token written.
 
 Synthetic data only. Prints codes and counts, never response bodies or the token.
 """
@@ -27,6 +34,7 @@ sys.path.insert(0, str(REPO / "src"))
 
 from cloud_autopsy.app import bundle as B  # noqa: E402
 from cloud_autopsy.app import create as C  # noqa: E402
+from cloud_autopsy.app import k8s_watch_recording as W  # noqa: E402
 from cloud_autopsy.collector import client as cl  # noqa: E402
 from cloud_autopsy.contracts import acquisition as acq  # noqa: E402
 from cloud_autopsy.contracts import frozen_input as fi  # noqa: E402
@@ -59,6 +67,18 @@ REFUSALS = (
     ("POST", "/api/v1/namespaces/ca-collector/serviceaccounts/ca-collector/token", "tokenrequest"),
     ("GET", "/apis/rbac.authorization.k8s.io/v1/namespaces/ca-demo/roles", "rbac"),
 )
+WATCH_ALLOWED = "/api/v1/namespaces/ca-demo/pods?watch=1"
+# CA-P2-004f: with the watch Role, these watches must still be refused.
+WATCH_REFUSALS = (
+    ("GET", "/api/v1/namespaces/ca-demo/secrets?watch=1", "watch secrets"),
+    ("GET", "/api/v1/namespaces/ca-demo/configmaps?watch=1", "watch configmaps"),
+    ("GET", "/api/v1/namespaces/ca-other/pods?watch=1", "watch another namespace"),
+    ("GET", "/apis/apps/v1/namespaces/ca-other/deployments?watch=1", "watch another namespace"),
+    ("GET", "/api/v1/pods?watch=1", "cluster-wide pod watch"),
+    ("GET", "/api/v1/events?watch=1", "cluster-wide event watch"),
+    ("GET", "/api/v1/nodes?watch=1", "watch nodes"),
+    ("GET", "/api/v1/namespaces?watch=1", "watch namespaces"),
+)
 
 
 def fail(message):
@@ -66,7 +86,7 @@ def fail(message):
     sys.exit(1)
 
 
-def raw_request(server, ca_file, token, method, path):
+def raw_request(server, ca_file, token, method, path, read=True):
     """Test-only: an arbitrary request with the collector token (never used by the collector)."""
     parts = urlsplit(server)
     context = ssl.create_default_context(cafile=str(ca_file))
@@ -80,7 +100,7 @@ def raw_request(server, ca_file, token, method, path):
     try:
         con.request(method, path, body=body, headers=headers)
         response = con.getresponse()
-        data = response.read(1_048_576)
+        data = response.read(1_048_576) if read or response.status != 200 else b""
         return response.status, data
     finally:
         con.close()
@@ -95,7 +115,14 @@ def rbac(args):
     if not pods:
         fail("no pods to probe")
     refused = 0
-    for method, path, why in REFUSALS:
+    refusals = REFUSALS
+    if args.watch_role:
+        refusals = tuple(r for r in REFUSALS if r[1] != WATCH_ALLOWED) + WATCH_REFUSALS
+        status, _ = raw_request(args.server, args.ca_file, token, "GET",
+                                WATCH_ALLOWED + "&timeoutSeconds=1&allowWatchBookmarks=true", read=False)
+        if status != 200:
+            fail(f"the permitted watch answered {status}")
+    for method, path, why in refusals:
         path = path.format(pod=pods[0])
         status, _ = raw_request(args.server, args.ca_file, token, method, path)
         if status != 403:
@@ -111,7 +138,8 @@ def rbac(args):
         cl.build_path("pods", "ca-other", 10)
     except cl.CollectorError:
         fail("the namespace is configuration, not part of the allowlist check")
-    print(f"rbac: {refused} forbidden requests refused with 403; permitted list 200; allowlist refuses all six")
+    print(f"rbac: {refused} forbidden requests refused with 403; permitted list 200"
+          f"{'; permitted watch 200' if args.watch_role else ''}; allowlist refuses all six")
 
 
 def scan(out, token):
@@ -181,6 +209,59 @@ def run(args):
     print(f"run ({expect}): ok; abstained; no planted value, token or event text written")
 
 
+def watch(args):
+    out = Path(args.out)
+    report = json.loads((out / "report.json").read_bytes())
+    token = Path(args.token_file).read_text(encoding="ascii").strip()
+    leaks = scan(out, token)
+    for path in sorted(out.rglob("*")):
+        if path.is_file() and b"continue" in path.read_bytes() and b'"continue"' in path.read_bytes():
+            leaks.append(f"{path.name}:continue-token")
+    if leaks:
+        fail(f"planted or secret values written: {leaks}")
+    conversion = W.verify_bundle(out / "recording", out / "bundle")  # replay: byte-identical
+    acquisitions = {a["query_id"]: a for a in conversion.report["acquisitions"]}
+    print("acquisitions:", {q: (a["outcomes"], a["verified_coverage_ms"], [s.get("end") for s in a["segments"]],
+                                a["withheld"], a["unconverted"]) for q, a in acquisitions.items()})
+    loaded = B.load(out / "bundle")
+    for b in loaded.batches:
+        claimed = b["outcome"] in ("complete", "empty")
+        if claimed != (b["coverage_basis"] is not None):
+            fail("a coverage basis without a coverage claim, or the reverse")
+        if claimed and (b["coverage"]["start"], b["coverage"]["end"]) != (
+                b["coverage_basis"]["start_anchor"]["at"], b["coverage_basis"]["end_anchor"]["at"]):
+            fail("coverage differs from its basis")
+    frozen = fi.seal(loaded.plan, loaded.registry, list(loaded.batches))
+    verified = sum(a["verified_ms"] for a in frozen.root()["acquisitions"])
+    inv = C.investigate_offline(loaded)
+    if inv.result["outcome"]["status"] != "abstained":
+        fail(f"the investigation is {inv.result['outcome']['status']}, expected abstained")
+    if args.expect == "proven":
+        if report["verified_coverage_ms"] <= 0 or verified <= 0:
+            fail("no verified coverage from a healthy session")
+        if not acquisitions["k8s.pods"]["segments"][0].get("proven"):
+            fail("the pod watch was never proven")
+        changes = sum(1 for b in loaded.batches for o in b["observations"]
+                      if any(t["timestamp_kind"] == "observed" for t in o["times"]))
+        if changes < 1:
+            fail("no watched change was recorded")
+    elif args.expect == "denied":
+        ends = [s.get("end") for a in acquisitions.values() for s in a["segments"]]
+        if "denied" not in ends:
+            fail(f"expected a denied end after the revocation: {ends}")
+    elif args.expect == "event_limit":
+        ends = [s.get("end") for a in acquisitions.values() for s in a["segments"]]
+        if "event_limit" not in ends:
+            fail(f"expected an event_limit end: {ends}")
+        if not [b for b in loaded.batches if b["reason"] == "event_limit" and b["truncation"]["truncated"]]:
+            fail("expected a truncated partial event_limit batch")
+    segments = max(len(a["segments"]) for a in acquisitions.values())
+    if segments < args.min_segments:
+        fail(f"expected at least {args.min_segments} segments, got {segments}")
+    print(f"watch ({args.expect}): ok; verified {report['verified_coverage_ms']} ms (frozen input {verified} ms); "
+          "replay byte-identical; abstained; no planted value, token, continue token or event text written")
+
+
 def db(args):
     rows = json.loads(Path(args.json).read_bytes())
     if len(rows) != 1 or rows[0].get("status") != "ok" or rows[0].get("verified") is not True:
@@ -197,6 +278,12 @@ def main():
     p.add_argument("--server", required=True)
     p.add_argument("--ca-file", required=True)
     p.add_argument("--token-file", required=True)
+    p.add_argument("--watch-role", action="store_true")
+    p = sub.add_parser("watch")
+    p.add_argument("--out", required=True)
+    p.add_argument("--token-file", required=True)
+    p.add_argument("--expect", required=True, choices=("proven", "denied", "event_limit", "any"))
+    p.add_argument("--min-segments", type=int, default=1)
     p = sub.add_parser("run")
     p.add_argument("--out", required=True)
     p.add_argument("--token-file")
@@ -204,7 +291,7 @@ def main():
     p = sub.add_parser("db")
     p.add_argument("--json", required=True)
     args = parser.parse_args()
-    {"rbac": rbac, "run": run, "db": db}[args.command](args)
+    {"rbac": rbac, "run": run, "db": db, "watch": watch}[args.command](args)
 
 
 if __name__ == "__main__":

@@ -271,7 +271,8 @@ KINDS_ADDED_IN_V2 = {spec.observation_kind: spec for spec in (
 #   under a plan pinning 0.3. It is a collector-clock bracket: the commit of the observed change lies
 #   in ``[raw, raw + declared precision)`` (the unchanged time contract's meaning; see the CA-P2-004f
 #   plan section 6.2 and tests/contracts/test_observed_bracket.py);
-# - ``k8s_object_deleted``: a Kubernetes DELETED watch event, with a required ``observed`` time.
+# - ``k8s_object_deleted``: a Kubernetes DELETED watch event, with required ``event`` and ``observed``
+#   times (the same collector bracket).
 # Labelling (rev. 2 of the 004d rule): a record carries the earliest registry version under which that
 # exact record is valid. A record without ``observed`` keeps its 0.1 or 0.2 label and stays
 # byte-identical; a record with ``observed`` is labelled 0.3 and refused under 0.1 and 0.2 plans.
@@ -280,8 +281,10 @@ OBSERVED_TIME_KINDS = frozenset({"pod", "replicaset", "deployment_rollout", "k8s
 DELETED_OBJECT_KINDS = ("Pod", "ReplicaSet", "Deployment", "Event")
 KINDS_ADDED_IN_V3 = {spec.observation_kind: spec for spec in (
     # A deletion seen on a watch: which object, the deletion's resourceVersion (source_version) and
-    # when it was observed. Nothing else of the deleted object is carried.
-    KindSpec("k8s_object_deleted", "K8S-DELETE", "kubernetes_api", DELETED_OBJECT_KINDS, (OBSERVED_TIME,), (),
+    # when it was observed. Nothing else of the deleted object is carried. A deletion has no other
+    # time, so its required ``event`` time is the same collector bracket as its ``observed`` time
+    # (every kind has an ``event`` time; the engine relies on that).
+    KindSpec("k8s_object_deleted", "K8S-DELETE", "kubernetes_api", DELETED_OBJECT_KINDS, ("event", OBSERVED_TIME), (),
              _Object({"object_kind": (_Text(10, r"Pod|ReplicaSet|Deployment|Event"), True)}),
              since=KIND_REGISTRY_VERSION_V3),
 )}
