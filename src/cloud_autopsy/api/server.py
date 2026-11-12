@@ -13,7 +13,7 @@ import os
 import sys
 from pathlib import Path
 
-from ..db import ingest, results
+from ..db import ingest, results, status
 from ..db.adapter import Database, DbError, Endpoint
 from . import grants as grants_module
 from . import ui
@@ -60,6 +60,24 @@ def database_backend(connect):
     return load_verified, check_ready
 
 
+def status_backend(connect):
+    """Lifecycle status over ``connect()`` (CA-P2-004b): a ``RunStatus`` or None, else ``BackendDown``."""
+
+    def load_status(run_id):
+        try:
+            db = connect()
+        except DbError:
+            raise BackendDown() from None
+        try:
+            return status.load_status(db, run_id)
+        except (DbError, status.StatusInvalid):
+            raise BackendDown() from None
+        finally:
+            db.close()
+
+    return load_status
+
+
 def engine_connector(host, port, database, password):
     def connect():
         return Database(Endpoint(host, int(port), database), "ca_engine", password,
@@ -70,7 +88,7 @@ def engine_connector(host, port, database, password):
 def build(grants_path, connect, port=0, quiet=False, dashboard=True):
     load_verified, check_ready = database_backend(connect)
     service = ApiService(grants_module.load(grants_path), load_verified, check_ready,
-                         ui=ui.load_assets() if dashboard else None)
+                         ui=ui.load_assets() if dashboard else None, load_status=status_backend(connect))
     return LoopbackServer(service, port, quiet=quiet)
 
 

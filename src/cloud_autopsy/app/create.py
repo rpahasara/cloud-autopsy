@@ -82,7 +82,7 @@ def create_in_database(roles, bundle, verify_db=None):
     ``verify_db``: an optional separate ``ca_engine`` connection for the verify-on-read check."""
     try:
         from . import pipeline  # needs the database driver; the offline mode does not
-        from ..db import results
+        from ..db import results, seal
     except ImportError as exc:
         raise CreationFailed("start", None, type(exc).__name__) from exc
 
@@ -103,6 +103,8 @@ def create_in_database(roles, bundle, verify_db=None):
         verified = pipeline.replay_stored(verify_db or roles["ca_engine"], run_id)
     except CreationFailed:
         raise
+    except seal.SealFailed as exc:  # the run is now 'failed' with this fixed reason (CA-P2-004b)
+        raise CreationFailed("seal", progress.get("run_id"), exc.reason) from exc
     except Exception as exc:  # noqa: BLE001 -- the stage and class are reported; nothing is marked successful
         raise CreationFailed(progress.get("stage", "start"), progress.get("run_id"), type(exc).__name__) from exc
     if verified.result_bytes != expected.result_bytes or verified.result_digest != expected.result_digest:
@@ -118,13 +120,22 @@ class GrantFiles:
     token_path: Path
 
 
-def issue_private_grant(investigations, directory=None, name="bundle-runs"):
+def issue_private_grant(investigations, directory=None, name="bundle-runs", failed=()):
     """A bearer token granting exactly these database-verified runs, written to a new private
-    directory outside Git (``grants.json`` holds only the token hash; ``token`` holds the token)."""
-    investigations = list(investigations)
-    if not investigations or not all(isinstance(i, DatabaseInvestigation) for i in investigations):
-        raise TypeError("grants are issued only for database-verified investigations")
-    record, tokens = G.issue({name: [i.run_id for i in investigations]})
+    directory outside Git (``grants.json`` holds only the token hash; ``token`` holds the token).
+
+    ``failed`` (CA-P2-004b): ``CreationFailed`` errors whose run exists. Their runs are granted
+    **status only** (grants contract 0.2): the token can read their lifecycle state and fixed
+    failure reason, never a result or evidence."""
+    investigations, failed = list(investigations), list(failed)
+    if not all(isinstance(i, DatabaseInvestigation) for i in investigations):
+        raise TypeError("result grants are issued only for database-verified investigations")
+    if not all(isinstance(f, CreationFailed) and f.run_id for f in failed):
+        raise TypeError("status-only grants are issued only for failed creations whose run exists")
+    if not investigations and not failed:
+        raise TypeError("nothing to grant")
+    runs = {name: [i.run_id for i in investigations]}
+    record, tokens = G.issue(runs, {name: [f.run_id for f in failed]} if failed else None)
     target = make_private_dir(directory, prefix="ca-grant-")
     grants_path, token_path = target / "grants.json", target / "token"
     G.write_private(grants_path, json.dumps(record).encode("utf-8"))

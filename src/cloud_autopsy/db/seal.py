@@ -6,29 +6,81 @@ any write transaction over the run's stored batches. Phase B publishes the root,
 decoded rows in one transaction, re-verifies them from the database with ``verify_full`` and only
 then moves the run to ``sealed``. Any failure rolls phase B back completely; the deterministic seal
 makes a retry (or a lease takeover after expiry) publish byte-identical output.
+
+Run lifecycle and recovery (CA-P2-004b, R4):
+
+- **Deterministic failure** (a contract error from the pure seal or from re-verifying what phase B
+  wrote, for example ``limit_exceeded``): repeating the seal gives the same error, so the worker
+  moves the run to ``failed`` with the fixed reason ``seal:<contract code>`` and raises
+  ``SealFailed``. The run never waits in ``sealing`` for its lease to expire.
+- **Transient failure** (a database or connection error, or a crashed worker): the run stays
+  ``sealing`` under its lease. After the lease expires, any worker may take it over and seal again;
+  the output is byte-identical.
+- **Bounded, durable retries:** every lease acquisition is a committed update that increases
+  ``state_version`` by exactly one (enforced by ``ca.check_run_transition``), and a run in
+  ``sealing`` is only ever updated by lease acquisition. So while a run is ``sealing``, its
+  ``state_version`` *is* the number of lease acquisitions so far, and it survives any crash. A
+  worker that would make acquisition ``MAX_SEAL_ATTEMPTS + 1`` instead moves the run to ``failed``
+  with ``seal:attempts_exhausted``.
+- **Fencing:** publication (phase B) and the move to ``failed`` both require, under ``FOR UPDATE``,
+  that the run is still ``sealing`` at this worker's ``state_version``, owned by this worker, and
+  that the lease has not expired (checked against ``clock_timestamp()``, not the transaction
+  start). A worker whose lease expired or was taken over gets ``SealConflict`` and changes nothing.
 """
 
+import re
 import uuid
 
 from ..contracts import canonical
 from ..contracts import frozen_input as fi
+from ..contracts.errors import ContractError
 from .adapter import with_retry
+
+MAX_SEAL_ATTEMPTS = 3  # PROVISIONAL: lease acquisitions before a run left in 'sealing' is failed
+ATTEMPTS_EXHAUSTED = "seal:attempts_exhausted"
+_REASON = re.compile(r"seal:[a-z][a-z0-9_]{0,63}", re.ASCII)
 
 
 class SealConflict(RuntimeError):
     """Another sealer holds the run, or the run is not in a sealable state."""
 
 
+class SealFailed(RuntimeError):
+    """The run was moved to ``failed``. ``reason`` is a fixed code (``seal:<code>``), never input content."""
+
+    def __init__(self, reason):
+        self.reason = reason
+        super().__init__(f"run failed: {reason}")
+
+
 class InjectedFailure(RuntimeError):
     """Raised only by tests through ``fail_before_commit`` to prove rollback."""
 
 
+def failure_reason(exc):
+    """The fixed reason recorded for a deterministic (contract) failure."""
+    reason = f"seal:{getattr(exc, 'code', '')}"
+    return reason if _REASON.fullmatch(reason) else "seal:contract_error"
+
+
 def seal_run(sealer_db, run_id, plan, registry, worker=None, lease_seconds=300, fail_before_commit=False):
+    """Seal the run, or take over a run whose lease expired.
+
+    Raises ``SealConflict`` when another worker holds a live lease or the run is not sealable, and
+    ``SealFailed`` when the run was moved to ``failed``. Any other exception is transient: the run
+    stays ``sealing`` under this worker's lease and is recoverable once the lease expires."""
     worker = worker or f"sealer-{uuid.uuid4().hex[:12]}"
     version = with_retry(lambda: _phase_a(sealer_db, run_id, plan, worker, lease_seconds))
-    records = _load_batches(sealer_db, run_id)
-    frozen = fi.seal(plan, registry, records)
-    with_retry(lambda: _phase_b(sealer_db, run_id, plan, registry, worker, version, frozen, fail_before_commit))
+    if version is None:
+        raise SealFailed(ATTEMPTS_EXHAUSTED)
+    try:
+        records = _load_batches(sealer_db, run_id)
+        frozen = fi.seal(plan, registry, records)
+        with_retry(lambda: _phase_b(sealer_db, run_id, plan, registry, worker, version, frozen, fail_before_commit))
+    except ContractError as exc:  # deterministic: repeating the seal gives the same error
+        reason = failure_reason(exc)
+        with_retry(lambda: _mark_failed(sealer_db, run_id, worker, version, reason))
+        raise SealFailed(reason) from None
     return frozen
 
 
@@ -41,6 +93,12 @@ def _phase_a(db, run_id, plan, worker, lease_seconds):
         state, version, owner, expired, plan_digest = row
         if plan_digest != plan.digest:
             raise SealConflict("plan differs from the run's plan")
+        if state == "sealing" and (owner == worker or expired) and version >= MAX_SEAL_ATTEMPTS:
+            # The durable bound: while a run is sealing, state_version counts its lease acquisitions.
+            db.run("UPDATE ca.run SET state = 'failed', state_version = state_version + 1, lease_owner = NULL, "
+                   "lease_expires_at = NULL, failure_reason = :f WHERE run_id = CAST(:r AS uuid) "
+                   "AND state_version = :v", f=ATTEMPTS_EXHAUSTED, r=run_id, v=version)
+            return None
         if state == "collecting" or (state == "sealing" and (owner == worker or expired)):
             db.run("UPDATE ca.run SET state = 'sealing', state_version = state_version + 1, lease_owner = :w, "
                    "lease_expires_at = now() + make_interval(secs => :s) WHERE run_id = CAST(:r AS uuid) "
@@ -60,10 +118,7 @@ def _load_batches(db, run_id):
 def _phase_b(db, run_id, plan, registry, worker, version, frozen, fail_before_commit):
     root = frozen.root()
     with db.transaction():
-        row = db.one("SELECT state, state_version, lease_owner FROM ca.run WHERE run_id = CAST(:r AS uuid) "
-                     "FOR UPDATE", r=run_id)
-        if row is None or tuple(row) != ("sealing", version, worker):
-            raise SealConflict("lease lost before publication")
+        _hold_lease(db, run_id, worker, version, "publication")
         db.run("INSERT INTO ca.frozen_input (run_id, plan_digest, contract_version, manifest_digest, status, "
                "root_bytes) VALUES (CAST(:r AS uuid), :p, :v, :d, :s, :b)", r=run_id, p=plan.digest,
                v=root["contract_version"], d=root["manifest_digest"], s=root["status"], b=frozen.root_bytes)
@@ -78,6 +133,27 @@ def _phase_b(db, run_id, plan, registry, worker, version, frozen, fail_before_co
             raise InjectedFailure("injected failure after publishing rows, before commit")
         db.run("UPDATE ca.run SET state = 'sealed', state_version = state_version + 1, lease_owner = NULL, "
                "lease_expires_at = NULL WHERE run_id = CAST(:r AS uuid) AND state_version = :v", r=run_id, v=version)
+
+
+def _hold_lease(db, run_id, worker, version, action):
+    """Inside a transaction: lock the run and require this worker's live lease at this version."""
+    row = db.one("SELECT state, state_version, lease_owner, lease_expires_at > clock_timestamp() "
+                 "FROM ca.run WHERE run_id = CAST(:r AS uuid) FOR UPDATE", r=run_id)
+    if row is None or tuple(row[:3]) != ("sealing", version, worker):
+        raise SealConflict(f"lease lost before {action}")
+    if row[3] is not True:
+        raise SealConflict(f"lease expired before {action}")
+
+
+def _mark_failed(db, run_id, worker, version, reason):
+    """Move a sealing run this worker still holds to ``failed`` with a fixed reason code."""
+    if not _REASON.fullmatch(reason):
+        raise ValueError("failure reasons are fixed codes")
+    with db.transaction():
+        _hold_lease(db, run_id, worker, version, "marking the run failed")
+        db.run("UPDATE ca.run SET state = 'failed', state_version = state_version + 1, lease_owner = NULL, "
+               "lease_expires_at = NULL, failure_reason = :f WHERE run_id = CAST(:r AS uuid) AND state_version = :v",
+               f=reason, r=run_id, v=version)
 
 
 def _insert_decoded(db, run_id, plan, root, frozen):

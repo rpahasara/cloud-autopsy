@@ -147,6 +147,40 @@ class BundleCreationTests(unittest.TestCase):
         self.assertEqual(code, 1)  # and no server was started: --serve needs every bundle created
         self.assertEqual((row["status"], row["stage"], row["reason"]), ("failed", "seal", "RuntimeError"))
 
+    def failed_creation(self, variant="no-symptom"):
+        """Create a bundle whose database seal fails deterministically: the run ends 'failed'."""
+        from cloud_autopsy.contracts import errors as E
+        from cloud_autopsy.contracts import frozen_input as fi
+        from cloud_autopsy.db import seal
+
+        class SealRefuses:  # the database seal only; the offline check before it is untouched
+            def __getattr__(self, name):
+                return getattr(fi, name)
+
+            @staticmethod
+            def seal(*a, **k):
+                raise fi.ManifestError(E.LIMIT_EXCEEDED, "injected deterministic seal failure")
+
+        loaded = B.load(EXAMPLES / variant)
+        seal.fi = SealRefuses()
+        try:
+            with self.assertRaises(C.CreationFailed) as ctx:
+                C.create_in_database(self.db.roles, loaded)
+        finally:
+            seal.fi = fi
+        return ctx.exception
+
+    def test_a_deterministic_seal_failure_is_reported_failed_never_verified(self):
+        failed = self.failed_creation()
+        self.assertEqual((failed.stage, failed.reason), ("seal", "seal:limit_exceeded"))
+        self.assertEqual(self.state(failed.run_id), "failed")  # R4: not left 'sealing'
+        self.assertEqual(create_cli.run_status(self.db, failed.run_id),
+                         {"state": "failed", "failure_reason": "seal:limit_exceeded", "lease_expired": None})
+        with self.assertRaises(results.StoredResultUnavailable):
+            results.load_verified_result(self.fx.connect("ca_engine"), failed.run_id)
+        with self.assertRaises(TypeError):
+            C.issue_private_grant([failed])  # a failed run is never granted results
+
     def get(self, port, path, token):
         con = http.client.HTTPConnection("127.0.0.1", port, timeout=30)
         con.request("GET", path, headers={"Authorization": f"Bearer {token}"})
@@ -186,6 +220,53 @@ class BundleCreationTests(unittest.TestCase):
                            "document.querySelector('#run-title').textContent === 'ca-scenario-001-config-cause' && "
                            "document.querySelector('.verify-title')?.textContent === 'Byte-identical replay'", 30)
                 self.assertEqual(b.js("document.querySelector('#mode-chip').textContent"), "Verified on read")
+                self.assertEqual(b.console_errors(), [])
+            finally:
+                b.close()
+        finally:
+            api.shutdown()
+            api.server_close()
+
+
+    @unittest.skipUnless(BROWSER_OK, "no Chromium-family browser installed (set CA_BROWSER)")
+    def test_a_failed_run_shows_its_status_only_with_explicit_status_access(self):
+        inv = C.create_in_database(self.db.roles, B.load(EXAMPLES / "config-cause"), verify_db=self.fx.connect("ca_engine"))
+        failed = self.failed_creation("clock-unknown")
+        holder = {}
+        create_cli.serve(self.db, [inv], self.tmp / "grant-status", 0, failed=[failed],
+                         ready=lambda api, files: holder.update(api=api, files=files))
+        api, files = holder["api"], holder["files"]
+        threading.Thread(target=api.serve_forever, daemon=True).start()
+        token = files.token_path.read_text(encoding="ascii")
+        try:
+            status, body = self.get(api.port, f"/v1/runs/{failed.run_id}/status", token)
+            self.assertEqual((status, body["verified"], body["access"], body["lifecycle"]["state"],
+                              body["lifecycle"]["failure_reason"]), (200, False, "status", "failed", "seal:limit_exceeded"))
+            for route in ("result", "timeline", "hypotheses", "citations"):  # status never opens results
+                self.assertEqual(self.get(api.port, f"/v1/runs/{failed.run_id}/{route}", token),
+                                 (403, {"error": "run_not_authorized"}))
+            status, body = self.get(api.port, "/v1/summaries/1", token)
+            states = {i["run_id"]: (i["state"], i.get("verified")) for i in body["items"]}
+            self.assertEqual(states, {inv.run_id: ("verified", True), failed.run_id: ("run_failed", False)})
+            b = _cdp.Browser(1440, 900)
+            try:
+                b.navigate(f"http://127.0.0.1:{api.port}/")
+                b.js(f"document.querySelector('#token').value = {json.dumps(token)};"
+                     "document.querySelector('#connect-form').requestSubmit(); 1")
+                b.wait_for("document.querySelector('#app').dataset.page === 'home' && "
+                           "document.querySelector('.h-granted .m-value')?.textContent === '2'", 30)
+                self.assertEqual(b.js("document.querySelector('.h-resolved .m-value').textContent"), "1")
+                b.js("document.querySelector('[data-view=investigations]').click(); 1")
+                row = f".inv-row[data-run=\"{failed.run_id}\"] .inv-ver"
+                b.wait_for(f"document.querySelector('{row}')?.textContent.startsWith('Run failed')", 30)
+                self.assertIn("seal:limit_exceeded", b.js(f"document.querySelector('{row}').textContent"))
+                self.assertEqual(b.js(f"document.querySelector('{row}').className"), "inv-ver is-run_failed")
+                b.js(f"document.querySelector('.inv-row[data-run=\"{failed.run_id}\"]').click(); 1")
+                b.wait_for("document.querySelector('#app').dataset.page === 'run' && "
+                           "document.querySelector('#state-panel h2')?.textContent === 'Run failed'", 30)
+                panel = b.js("document.querySelector('#state-panel').textContent")
+                self.assertIn("reason: seal:limit_exceeded", panel)
+                self.assertNotIn("Verified on read", b.js("document.querySelector('#mode-chip').textContent"))
                 self.assertEqual(b.console_errors(), [])
             finally:
                 b.close()

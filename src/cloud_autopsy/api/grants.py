@@ -5,6 +5,13 @@ A grants file is provisioned locally, outside any Git working tree, and holds on
   {"contract_version": "ca-api-grants/0.1-provisional",
    "grants": [{"name": "demo-all", "token_sha256": "<64 hex>", "run_ids": ["<uuid>", ...]}, ...]}
 
+``ca-api-grants/0.2-provisional`` (CA-P2-004b) adds ``status_run_ids`` to every grant: runs whose
+**lifecycle status only** the token may read (``/v1/runs/{run_id}/status`` and the run's state in
+``/v1/summaries``), for example a run whose creation failed. Status access never authorizes a
+result, timeline, hypotheses, citations or evidence: those still need the run in ``run_ids`` and a
+stored result that verifies on read. The two lists are disjoint and together name 1-1000 runs;
+``run_ids`` may be empty in 0.2. Version 0.1 files are still accepted unchanged.
+
 Rules:
 - a token is 43-128 URL-safe characters (``issue`` makes 32 random bytes); only its SHA-256 is stored;
 - every grant names its runs explicitly (lowercase canonical UUIDs, 1-1000 of them). There is
@@ -27,6 +34,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 GRANTS_VERSION = "ca-api-grants/0.1-provisional"
+GRANTS_VERSION_STATUS = "ca-api-grants/0.2-provisional"
+_GRANT_KEYS = {GRANTS_VERSION: {"name", "token_sha256", "run_ids"},
+               GRANTS_VERSION_STATUS: {"name", "token_sha256", "run_ids", "status_run_ids"}}
 MAX_FILE_BYTES = 65_536
 MAX_GRANTS = 100
 MAX_RUNS_PER_GRANT = 1_000
@@ -48,10 +58,20 @@ class GrantError(ValueError):
 class Grant:
     name: str
     token_sha256: bytes
-    run_ids: frozenset
+    run_ids: frozenset                       # results, timeline, hypotheses, citations, evidence
+    status_run_ids: frozenset = frozenset()  # lifecycle status only
 
     def authorizes(self, run_id):
+        """Result access: the run must still verify on read before anything is served."""
         return run_id in self.run_ids
+
+    def may_view_status(self, run_id):
+        """Lifecycle status access: the run's state and a fixed failure reason, nothing else."""
+        return run_id in self.run_ids or run_id in self.status_run_ids
+
+    @property
+    def visible_run_ids(self):
+        return self.run_ids | self.status_run_ids
 
 
 def _sha256(token):
@@ -87,27 +107,36 @@ def _inside_git_tree(path):
 def parse(record):
     if not isinstance(record, dict) or set(record) != {"contract_version", "grants"}:
         raise GrantError("grants_invalid", "grants file must have exactly contract_version and grants")
-    if record["contract_version"] != GRANTS_VERSION:
+    version = record["contract_version"]
+    if version not in _GRANT_KEYS:
         raise GrantError("grants_version", "unsupported grants version")
     items = record["grants"]
     if not isinstance(items, list) or not 1 <= len(items) <= MAX_GRANTS:
         raise GrantError("grants_invalid", f"grants must be a list of 1-{MAX_GRANTS} entries")
     grants, names, hashes = [], set(), set()
     for item in items:
-        if not isinstance(item, dict) or set(item) != {"name", "token_sha256", "run_ids"}:
-            raise GrantError("grants_invalid", "each grant has exactly name, token_sha256 and run_ids")
+        if not isinstance(item, dict) or set(item) != _GRANT_KEYS[version]:
+            raise GrantError("grants_invalid", "each grant has exactly the fields of its contract version")
         name, digest, runs = item["name"], item["token_sha256"], item["run_ids"]
+        status_runs = item.get("status_run_ids", [])
         if not isinstance(name, str) or not NAME.fullmatch(name) or name in names:
             raise GrantError("grants_invalid", "grant names must be unique lowercase identifiers")
         if not isinstance(digest, str) or not HEX64.fullmatch(digest) or digest in hashes:
             raise GrantError("grants_invalid", "token hashes must be unique SHA-256 hex digests")
-        if not isinstance(runs, list) or not 1 <= len(runs) <= MAX_RUNS_PER_GRANT \
-                or not all(isinstance(r, str) and UUID.fullmatch(r) for r in runs) or len(set(runs)) != len(runs):
-            raise GrantError("grants_invalid", "run_ids must list 1-1000 distinct lowercase UUIDs (no wildcard)")
+        minimum = 1 if version == GRANTS_VERSION else 0
+        if not _run_list(runs, minimum) or not _run_list(status_runs, 0) \
+                or not 1 <= len(runs) + len(status_runs) <= MAX_RUNS_PER_GRANT or set(runs) & set(status_runs):
+            raise GrantError("grants_invalid", "run_ids and status_run_ids must list 1-1000 distinct lowercase "
+                                               "UUIDs in total, with no run in both (no wildcard)")
         names.add(name)
         hashes.add(digest)
-        grants.append(Grant(name, bytes.fromhex(digest), frozenset(runs)))
+        grants.append(Grant(name, bytes.fromhex(digest), frozenset(runs), frozenset(status_runs)))
     return Grants(grants)
+
+
+def _run_list(runs, minimum):
+    return (isinstance(runs, list) and minimum <= len(runs) <= MAX_RUNS_PER_GRANT and len(set(runs)) == len(runs)
+            and all(isinstance(r, str) and UUID.fullmatch(r) for r in runs))
 
 
 def load(path):
@@ -133,12 +162,21 @@ def _no_duplicates(pairs):
     return dict(pairs)
 
 
-def issue(grant_runs):
-    """``{name: [run_id, ...]}`` -> (grants record with hashes only, {name: token}). Tokens are shown once."""
-    tokens = {name: secrets.token_urlsafe(32) for name in grant_runs}
-    record = {"contract_version": GRANTS_VERSION,
-              "grants": [{"name": name, "token_sha256": _sha256(tokens[name]).hex(), "run_ids": sorted(runs)}
-                         for name, runs in sorted(grant_runs.items())]}
+def issue(grant_runs, status_runs=None):
+    """``{name: [run_id, ...]}`` -> (grants record with hashes only, {name: token}). Tokens are shown once.
+
+    ``status_runs`` (``{name: [run_id, ...]}``), when given, adds status-only runs to those grants
+    and writes contract 0.2; without it the record is 0.1, exactly as before."""
+    names = set(grant_runs) | set(status_runs or {})
+    tokens = {name: secrets.token_urlsafe(32) for name in names}
+    grants = []
+    for name in sorted(names):
+        entry = {"name": name, "token_sha256": _sha256(tokens[name]).hex(), "run_ids": sorted(grant_runs.get(name, []))}
+        if status_runs is not None:
+            entry["status_run_ids"] = sorted(status_runs.get(name, []))
+        grants.append(entry)
+    record = {"contract_version": GRANTS_VERSION if status_runs is None else GRANTS_VERSION_STATUS,
+              "grants": grants}
     parse(record)  # refuse anything load() would refuse
     return record, tokens
 

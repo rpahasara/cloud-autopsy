@@ -10,6 +10,7 @@ import shutil
 import stat
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -79,7 +80,7 @@ class PostgresCase(unittest.TestCase):
 class MigrationTests(PostgresCase):
     def test_migrations_applied_once_and_environment_checked(self):  # CA-IT-001, CA-IT-025, CA-IT-031
         self.assertEqual(self.fx.applied, [m.filename for m in migrate.discover()])
-        self.assertEqual(len(self.fx.applied), 4)
+        self.assertEqual(len(self.fx.applied), 5)
         self.assertEqual(migrate.apply(self.owner), [])
         ingest.check_environment(self.reader)
         self.assertEqual(sqlstate(self.owner.run, "UPDATE ca.data_classification SET classification = 'x'"),
@@ -231,11 +232,13 @@ class SealTests(PostgresCase):
         plan = self.plan(["configmaps", "deployments"])
         run_id, _ = self.run_with(plan, ["cm-1", "deploy-1", "deploy-2"])
         with self.assertRaises(seal.InjectedFailure):
-            seal.seal_run(self.sealer, run_id, plan, M.REGISTRY, worker="crashing", lease_seconds=0,
+            # CA-P2-004b: publication needs a live lease, so this lease is short but not already expired.
+            seal.seal_run(self.sealer, run_id, plan, M.REGISTRY, worker="crashing", lease_seconds=1,
                           fail_before_commit=True)
         for table in ("frozen_input", "manifest_page", "run_evidence", "run_gap", "run_coverage", "run_acquisition"):
             self.assertEqual(self.count(table, run_id), 0, table)
         self.assertEqual(self.state(run_id), "sealing")
+        time.sleep(1.2)  # let the crashed worker's lease expire
         frozen = seal.seal_run(self.sealer, run_id, plan, M.REGISTRY, worker="recovery")  # lease expired
         stored = seal.read_frozen_input(self.reader, run_id)
         self.assertEqual((stored.root_bytes, stored.page_bytes), (frozen.root_bytes, frozen.page_bytes))

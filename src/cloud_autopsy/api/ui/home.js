@@ -9,10 +9,19 @@ import { animate, cancelAll, finished, prefersReducedMotion, rectIn } from "./mo
 import { say } from "./views.js";
 
 const AUTO_PAGES = 5;            // pages loaded without asking (each page is one bounded request)
-const ATTENTION = new Set(["unverifiable", "not_found", "unavailable", "error"]);
+// CA-P2-004b lifecycle states (runs without a verified result; never verified, no result fields):
+// in progress (collecting, sealing, sealed without a stored result, or sealed with status-only
+// access) and failed (run_failed, cancelled). Both count under "needs attention", never as outcomes.
+const IN_PROGRESS = new Set(["collecting", "sealing", "awaiting_result", "sealed"]);
+const RUN_FAILED = new Set(["run_failed", "cancelled"]);
+const ATTENTION = new Set(["unverifiable", "not_found", "unavailable", "error", ...IN_PROGRESS, ...RUN_FAILED]);
 const HAS_RESULT = new Set(["verified", "preview"]);
 const STATE_LABEL = { verified: "Verified", preview: "Preview \u00b7 not verified", unverifiable: "Unverifiable",
-                      not_found: "Not found", unavailable: "Unavailable", error: "Error" };
+                      not_found: "Not found", unavailable: "Unavailable", error: "Error",
+                      collecting: "Collecting \u00b7 not verified", sealing: "Sealing \u00b7 not verified",
+                      awaiting_result: "Sealed \u00b7 no result yet", sealed: "Sealed \u00b7 status only",
+                      run_failed: "Run failed", cancelled: "Cancelled" };
+const reasonOf = (i) => i.reason || (i.lifecycle && i.lifecycle.failure_reason) || null;
 const CARD_IDS = ["hero", "granted", "resolved", "abstained", "attention", "trend", "band"];
 
 export function createHome(env) {
@@ -108,7 +117,8 @@ export function createHome(env) {
       unverifiable: group((i) => i.state === "unverifiable"),
       notFound: group((i) => i.state === "not_found"),
       unavailable: group((i) => i.state === "unavailable"),
-      failed: group((i) => i.state === "error"),
+      failed: group((i) => i.state === "error" || RUN_FAILED.has(i.state)),
+      inProgress: group((i) => IN_PROGRESS.has(i.state)),
       attention: group((i) => ATTENTION.has(i.state)),
       records, cited, sources: [...sources.values()].sort((a, b) => b.records - a.records || a.id.localeCompare(b.id)),
       reasons: [...reasons.entries()].sort((a, b) => b[1] - a[1]),
@@ -322,7 +332,8 @@ export function createHome(env) {
           tile("resolved", "Resolved", f.resolved, h("p", { class: "tile-line" }, icon("clock"), `${avg(f.resolved)} evidence / run`)),
           tile("abstained", "Abstained", f.abstained, h("p", { class: "tile-line" }, icon("clock"), `${avg(f.abstained)} evidence / run`)),
           tile("attention", "Needs attention", f.attention, h("p", { class: "tile-line" }, icon("alert"),
-            `${f.unverifiable.length} unverif. \u00b7 ${f.notFound.length + f.unavailable.length + f.failed.length} missing`)))),
+            `${f.unverifiable.length} unverif. \u00b7 ${f.notFound.length + f.unavailable.length + f.failed.length} missing`
+            + (f.inProgress.length ? ` \u00b7 ${f.inProgress.length} in progress` : ""))))),
       h("div", { class: "band-col" },
         h("div", { class: "band-head" }, h("h3", null, "Recent investigations"),
           h("button", { type: "button", class: "link-light", onclick: (e) => { e.stopPropagation(); setView("investigations"); } }, "View all")),
@@ -366,7 +377,7 @@ export function createHome(env) {
             h("span", { role: "cell", class: "inv-ev" }, has ? [h("span", null, `${i.evidence.records} rec`, i.gaps.total ? h("em", null, ` +${i.gaps.total} gap`) : null,
               h("small", null, ` \u00b7 manifest ${say(i.manifest.status).toLowerCase()}`)), h("span", { class: "ev-bar" }, bar)] : "\u2014"),
             h("span", { role: "cell" }, has ? hyp(i) : "\u2014"),
-            h("span", { role: "cell", class: ["inv-ver", `is-${i.state}`] }, STATE_LABEL[i.state], i.reason ? h("small", { class: "mono" }, ` ${i.reason}`) : null));
+            h("span", { role: "cell", class: ["inv-ver", `is-${i.state}`] }, STATE_LABEL[i.state], reasonOf(i) ? h("small", { class: "mono" }, ` ${reasonOf(i)}`) : null));
         }) : h("p", { class: "band-empty" }, "No examined run matches this filter.")),
       h("footer", { class: "inv-foot" },
         h("span", null, f.partial ? `Showing ${f.examined} of ${f.granted} granted runs; figures cover examined runs only.` : `All ${f.granted} granted runs examined.`,
@@ -406,7 +417,8 @@ export function createHome(env) {
     else if (id === "abstained") replace(c, metricCard("abstained", "Abstained", f.abstained.length, `${pct(f.abstained.length, f.examined)}%`, f, (i) => kindOf(i) === "abstained",
       "no cause asserted"));
     else if (id === "attention") replace(c, metricCard("attention", "Unverifiable", f.unverifiable.length, f.attention.length ? `${f.attention.length} need attention` : "none", f,
-      (i) => kindOf(i) === "attention", `${f.notFound.length} not found \u00b7 ${f.unavailable.length} unavailable${f.failed.length ? ` \u00b7 ${f.failed.length} failed` : ""}`));
+      (i) => kindOf(i) === "attention", `${f.notFound.length} not found \u00b7 ${f.unavailable.length} unavailable${f.failed.length ? ` \u00b7 ${f.failed.length} failed` : ""}`
+        + (f.inProgress.length ? ` \u00b7 ${f.inProgress.length} in progress` : "")));
     else if (id === "trend") {
       const box = c.querySelector(".trend-plot");
       const size = box && box.clientWidth > 40 ? [box.clientWidth, box.clientHeight] : [640, 200];

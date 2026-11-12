@@ -19,7 +19,7 @@ if _db.AVAILABLE:
     from cloud_autopsy.contracts import errors as E
     from cloud_autopsy.contracts import frozen_input as fi
     from cloud_autopsy.db import results, seal
-    from test_postgres import PostgresCase
+    from test_postgres import PostgresCase, sqlstate
 else:  # keeps the module importable without the driver; every test is skipped
     PostgresCase = unittest.TestCase
 
@@ -162,6 +162,65 @@ class LifecycleTests(PostgresCase):
         self.assertEqual(self.row(run_id), ("failed", max_attempts() + 1, None, "seal:attempts_exhausted"))
         self.assertEqual(type(ctx.exception).__name__, "SealFailed")
         self.assertEqual(self.count("frozen_input", run_id), 0)
+
+
+@unittest.skipUnless(_db.AVAILABLE, _db.SKIP_REASON)
+class RunStatusViewTests(PostgresCase):
+    """Migration 0005: ``ca.run_status`` exposes lifecycle metadata only, to ca_engine only."""
+
+    def setUp(self):
+        from cloud_autopsy.db import status
+        self.status = status
+        self.engine = self.fx.connect("ca_engine")
+        self.addCleanup(self.engine.close)
+
+    def fresh_run(self):
+        plan = self.plan(TWO)
+        run_id, _ = self.run_with(plan, NAMES)
+        return plan, run_id
+
+    def look(self, run_id):
+        found = self.status.load_status(self.engine, run_id)
+        return found and found.to_record()
+
+    def test_the_view_shows_each_lifecycle_state_and_nothing_else(self):
+        columns = [r[0] for r in self.engine.run(
+            "SELECT column_name FROM information_schema.columns WHERE table_schema = 'ca' AND table_name = 'run_status' "
+            "ORDER BY ordinal_position")]
+        self.assertEqual(columns, ["run_id", "state", "failure_reason", "lease_expired"])
+        plan, collecting = self.fresh_run()
+        self.assertEqual(self.look(collecting), {"state": "collecting", "failure_reason": None, "lease_expired": None})
+        _, live = self.fresh_run()
+        seal._phase_a(self.sealer, live, plan, "secret-worker-name", 300)
+        self.assertEqual(self.look(live), {"state": "sealing", "failure_reason": None, "lease_expired": False})
+        _, expired = self.fresh_run()
+        seal._phase_a(self.sealer, expired, plan, "secret-worker-name", 0)
+        self.assertEqual(self.look(expired), {"state": "sealing", "failure_reason": None, "lease_expired": True})
+        _, sealed = self.fresh_run()
+        seal.seal_run(self.sealer, sealed, plan, M.REGISTRY)
+        self.assertEqual(self.look(sealed), {"state": "sealed", "failure_reason": None, "lease_expired": None})
+        self.assertIsNone(self.look("00000000-0000-4000-8000-000000000000"))
+        # the worker identity never leaves the database through the view
+        rows = self.engine.run("SELECT * FROM ca.run_status WHERE run_id = CAST(:r AS uuid)", r=live)
+        self.assertNotIn("secret-worker-name", repr(rows))
+
+    def test_free_text_failure_reasons_are_never_exposed(self):
+        _, run_id = self.fresh_run()
+        self.as_owner("UPDATE ca.run SET state = 'failed', state_version = state_version + 1, "
+                      "failure_reason = :f WHERE run_id = CAST(:r AS uuid)",
+                      f="Traceback: password=hunter2 at /home/x", r=run_id)
+        self.assertEqual(self.look(run_id), {"state": "failed", "failure_reason": "unspecified", "lease_expired": None})
+
+    def test_only_ca_engine_may_read_the_view_and_nothing_else_changed(self):
+        from cloud_autopsy.db import bootstrap
+        readers = [role for role in sorted(bootstrap.ROLES) if self.owner.one(
+            "SELECT has_table_privilege(:r, 'ca.run_status', 'SELECT')", r=role)[0]]
+        self.assertEqual([r for r in readers if r != "ca_owner"], ["ca_engine"])
+        self.assertFalse(self.owner.one("SELECT has_table_privilege('public', 'ca.run_status', 'SELECT')")[0])
+        for priv in ("INSERT", "UPDATE", "DELETE", "TRUNCATE"):
+            self.assertFalse(self.owner.one("SELECT has_table_privilege('ca_engine', 'ca.run_status', :p)", p=priv)[0])
+        # ca_engine still has no base-table access: the view is the only lifecycle read path
+        self.assertEqual(sqlstate(self.engine.run, "SELECT lease_owner FROM ca.run LIMIT 1"), "42501")
 
 
 if __name__ == "__main__":

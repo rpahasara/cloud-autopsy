@@ -980,6 +980,9 @@ button.inv-row:hover { background: rgba(255, 255, 255, 0.06); }
 .inv-ver.is-verified { color: #cfe3b5; }
 .inv-ver.is-preview { color: #f0d39b; }
 .inv-ver.is-unverifiable, .inv-ver.is-not_found, .inv-ver.is-unavailable { color: #f0bcaa; }
+/* CA-P2-004b lifecycle states reuse the existing tones: in progress as preview (amber), failed as refusals (rose). */
+.inv-ver.is-collecting, .inv-ver.is-sealing, .inv-ver.is-awaiting_result, .inv-ver.is-sealed { color: #f0d39b; }
+.inv-ver.is-run_failed, .inv-ver.is-cancelled { color: #f0bcaa; }
 .inv-row.is-attention .inv-title b { color: var(--on-dark-2); }
 .inv-foot { display: flex; justify-content: space-between; align-items: center; gap: 14px; margin-top: auto; padding-top: 6px; font-size: 11.5px; color: var(--on-dark-3); }
 .btn-light { background: #fff; color: var(--ink); box-shadow: 0 10px 20px -12px rgba(0, 0, 0, 0.8); }

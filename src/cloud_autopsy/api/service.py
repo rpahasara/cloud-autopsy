@@ -12,6 +12,17 @@ Routes (GET only; everything else is 405):
   /v1/runs/{run_id}/evidence/{evidence_hex}  one sealed evidence record of that run; the path
                                              carries the 64-hex digest of the evidence ID
                                              (``ca-evidence-id-sha256/0.1-provisional:<hex>``)
+  /v1/runs/{run_id}/status                   lifecycle status only (CA-P2-004b), never verified
+
+Run lifecycle status (CA-P2-004b): a grant may also name **status-only** runs (grants contract 0.2,
+``status_run_ids``), for example runs whose creation failed. For those, only
+``/v1/runs/{run_id}/status`` and their state in ``/v1/summaries`` are answered; every result,
+timeline, hypotheses, citations and evidence route still answers 403 unless the run is in the
+grant's ``run_ids``, and still serves only a result that verifies on read. A status carries the
+lifecycle state, a fixed failure reason (failed runs) and whether the lease expired (sealing runs),
+always with ``"verified": false``. Status is read through ``load_status(run_id)`` (the
+``ca.run_status`` view as ``ca_engine``) only for runs the caller's grant names, inside the same
+verified-read gate.
 
 Order of checks for ``/v1``: method, request body, path shape (strict regular expressions, no
 query string, no percent-encoding), bearer token, explicit run grant, then verify-on-read.
@@ -69,6 +80,12 @@ EVIDENCE_HEX = re.compile(r"[0-9a-f]{64}", re.ASCII)
 _RUN_ROUTE = re.compile(r"/v1/runs/([^/]+)/(result|timeline|hypotheses|citations)", re.ASCII)
 _EVIDENCE_ROUTE = re.compile(r"/v1/runs/([^/]+)/evidence/([^/]+)", re.ASCII)
 _SUMMARY_ROUTE = re.compile(r"/v1/summaries/([0-9]{1,4})", re.ASCII)
+_STATUS_ROUTE = re.compile(r"/v1/runs/([^/]+)/status", re.ASCII)
+# Summary item state for a run that has no verified result, by lifecycle state. A sealed run is
+# "awaiting_result" when the grant includes its result, and plain "sealed" for a status-only grant.
+LIFECYCLE_ITEM_STATES = {"collecting": "collecting", "sealing": "sealing", "failed": "run_failed",
+                         "cancelled": "cancelled"}
+STATUS_NOTE = "lifecycle status only: this is not an investigation result and is never verified"
 SUMMARY_PAGE_SIZE = 10     # PROVISIONAL: verified loads per summary request
 _PATH_CHARS = re.compile(r"[A-Za-z0-9/._:-]+", re.ASCII)
 SECURITY_HEADERS = (("Content-Type", "application/json; charset=utf-8"), ("Cache-Control", "no-store"),
@@ -175,10 +192,13 @@ class ApiService:
     ``Unverifiable`` or ``BackendDown``. ``check_ready()`` returns or raises ``BackendDown``."""
 
     def __init__(self, grants, load_verified, check_ready, max_in_flight=DEFAULT_MAX_IN_FLIGHT, ui=None,
-                 preview=False, log=None):
+                 preview=False, log=None, load_status=None):
         if not 1 <= int(max_in_flight) <= 64:
             raise ValueError("max_in_flight must be between 1 and 64")
         self.grants, self.load_verified, self.check_ready = grants, load_verified, check_ready
+        # ``load_status(run_id)``: an object with ``state`` and ``to_record()``, or None for no such
+        # run; raises ``BackendDown``. None (the synthetic preview) disables lifecycle status.
+        self.load_status = load_status
         self.ui, self.preview = dict(ui or {}), bool(preview)
         self.log = log  # ``log(line)`` for safe diagnostics; the loopback transport supplies its own
         self._work = threading.BoundedSemaphore(int(max_in_flight))
@@ -207,6 +227,8 @@ class ApiService:
                 return method, "/v1/runs/{run_id}/evidence/{evidence_hex}"
             if _SUMMARY_ROUTE.fullmatch(path):
                 return method, "/v1/summaries/{page}"
+            if _STATUS_ROUTE.fullmatch(path):
+                return method, "/v1/runs/{run_id}/status"
         return method, "<rejected>"
 
     def handle(self, method, path, headers, header_bytes=0):
@@ -242,6 +264,9 @@ class ApiService:
         summary_match = _SUMMARY_ROUTE.fullmatch(path)
         if summary_match:
             return self._summaries(summary_match.group(1), headers)
+        status_match = _STATUS_ROUTE.fullmatch(path)
+        if status_match:
+            return self._status(status_match.group(1), headers)
 
         match = _RUN_ROUTE.fullmatch(path)
         evidence_match = _EVIDENCE_ROUTE.fullmatch(path)
@@ -296,13 +321,42 @@ class ApiService:
                                                     "record": member["record"]}})
         return _json(200, {**envelope, "data": _views(verified.result)[match.group(2)]})
 
+    def _status(self, run_id, headers):
+        if not UUID.fullmatch(run_id):
+            return _error(400, "invalid_run_id")
+        grant = self.grants.authenticate(headers.get("Authorization"))
+        if grant is None:
+            return _error(401, "invalid_token", (("WWW-Authenticate", 'Bearer realm="cloud-autopsy-local"'),))
+        if not grant.may_view_status(run_id):
+            return _error(403, "run_not_authorized")  # before the database: existence is not revealed
+        if self.load_status is None:
+            return _error(404, "status_not_available")
+
+        def load():
+            try:
+                return self.load_status(run_id), None
+            except BackendDown:
+                return None, _error(503, "database_unavailable")
+
+        loaded, overloaded = self._admitted(self._work, load)
+        if overloaded:
+            return overloaded
+        status, failure = loaded
+        if failure:
+            return failure
+        if status is None:
+            return _error(404, "run_not_found")
+        return _json(200, {"api_version": API_VERSION, "run_id": run_id, "verified": False,
+                           "access": "result" if grant.authorizes(run_id) else "status",
+                           "lifecycle": status.to_record(), "note": STATUS_NOTE})
+
     def _summaries(self, page_text, headers):
         if page_text.startswith("0"):
             return _error(400, "invalid_page")
         grant = self.grants.authenticate(headers.get("Authorization"))
         if grant is None:
             return _error(401, "invalid_token", (("WWW-Authenticate", 'Bearer realm="cloud-autopsy-local"'),))
-        runs = sorted(grant.run_ids)  # only this grant's runs, in a deterministic order
+        runs = sorted(grant.visible_run_ids)  # only this grant's runs (result and status-only), in order
         pages = max(1, -(-len(runs) // SUMMARY_PAGE_SIZE))
         page = int(page_text)
         if page > pages:
@@ -315,13 +369,37 @@ class ApiService:
                 self.log(f"api summary_item_error {type(exc).__name__}")
             return {"run_id": run_id, "state": "error"}
 
+        def lifecycle(run_id, result_access):
+            """The item for a run without a verified result: its lifecycle state, never verified."""
+            if self.load_status is None:
+                return {"run_id": run_id, "state": "not_found" if result_access else "unavailable"}
+            try:
+                status = self.load_status(run_id)
+            except BackendDown:
+                return {"run_id": run_id, "state": "unavailable"}
+            except Exception as exc:  # noqa: BLE001 -- contained to this run and logged by class
+                return failed(run_id, exc)
+            if status is None:
+                return {"run_id": run_id, "state": "not_found"}
+            if status.state == "sealed":
+                state = "awaiting_result" if result_access else "sealed"
+            elif status.state in LIFECYCLE_ITEM_STATES:
+                state = LIFECYCLE_ITEM_STATES[status.state]
+            else:
+                return failed(run_id, ValueError("unknown lifecycle state"))
+            return {"run_id": run_id, "state": state, "verified": False,
+                    "access": "result" if result_access else "status", "lifecycle": status.to_record()}
+
         def summarize():
             items = []
             for run_id in chunk:  # one at a time: one database connection, inside one gate slot
+                if not grant.authorizes(run_id):  # status-only: its result is never loaded
+                    items.append(lifecycle(run_id, False))
+                    continue
                 try:
                     verified = self.load_verified(run_id)
                 except Unavailable:
-                    items.append({"run_id": run_id, "state": "not_found"})
+                    items.append(lifecycle(run_id, True))
                     continue
                 except Unverifiable as exc:
                     items.append({"run_id": run_id, "state": "unverifiable", "reason": exc.code})

@@ -32,6 +32,26 @@ const ERRORS = {
   invalid_run_id: ["Invalid run ID", "Run IDs are lowercase UUIDs."],
 };
 
+// CA-P2-004b: a run without a verified result, described by its lifecycle status only
+// (/v1/runs/{id}/status, always "verified": false). Nothing from such a run is shown or verified.
+const LIFECYCLE = {
+  collecting: ["Collecting evidence", "This run is still collecting evidence. It has no result yet, so nothing from it is shown or verified."],
+  sealing: ["Sealing in progress", "This run's evidence is being sealed. It has no result yet, so nothing from it is shown or verified."],
+  awaiting_result: ["Sealed \u00b7 no result yet", "This run is sealed, but no investigation result has been stored for it yet. Nothing from it is shown or verified."],
+  sealed: ["Sealed \u00b7 status only", "This run is sealed. This token may read its lifecycle status only, so no result is shown."],
+  failed: ["Run failed", "This run failed before a verified result existed. Only its lifecycle status is shown; nothing from it is verified."],
+  cancelled: ["Run cancelled", "This run was cancelled before a result existed. Only its lifecycle status is shown."],
+};
+
+function lifecycleText(err) {
+  const l = err.lifecycle || {};
+  const key = l.state === "sealed" && err.access === "result" ? "awaiting_result" : l.state;
+  const [title, text] = LIFECYCLE[key] || ["Run status", "Only this run's lifecycle status is available."];
+  return [title, l.state === "sealing" && l.lease_expired ? `${text} Its sealing lease has expired, so another worker may recover it.` : text];
+}
+
+const errorTitle = (err) => (err.code === "lifecycle" ? lifecycleText(err)[0] : (ERRORS[err.code] || ["Error"])[0]);
+
 let token = null;
 const state = {
   runs: [], active: null, model: null, view: "overview", entry: null, evidence: null, evidenceFilter: "all", filter: "all",
@@ -104,7 +124,18 @@ async function loadRun(run, { full }) {
   renderRunList();
   const result = await api(`/v1/runs/${run.id}/result`);
   if (result.stale) return run;
-  if (result.status !== 200 || !result.body.data) return fail(run, failure(result));
+  if (result.status !== 200 || !result.body.data) {
+    const f = failure(result);
+    if (f.code === "run_not_authorized" || f.code === "run_not_found") {
+      // The run may have no result yet, or the grant may cover its status only: show its lifecycle.
+      const st = await api(`/v1/runs/${run.id}/status`);
+      if (st.stale) return run;
+      if (st.status === 200 && st.body.verified === false && st.body.lifecycle) {
+        return fail(run, { code: "lifecycle", lifecycle: st.body.lifecycle, access: st.body.access });
+      }
+    }
+    return fail(run, f);
+  }
   let citations = null;
   if (full) {
     citations = await api(`/v1/runs/${run.id}/citations`);
@@ -379,7 +410,9 @@ async function selectRun(runId, { first = false, reverify = false } = {}) {
 
 function renderError(run) {
   const err = run.error || { code: "unknown" };
-  const [title, text] = ERRORS[err.code] || ["Unexpected response", `The API answered with code ${err.code}.`];
+  const [title, text] = err.code === "lifecycle" ? lifecycleText(err)
+    : ERRORS[err.code] || ["Unexpected response", `The API answered with code ${err.code}.`];
+  const reason = err.code === "lifecycle" ? err.lifecycle.failure_reason : err.reason;
   app.dataset.state = "ready";
   stage.dataset.error = err.code;
   delete stage.dataset.pending;
@@ -397,7 +430,7 @@ function renderError(run) {
     h("p", { class: "eyebrow" }, `Run ${shortRun(run.id)}`),
     h("h2", null, title),
     h("p", null, text),
-    err.reason ? h("p", { class: "mono reason" }, `reason: ${err.reason}`) : null,
+    reason ? h("p", { class: "mono reason" }, `reason: ${reason}`) : null,
     h("div", { class: "state-actions" },
       h("button", { type: "button", class: "btn btn-ink", onclick: () => selectRun(run.id, { reverify: true }) }, "Try again"),
       state.runs.length > 1 ? h("button", { type: "button", class: "btn btn-soft", onclick: (e) => openPopover(e.currentTarget) }, "Other runs") : null)));
@@ -810,8 +843,10 @@ function renderRunList() {
     const sum = run.summary && run.summary.outcome ? run.summary : null;
     const outcome = run.result ? run.result.data.outcome.status : sum ? sum.outcome.status : null;
     const label = run.status === "ready" || (run.status === "pending" && sum) ? (outcome === "resolved" ? "Resolved" : "Abstained")
-      : run.status === "error" ? (ERRORS[run.error.code] || ["Error"])[0] : run.status === "loading" ? "Verifying\u2026"
-        : run.summary ? ({ unverifiable: "Unverifiable", not_found: "Not found", unavailable: "Unavailable", error: "Error" }[run.summary.state] || "Not loaded") : "Not loaded";
+      : run.status === "error" ? errorTitle(run.error) : run.status === "loading" ? "Verifying\u2026"
+        : run.summary ? ({ unverifiable: "Unverifiable", not_found: "Not found", unavailable: "Unavailable", error: "Error",
+                           collecting: "Collecting", sealing: "Sealing", awaiting_result: "No result yet", sealed: "Status only",
+                           run_failed: "Run failed", cancelled: "Cancelled" }[run.summary.state] || "Not loaded") : "Not loaded";
     return h("li", null, h("button", { type: "button", class: ["run-item", run.id === state.active ? "is-on" : null], dataset: { run: run.id }, onclick: () => (app.dataset.page === "run" ? selectRun(run.id) : openRun(run.id)) },
       h("span", { class: ["run-dot", outcome ? `is-${outcome}` : run.summary ? "is-error" : `is-${run.status}`] }),
       h("span", { class: "run-id mono" }, shortRun(run.id)),
