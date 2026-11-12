@@ -5,8 +5,9 @@
 - 0.1 runs (the scenario fixtures and a 0.1 conversion) and a 0.2 run of the same recording live in
   one database. Every result is stored, verified on read and equal to offline. Evidence for objects
   both runs observed is stored once, byte-identical, and never re-labelled.
-- A run whose stored evidence was recorded under a different registry binding is refused at seal
-  (``failed``, ``seal:record_inconsistent``) instead of sealing and failing verification later.
+- The same unchanged objects observed through an evolved registry binding seal and verify with records
+  bound to their own registry (PR #31 review, migration 0007); the first stored bytes are never rewritten.
+  A stored record that does not decode under the run's binding still fails the run at seal.
 Synthetic data only.
 """
 
@@ -143,30 +144,64 @@ class KindsV2DatabaseTests(unittest.TestCase):
                                 r=run_id)
         return [{"evidence_id": r[0], "content_digest": r[1]} for r in rows]
 
-    def test_a_different_registry_binding_for_stored_evidence_is_refused_at_seal(self):
-        """Regression (CA-P2-004d preflight): stored evidence carries its first registry's binding digest.
-        A run binding the same objects through a different registry must fail at seal, not later."""
+    def another_binding(self, tag):
+        """The 0.1 conversion's plan and batches, re-bound to a registry that differs only in its query list."""
         loaded = self.created[ev.KIND_REGISTRY_VERSION][0]
         record = loaded.registry.to_record()
-        record["registry_id"] = "binding-b"
-        record["sources"][0]["query_ids"] = sorted(record["sources"][0]["query_ids"] + ["k8s.other"])
+        record["registry_id"] = tag
+        record["sources"][0]["query_ids"] = sorted(record["sources"][0]["query_ids"] + [f"k8s.{tag}"])
         registry = SourceRegistry.from_record(record)
-        plan_record = {**loaded.plan.to_record(), "plan_id": "binding-b", "registry_id": registry.registry_id,
-                       "registry_digest": registry.digest}
-        plan = pl.RunPlan.from_record(plan_record, registry)
-        batches = [{**b, "plan_digest": plan.digest} for b in loaded.batches]
+        plan = pl.RunPlan.from_record({**loaded.plan.to_record(), "plan_id": tag, "registry_id": registry.registry_id,
+                                       "registry_digest": registry.digest}, registry)
+        return loaded, registry, plan, [{**b, "plan_digest": plan.digest} for b in loaded.batches]
+
+    def test_the_same_objects_through_another_registry_binding_seal_and_verify(self):
+        """PR #31 review (P1): stored evidence is keyed by (evidence_id, content_digest) but its bytes carry the
+        source-binding digest. A later run observing the same unchanged objects through an evolved registry
+        (one more query) must seal and verify with its own binding, not be rejected or read the first binding."""
+        loaded, registry, plan, batches = self.another_binding("binding-b")
+        run_id, _, _ = pipeline.persist_records(self.db.roles, plan, registry, list(loaded.clock_records), batches,
+                                                "binding-b")
+        stored, inv = pipeline.record_result(self.db.roles["ca_engine"], self.db.roles["ca_result_writer"], run_id)
+        self.assertEqual(stored, results.STORED)
+        again = results.load_verified_result(self.fx.connect("ca_engine"), run_id)
+        self.assertEqual(again.result_bytes, inv.result_bytes)
+        for record in again.evidence.values():  # this run reads records bound to its own registry
+            self.assertEqual(record["record"]["source_binding_digest"], registry.sources[0].binding_digest)
+        # the earlier runs are untouched and still read their own binding
+        for _, (old_loaded, old_inv) in self.created.items():
+            old = results.load_verified_result(self.fx.connect("ca_engine"), old_inv.run_id)
+            self.assertEqual(old.result_bytes, old_inv.result_bytes)
+            self.assertEqual({r["record"]["source_binding_digest"] for r in old.evidence.values()},
+                             {old_loaded.registry.sources[0].binding_digest})
+        # the first stored bytes are never rewritten
+        admin = self.admin()
+        first = loaded.registry.sources[0].binding_digest
+        rows = admin.run("SELECT record_bytes FROM ca.evidence_version v JOIN ca.run_evidence r ON "
+                         "r.evidence_id = v.evidence_id AND r.content_digest = v.content_digest "
+                         "WHERE r.run_id = CAST(:r AS uuid)", r=run_id)
+        self.assertTrue(rows)
+        self.assertEqual({json.loads(bytes(r[0]))["source_binding_digest"] for r in rows}, {first})
+
+    def test_a_poisoned_stored_record_still_fails_at_seal(self):
+        """The seal-time guard stays: a stored record that does not decode under the run's binding fails the run."""
+        loaded, registry, plan, batches = self.another_binding("binding-c")
+        member = next(o for b in batches for o in b["observations"])
+        evidence = ev.observe(member, source_id=registry.sources[0].source_id, registry=registry)
+        forged = evidence.to_record()
+        forged["evidence_class"] = "K8S-FORGED"  # same id and digest, inconsistent derived fields
+        admin = self.admin()
+        with admin.transaction():
+            admin.run("INSERT INTO ca.evidence_binding_record (evidence_id, content_digest, source_binding_digest, "
+                      "record_bytes) VALUES (:e, :d, :b, :x)", e=evidence.evidence_id, d=evidence.content_digest,
+                      b=registry.sources[0].binding_digest, x=canonical.canonical_bytes(forged))
         progress = {}
         with self.assertRaises(seal.SealFailed) as ctx:
             pipeline.persist_records(self.db.roles, plan, registry, list(loaded.clock_records), batches,
-                                     "binding-b", progress)
+                                     "binding-c", progress)
         self.assertEqual(ctx.exception.reason, "seal:record_inconsistent")
-        state = self.admin().one("SELECT state, failure_reason FROM ca.run WHERE run_id = CAST(:r AS uuid)",
-                                 r=progress["run_id"])
-        self.assertEqual(tuple(state), ("failed", "seal:record_inconsistent"))
-        # the earlier runs are untouched
-        for _, inv in self.created.values():
-            self.assertEqual(results.load_verified_result(self.fx.connect("ca_engine"), inv.run_id).result_bytes,
-                             inv.result_bytes)
+        state = admin.one("SELECT state FROM ca.run WHERE run_id = CAST(:r AS uuid)", r=progress["run_id"])
+        self.assertEqual(state[0], "failed")
 
     def get(self, port, path, token):
         con = http.client.HTTPConnection("127.0.0.1", port, timeout=30)
