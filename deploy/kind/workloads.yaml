@@ -1,0 +1,82 @@
+# CA-P2-004e synthetic workloads (all values invented). Planted values (PLANTED-*) must never appear
+# in anything the collector writes. Images are pinned by digest (registry.k8s.io/pause).
+apiVersion: v1
+kind: Namespace
+metadata: {name: ca-demo}
+---
+apiVersion: v1
+kind: Namespace
+metadata: {name: ca-other}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: checkout-db-pool, namespace: ca-demo}
+data:
+  pool.maxConnections: "4"
+  note: PLANTED-CONFIG-VALUE-c44
+---
+apiVersion: v1
+kind: Secret
+metadata: {name: checkout-db, namespace: ca-demo}
+type: Opaque
+stringData:
+  password: PLANTED-SECRET-VALUE-d17
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout-api
+  namespace: ca-demo
+  annotations: {ca.synthetic/planted: PLANTED-ANNOTATION-91d}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: checkout-api}}
+  template:
+    metadata: {labels: {app: checkout-api}}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: checkout-api
+          image: registry.k8s.io/pause:3.9@sha256:7031c1b283388d2c2e09b57badb803c05ebed362dc88d84b480cc47f72a21097
+          env:
+            - {name: API_KEY, value: PLANTED-ENV-VALUE-7c1}
+            - name: DB_PASSWORD
+              valueFrom: {secretKeyRef: {name: checkout-db, key: password}}
+          volumeMounts:
+            - {name: pool, mountPath: /etc/checkout/pool}
+      volumes:
+        - name: pool
+          configMap: {name: checkout-db-pool}
+---
+# A container that cannot start, so the cluster records Warning events.
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: crashy, namespace: ca-demo}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: crashy}}
+  template:
+    metadata: {labels: {app: crashy}}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: crashy
+          image: registry.k8s.io/pause:3.9@sha256:7031c1b283388d2c2e09b57badb803c05ebed362dc88d84b480cc47f72a21097
+          command: ["/does-not-exist"]
+          env:
+            - {name: TOKEN, value: PLANTED-ENV-VALUE-7c1}
+---
+# Another namespace: the collector must not be able to read it.
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: other-app, namespace: ca-other}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: other-app}}
+  template:
+    metadata: {labels: {app: other-app}}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: other-app
+          image: registry.k8s.io/pause:3.9@sha256:7031c1b283388d2c2e09b57badb803c05ebed362dc88d84b480cc47f72a21097

@@ -92,6 +92,12 @@ MANDATORY = {"k8s.deployments": True, "k8s.pods": True, "k8s.configmaps": False,
 #                             continuous history, so the acquisition is partial (continuity_lost) and
 #                             its window is never counted as covered.
 SNAPSHOT_INSTANT, DECLARED_WINDOW = "snapshot_instant", "recorder_declared_window"
+#   client_bracket            (recording 0.3, collector) one list consistent at an opaque collection
+#                             resourceVersion, observed between two client-clock times; the API-server
+#                             clock is unknown, so it is never placed at an instant: partial
+#                             (continuity_lost), with the client bracket as unverified coverage.
+CLIENT_BRACKET = "client_bracket"
+RECORDING_VERSION_V3 = "ca-k8s-recording/0.3-provisional"   # collector provenance (CA-P2-004e)
 RESOURCES = {  # resource -> (accepted apiVersions, list kind, item kind)
     "pods": (("v1",), "PodList", "Pod"),
     "replicasets": (("apps/v1",), "ReplicaSetList", "ReplicaSet"),
@@ -107,6 +113,18 @@ _MANIFEST_KEYS = {"contract_version", "recording_id", "data_classification", "so
                   "namespace", "window", "clock", "responses"}
 _RESPONSE_KEYS = {"resource", "file", "sha256", "http_status", "error", "coverage"}
 _RESPONSE_KEYS_V2 = {"resource", "file", "sha256", "http_status", "error", "snapshot_at"}
+# Recording 0.3 (collector, CA-P2-004e): no snapshot_at and no coverage field, by design.
+_RESPONSE_KEYS_V3 = {"resource", "file", "sha256", "http_status", "error", "outcome", "collection_resource_version",
+                     "pages", "restarts", "client_first_request_at", "client_last_response_at", "client_elapsed_ms",
+                     "remaining_item_count"}
+_MANIFEST_KEYS_V3 = _MANIFEST_KEYS | {"provenance"}
+_ERROR_CODE = re.compile(r"[a-z][a-z0-9_]{0,63}", re.ASCII)
+V3_OUTCOMES = ("consistent", "truncated", "rv_changed", "expired", "denied", "rate_limited", "timeout", "unavailable",
+               "invalid")
+_V3_FAILURES = {"rv_changed": (acq.FAILED, "invalid_response"), "expired": (acq.FAILED, "source_unavailable"),
+                "denied": (acq.DENIED, "authorization_denied"), "rate_limited": (acq.FAILED, "rate_limited"),
+                "timeout": (acq.FAILED, "timeout"), "unavailable": (acq.FAILED, "source_unavailable"),
+                "invalid": (acq.FAILED, "invalid_response")}
 _CLOCK_KEYS = {"clock_domain_id", "status", "offset_ms", "offset_uncertainty_ms", "continuity"}
 _ERRORS = ("timeout", "rate_limited", "unavailable")
 _ID = re.compile(r"[a-z0-9][a-z0-9._-]{0,47}", re.ASCII)  # leaves room for derived identifiers
@@ -226,13 +244,58 @@ def _ms_text(epoch_ms):
     return t.strftime("%Y-%m-%dT%H:%M:%S.") + f"{epoch_ms % 1000:03d}Z"
 
 
+def _validate_collector_response(i, r, window, files):
+    """Recording 0.3: one collector list collection (CA-P2-004e). Returns the normalized response."""
+    where = f"responses[{i}]"
+    outcome = r["outcome"]
+    if outcome not in V3_OUTCOMES:
+        raise RecordingError("recording_manifest_invalid", f"{where}.outcome is not a supported value")
+    for field, low in (("pages", 0), ("restarts", 0), ("client_elapsed_ms", 0)):
+        if type(r[field]) is not int or r[field] < low:
+            raise RecordingError("recording_manifest_invalid", f"{where}.{field} must be a non-negative integer")
+    if r["remaining_item_count"] is not None and (type(r["remaining_item_count"]) is not int or r["remaining_item_count"] < 1):
+        raise RecordingError("recording_manifest_invalid", f"{where}.remaining_item_count must be null or positive")
+    try:
+        first = pl.exact_ms(r["client_first_request_at"], f"{where}.client_first_request_at")
+        last = pl.exact_ms(r["client_last_response_at"], f"{where}.client_last_response_at")
+    except ContractError:
+        raise RecordingError("recording_manifest_invalid", f"{where} client times must be RFC 3339 UTC") from None
+    if not window[0] <= first <= last < window[1]:
+        raise RecordingError("recording_manifest_invalid", f"{where} client times must lie inside the window")
+    collected = outcome in ("consistent", "truncated")
+    if collected:
+        path, digest, rv = r["file"], r["sha256"], r["collection_resource_version"]
+        if r["http_status"] != 200 or r["error"] is not None or r["pages"] < 1:
+            raise RecordingError("recording_manifest_invalid", f"{where}: a collected list is HTTP 200 without error")
+        if not isinstance(path, str) or not _PATH.fullmatch(path) or not isinstance(digest, str) \
+                or not _HEX64.fullmatch(digest):
+            raise RecordingError("recording_path_refused", f"{where} needs a responses/<name>.json file and sha256")
+        if path in files:
+            raise RecordingError("recording_manifest_conflict", f"{where} repeats a file")
+        if not isinstance(rv, str) or not 1 <= len(rv) <= 256 or any(not 0x20 <= ord(c) < 0x7f for c in rv):
+            raise RecordingError("recording_manifest_invalid", f"{where}.collection_resource_version is required")
+        files.append(path)
+    elif (r["file"], r["sha256"], r["collection_resource_version"]) != (None, None, None):
+        raise RecordingError("recording_manifest_invalid", f"{where}: a failed collection has no file or resourceVersion")
+    if outcome == "consistent" and r["remaining_item_count"] is not None:
+        raise RecordingError("recording_manifest_invalid", f"{where}: a consistent collection has no remaining items")
+    # Client-clock facts only: an unverified bracket, never an API-server instant or coverage.
+    return {**r, "_basis": CLIENT_BRACKET, "_coverage_ms": (first, last + 1), "_v3_outcome": outcome,
+            "_collected": collected}
+
+
 def _validate_manifest(manifest):
-    if not isinstance(manifest, dict) or set(manifest) != _MANIFEST_KEYS:
+    version = manifest.get("contract_version") if isinstance(manifest, dict) else None
+    expected_keys = _MANIFEST_KEYS_V3 if version == RECORDING_VERSION_V3 else _MANIFEST_KEYS
+    if not isinstance(manifest, dict) or set(manifest) != expected_keys:
         raise RecordingError("recording_manifest_invalid", "the manifest must have exactly the documented fields")
-    if manifest["contract_version"] not in (RECORDING_VERSION, RECORDING_VERSION_V2):
+    if manifest["contract_version"] not in (RECORDING_VERSION, RECORDING_VERSION_V2, RECORDING_VERSION_V3):
         raise RecordingError("recording_version_unsupported")
-    snapshot = manifest["contract_version"] == RECORDING_VERSION_V2
-    response_keys = _RESPONSE_KEYS_V2 if snapshot else _RESPONSE_KEYS
+    collector = manifest["contract_version"] == RECORDING_VERSION_V3
+    if collector and (manifest["provenance"] != "collector" or manifest["clock"].get("status") != "unknown"):
+        raise RecordingError("recording_manifest_invalid", "a 0.3 recording comes from the collector with an unknown clock")
+    snapshot = manifest["contract_version"] in (RECORDING_VERSION_V2, RECORDING_VERSION_V3)
+    response_keys = _RESPONSE_KEYS_V3 if collector else _RESPONSE_KEYS_V2 if snapshot else _RESPONSE_KEYS
     if manifest["data_classification"] != "synthetic":
         raise RecordingError("recording_classification_refused", "only synthetic recordings are accepted")
     for field in ("recording_id", "source_id", "cluster_id"):
@@ -256,6 +319,13 @@ def _validate_manifest(manifest):
             raise RecordingError("recording_resource_refused", f"responses[{i}].resource is not supported")
         if resource in seen:
             raise RecordingError("recording_manifest_conflict", f"responses[{i}] repeats a resource")
+        if collector:
+            if r["http_status"] is not None and (type(r["http_status"]) is not int or not 100 <= r["http_status"] <= 599):
+                raise RecordingError("recording_manifest_invalid", f"responses[{i}].http_status must be an HTTP status")
+            if r["error"] is not None and (not isinstance(r["error"], str) or not _ERROR_CODE.fullmatch(r["error"])):
+                raise RecordingError("recording_manifest_invalid", f"responses[{i}].error must be a fixed code")
+            seen[resource] = _validate_collector_response(i, r, window, files)
+            continue
         status, error, path, digest = r["http_status"], r["error"], r["file"], r["sha256"]
         if type(status) is not int or not 100 <= status <= 599:
             raise RecordingError("recording_manifest_invalid", f"responses[{i}].http_status must be an HTTP status")
@@ -614,6 +684,11 @@ def _load_response(root, response, resource):
     items, meta = body.get("items"), body.get("metadata") or {}
     if not isinstance(items, list) or not isinstance(meta, dict):
         raise _ItemInvalid("list_shape_invalid")
+    if "_v3_outcome" in response and (meta.get("resourceVersion") != response["collection_resource_version"]
+                                      or "continue" in meta):
+        # Recording 0.3: the sanitized list carries exactly the collection RV the manifest records, and
+        # never a continue token (tokens are opaque and never persisted).
+        raise RecordingError("recording_manifest_conflict", "a collected list differs from its manifest entry")
     uids = set()
     for item in items:
         if not isinstance(item, dict) or item.get("kind", item_kind) != item_kind:
@@ -632,6 +707,9 @@ def _status(response):
     """The failure of a non-200 response: (outcome, reason)."""
     if response is None:
         return acq.FAILED, "source_unavailable", "not_recorded"
+    if "_v3_outcome" in response:  # recording 0.3: the collector's outcome code decides
+        outcome, reason = _V3_FAILURES[response["_v3_outcome"]]
+        return outcome, reason, response["_v3_outcome"]
     code, error = response["http_status"], response["error"]
     if code in (401, 403):
         return acq.DENIED, "authorization_denied", f"http_{code}"
@@ -642,7 +720,7 @@ def _status(response):
     return acq.FAILED, "source_unavailable", f"http_{code}"
 
 
-def _batches(plan_digest, ctx, query, outcome, reason, coverage, observations, truncated, omitted):
+def _batches(plan_digest, ctx, query, outcome, reason, coverage, observations, truncated, omitted, final_cursor=None):
     stem = query.replace("k8s.", "")
     chunks = [observations[i:i + LIMITS["max_observations_per_batch"]]
               for i in range(0, len(observations), LIMITS["max_observations_per_batch"])] or [[]]
@@ -652,7 +730,7 @@ def _batches(plan_digest, ctx, query, outcome, reason, coverage, observations, t
         record_outcome = outcome
         if outcome in (acq.COMPLETE, acq.EMPTY):
             record_outcome = acq.COMPLETE if chunk else acq.EMPTY
-        after = f"{stem}-c{n}"
+        after = final_cursor if (last and final_cursor) else f"{stem}-c{n}"
         records.append({
             "contract_version": acq.BATCH_VERSION, "plan_digest": plan_digest, "source_id": ctx["source_id"],
             "query_id": query, "batch_key": f"{stem}-{n}", "sequence": n, "outcome": record_outcome,
@@ -681,6 +759,9 @@ def _coverage(responses, needed):
     spans = [responses[r]["_coverage_ms"] for r in needed]
     basis = responses[needed[0]]["_basis"]
     start, end = max(s for s, _ in spans), min(e for _, e in spans)
+    if basis == CLIENT_BRACKET:  # recording 0.3: never verified, never joined into one view
+        lo, hi = min(s for s, _ in spans), max(e for _, e in spans)
+        return "continuity_lost", {"start": _ms_text(lo), "end": _ms_text(hi)}, basis, None
     if basis == SNAPSHOT_INSTANT:
         if len(set(spans)) == 1:
             return None, {"start": _ms_text(start), "end": _ms_text(end)}, basis, None
@@ -745,7 +826,7 @@ def convert(directory, kind_registry_version=ev.KIND_REGISTRY_VERSION):
     # Read every recorded 200 response once: (items, token, remaining) or an invalid-body code.
     loaded = {}
     for resource, response in sorted(responses.items()):
-        if response["http_status"] == 200 and response["error"] is None:
+        if response.get("_collected", response["http_status"] == 200 and response["error"] is None):
             try:
                 loaded[resource] = _load_response(root, response, resource)
             except _ItemInvalid as exc:
@@ -792,8 +873,14 @@ def convert(directory, kind_registry_version=ev.KIND_REGISTRY_VERSION):
             outcome, reason = failure
             coverage, truncated, omitted, observations = None, False, None, []
         else:
-            truncated = any(loaded[r][1] for r in needed)
-            omitted_counts = [loaded[r][2] for r in needed if loaded[r][1]]
+            if "_v3_outcome" in responses[needed[0]]:  # recording 0.3: truncation is the collector's record
+                truncated = any(responses[r]["_v3_outcome"] == "truncated" for r in needed)
+                omitted_counts = [responses[r]["remaining_item_count"] for r in needed
+                                  if responses[r]["_v3_outcome"] == "truncated"]
+                entry["collection_resource_versions"] = {r: responses[r]["collection_resource_version"] for r in needed}
+            else:
+                truncated = any(loaded[r][1] for r in needed)
+                omitted_counts = [loaded[r][2] for r in needed if loaded[r][1]]
             omitted = sum(omitted_counts) if omitted_counts and None not in omitted_counts else None
             adjustment, coverage, entry["coverage_basis"], error = _coverage(responses, needed)
             if adjustment == "disjoint":
@@ -809,7 +896,12 @@ def convert(directory, kind_registry_version=ev.KIND_REGISTRY_VERSION):
         entry.update(outcome=outcome, reason=reason, observations=len(observations),
                      coverage_claimed=outcome in (acq.COMPLETE, acq.EMPTY))
         acquisitions.append(entry)
-        batches += _batches(plan.digest, ctx, query, outcome, reason, coverage, observations, truncated, omitted)
+        final_cursor = None
+        rvs = entry.get("collection_resource_versions") or {}
+        if len(needed) == 1 and outcome == acq.PARTIAL and needed[0] in rvs                 and acq.CURSOR.fullmatch(f"rv:{rvs[needed[0]]}"):
+            final_cursor = f"rv:{rvs[needed[0]]}"  # which collection the evidence came from (opaque RV)
+        batches += _batches(plan.digest, ctx, query, outcome, reason, coverage, observations, truncated, omitted,
+                            final_cursor)
 
     unsupported = []
     for resource in unsupported_resources:

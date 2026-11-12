@@ -159,6 +159,189 @@
       "version": "3.13"
     },
     {
+      "bom-ref": "kind-v0.33.0",
+      "externalReferences": [
+        {
+          "type": "license",
+          "url": "https://github.com/kubernetes-sigs/kind/blob/v0.33.0/LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "kind",
+      "properties": [
+        {
+          "name": "ca:pin-kind",
+          "value": "exact-version"
+        },
+        {
+          "name": "ca:pin",
+          "value": "v0.33.0"
+        },
+        {
+          "name": "ca:usage-scope",
+          "value": "ci-only"
+        },
+        {
+          "name": "ca:license-review",
+          "value": "pending"
+        }
+      ],
+      "scope": "excluded",
+      "type": "platform",
+      "version": "v0.33.0"
+    },
+    {
+      "bom-ref": "kindest-node-v1.37.0",
+      "externalReferences": [
+        {
+          "type": "license",
+          "url": "https://github.com/kubernetes-sigs/kind/blob/v0.33.0/LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "kindest/node",
+      "properties": [
+        {
+          "name": "ca:pin-kind",
+          "value": "image-digest"
+        },
+        {
+          "name": "ca:pin",
+          "value": "kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5"
+        },
+        {
+          "name": "ca:usage-scope",
+          "value": "ci-only"
+        },
+        {
+          "name": "ca:license-review",
+          "value": "pending"
+        }
+      ],
+      "purl": "pkg:docker/kindest/node@sha256%3Aa1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5",
+      "scope": "excluded",
+      "type": "container",
+      "version": "v1.37.0"
+    },
+    {
+      "bom-ref": "kubectl-v1.37.0",
+      "externalReferences": [
+        {
+          "type": "license",
+          "url": "https://github.com/kubernetes/kubernetes/blob/v1.37.0/LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "kubectl",
+      "properties": [
+        {
+          "name": "ca:pin-kind",
+          "value": "exact-version"
+        },
+        {
+          "name": "ca:pin",
+          "value": "v1.37.0"
+        },
+        {
+          "name": "ca:usage-scope",
+          "value": "ci-only"
+        },
+        {
+          "name": "ca:license-review",
+          "value": "pending"
+        }
+      ],
+      "scope": "excluded",
+      "type": "platform",
+      "version": "v1.37.0"
+    },
+    {
+      "bom-ref": "pause-3.10",
+      "externalReferences": [
+        {
+          "type": "license",
+          "url": "https://github.com/kubernetes/kubernetes/blob/v1.37.0/LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "registry.k8s.io/pause",
+      "properties": [
+        {
+          "name": "ca:pin-kind",
+          "value": "image-digest"
+        },
+        {
+          "name": "ca:pin",
+          "value": "registry.k8s.io/pause:3.10@sha256:ee6521f290b2168b6e0935a181d4cff9be1ac3f505666ef0e3c98fae8199917a"
+        },
+        {
+          "name": "ca:usage-scope",
+          "value": "ci-only"
+        },
+        {
+          "name": "ca:license-review",
+          "value": "pending"
+        }
+      ],
+      "purl": "pkg:docker/registry.k8s.io/pause@sha256%3Aee6521f290b2168b6e0935a181d4cff9be1ac3f505666ef0e3c98fae8199917a",
+      "scope": "excluded",
+      "type": "container",
+      "version": "3.10"
+    },
+    {
+      "bom-ref": "pause-3.9",
+      "externalReferences": [
+        {
+          "type": "license",
+          "url": "https://github.com/kubernetes/kubernetes/blob/v1.37.0/LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "registry.k8s.io/pause",
+      "properties": [
+        {
+          "name": "ca:pin-kind",
+          "value": "image-digest"
+        },
+        {
+          "name": "ca:pin",
+          "value": "registry.k8s.io/pause:3.9@sha256:7031c1b283388d2c2e09b57badb803c05ebed362dc88d84b480cc47f72a21097"
+        },
+        {
+          "name": "ca:usage-scope",
+          "value": "ci-only"
+        },
+        {
+          "name": "ca:license-review",
+          "value": "pending"
+        }
+      ],
+      "purl": "pkg:docker/registry.k8s.io/pause@sha256%3A7031c1b283388d2c2e09b57badb803c05ebed362dc88d84b480cc47f72a21097",
+      "scope": "excluded",
+      "type": "container",
+      "version": "3.9"
+    },
+    {
       "bom-ref": "pg8000",
       "externalReferences": [
         {
@@ -442,7 +625,7 @@
       ]
     }
   },
-  "serialNumber": "urn:uuid:f479dcc8-db1c-56ba-bb5a-d204b4e46fde",
+  "serialNumber": "urn:uuid:cb4e64ca-e972-5329-87f1-2dc48e7f873b",
   "specVersion": "1.6",
   "version": 1
 }

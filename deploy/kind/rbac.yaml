@@ -1,0 +1,30 @@
+# CA-P2-004e: the collector's identity. Namespace-restricted, read-only, least privilege:
+# get and list on pods, events, deployments and replicasets in ca-demo, and nothing else.
+# Deliberately absent: watch, configmaps, secrets, every subresource (exec, log, attach, portforward,
+# proxy, status, scale), every write verb, every cluster-scoped resource, any ClusterRole(Binding).
+apiVersion: v1
+kind: Namespace
+metadata: {name: ca-collector}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: ca-collector, namespace: ca-collector}
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: ca-collector-read, namespace: ca-demo}
+rules:
+  - apiGroups: [""]
+    resources: [pods, events]
+    verbs: [get, list]
+  - apiGroups: [apps]
+    resources: [deployments, replicasets]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: ca-collector-read, namespace: ca-demo}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: ca-collector-read}
+subjects:
+  - {kind: ServiceAccount, name: ca-collector, namespace: ca-collector}

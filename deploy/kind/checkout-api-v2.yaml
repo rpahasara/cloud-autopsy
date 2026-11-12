@@ -1,0 +1,27 @@
+# CA-P2-004e: the rollout. The same synthetic Deployment with a new image (pause 3.10, digest-pinned),
+# applied after the first revision is ready, so the cluster holds two ReplicaSet revisions.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout-api
+  namespace: ca-demo
+  annotations: {ca.synthetic/planted: PLANTED-ANNOTATION-91d}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: checkout-api}}
+  template:
+    metadata: {labels: {app: checkout-api}}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: checkout-api
+          image: registry.k8s.io/pause:3.10@sha256:ee6521f290b2168b6e0935a181d4cff9be1ac3f505666ef0e3c98fae8199917a
+          env:
+            - {name: API_KEY, value: PLANTED-ENV-VALUE-7c1}
+            - name: DB_PASSWORD
+              valueFrom: {secretKeyRef: {name: checkout-db, key: password}}
+          volumeMounts:
+            - {name: pool, mountPath: /etc/checkout/pool}
+      volumes:
+        - name: pool
+          configMap: {name: checkout-db-pool}

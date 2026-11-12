@@ -17,7 +17,8 @@ DB_PACKAGE = _support.PACKAGE / "db"
 # files; it may not import the driver. The engine and synthetic inputs stay pure.
 # The local read-only API (CA-P2-006b) reads its grants file and the ca_engine secret file; it
 # reaches the database only through the db subpackage and may not import the driver either.
-IO_PACKAGES = (DB_PACKAGE, _support.PACKAGE / "app", _support.PACKAGE / "api")
+# The read-only collector (CA-P2-004e) reads its CA and token files and writes its sanitized outputs.
+IO_PACKAGES = (DB_PACKAGE, _support.PACKAGE / "app", _support.PACKAGE / "api", _support.PACKAGE / "collector")
 # Exact identifiers that contain a forbidden substring but name something else: the designed
 # read-only evaluation database role is not the ca_eval evaluator package.
 ALLOWED_IDENTIFIERS = ("ca_evaluator",)
