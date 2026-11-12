@@ -71,6 +71,13 @@ jobs:
           done
           python -I tools/create_investigation.py --offline "$RUNNER_TEMP"/k8s/*/
 
+      # The job's first (cold) browser launch, then repeated and concurrent launches, through the same
+      # harness the browser tests use. Every failed or retried launch is printed; none is hidden.
+      - name: Browser startup stress (headless Chrome, 127.0.0.1 only)
+        env:
+          CA_BROWSER_NO_SANDBOX: "1"
+        run: python -I tests/browser/startup_stress.py --sequential 20 --concurrency 4 --rounds 3
+
       # CA-P2-006c: the read-only dashboard in the runner's preinstalled Chrome (headless, temporary
       # profile, DevTools on 127.0.0.1), served by the real API with the labelled synthetic preview.
       # The sandbox is disabled only because hosted runners may forbid its user namespaces; the
