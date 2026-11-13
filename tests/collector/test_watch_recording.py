@@ -257,6 +257,38 @@ class SessionIdentity(unittest.TestCase):
         self.assertEqual({(x["session_id"], x["clock_domain_id"]) for x in bases}, {(SESSION, DOMAIN)})
 
 
+class RuleProfiles(unittest.TestCase):
+    """CA-P2-005b: rule profile 2 only on explicit request; replay follows the bundle's own profile."""
+
+    def test_profile_2_is_opt_in_and_replays_under_the_pinned_profile(self):
+        from cloud_autopsy.app import create as C
+        from cloud_autopsy.app import bundle as B
+        tmp = F.tempdir(self, "ca-watch-rules-")
+        root = write(tmp / "rec", healthy())
+        default = K.convert(root, ev.KIND_REGISTRY_VERSION_V3)
+        opted = K.convert(root, ev.KIND_REGISTRY_VERSION_V3, rule_profile=2)
+        self.assertEqual(default.plan_record["rule_versions"]["timeline-rules"], "ca-timeline-rules/0.1-provisional")
+        self.assertEqual(opted.plan_record["rule_versions"]["timeline-rules"], "ca-timeline-rules/0.2-provisional")
+        self.assertEqual((default.report["rule_profile"], opted.report["rule_profile"]), (1, 2))
+        for name, conversion in (("p1", default), ("p2", opted)):
+            conversion.write_bundle(tmp / name)
+            W.verify_bundle(root, tmp / name)  # re-derived under the profile the bundle pins
+            outcome = C.investigate_offline(B.load(tmp / name)).result["outcome"]
+            # Collector-only evidence still abstains under either profile: no symptom source.
+            self.assertEqual(outcome["status"], "abstained")
+            self.assertIn("no_symptom_observed", outcome["reasons"])
+
+    def test_profile_2_needs_a_watch_recording_and_a_known_profile(self):
+        root = write(F.tempdir(self, "ca-watch-rules2-") / "rec", healthy())
+        with self.assertRaises(K.RecordingError) as ctx:
+            K.convert(root, ev.KIND_REGISTRY_VERSION_V3, rule_profile=3)
+        self.assertEqual(ctx.exception.code, "recording_rules_unsupported")
+        examples = Path(__file__).resolve().parents[2] / "examples" / "k8s-recordings" / "snapshot-complete"
+        with self.assertRaises(K.RecordingError) as ctx:
+            K.convert(examples, ev.KIND_REGISTRY_VERSION_V2, rule_profile=2)
+        self.assertEqual(ctx.exception.code, "recording_rules_unsupported")
+
+
 class Forgery(unittest.TestCase):
     def refused(self, entries, code="recording_stream_invalid", **kw):
         root = write(F.tempdir(self, "ca-watch-forged-") / "rec", entries, **kw)

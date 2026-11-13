@@ -18,7 +18,7 @@ The implementation was built under the product owner's [pre-gate development aut
 | Dependency, licensing and SSDLC foundation; offline supply-chain checks | `supply-chain/`, `tools/supply_chain/` | [CA-P2-001](docs/phase2/ca-p2-001/README.md) |
 | Provisional contracts: canonical JSON, time intervals, evidence identity, run plan, batches, frozen input | `src/cloud_autopsy/contracts/` | [CA-P2-002a](docs/phase2/ca-p2-002/ca-p2-002a.md) to [002d](docs/phase2/ca-p2-002/ca-p2-002d.md) |
 | PostgreSQL schema, roles, ingest and atomic seal (disposable, loopback-only container) | `src/cloud_autopsy/db/` | [CA-P2-003](docs/phase2/ca-p2-003/README.md), [003b-1](docs/phase2/ca-p2-003/ca-p2-003b-1.md) |
-| Deterministic investigation engine (one mechanism catalog) | `src/cloud_autopsy/engine/` | [CA-P2-005a](docs/phase2/ca-p2-005/ca-p2-005a.md) |
+| Deterministic investigation engine (one mechanism catalog); opt-in rule profile 2 orders collector evidence by its `observed` brackets | `src/cloud_autopsy/engine/` | [CA-P2-005a](docs/phase2/ca-p2-005/ca-p2-005a.md), [005b](docs/phase2/ca-p2-005/ca-p2-005b.md) |
 | Immutable results with verify-on-read replay | `src/cloud_autopsy/db/results.py` | [CA-P2-006a](docs/phase2/ca-p2-006/ca-p2-006a.md) |
 | Loopback read-only API with per-run grants | `src/cloud_autopsy/api/` | [CA-P2-006b](docs/phase2/ca-p2-006/ca-p2-006b.md) |
 | Local dashboard and Home overview, including a labelled synthetic preview | `src/cloud_autopsy/api/ui/`, `tools/dashboard_preview.py` | [CA-P2-006c](docs/phase2/ca-p2-006/ca-p2-006c.md), [006d](docs/phase2/ca-p2-006/ca-p2-006d.md) |

@@ -49,6 +49,8 @@ def main(argv=None):
     parser.add_argument("--final-wait", type=float, default=90.0)
     parser.add_argument("--watch-timeout", type=int, default=600, help="max timeoutSeconds per watch request")
     parser.add_argument("--max-reconnects", type=int, default=3)
+    parser.add_argument("--ordering-rules", choices=("0.1", "0.2"), default="0.1",
+                        help="timeline rules the plan pins: 0.1 (event ordering, default) or 0.2 (observed-first, CA-P2-005b)")
     args = parser.parse_args(argv)
     config = co.CollectorConfig(server=args.server, ca_file=args.ca_file, token_file=args.token_file,
                                 namespace=args.namespace, cluster_id=args.cluster_id, recording_id=args.recording_id,
@@ -87,7 +89,8 @@ def _watch(args, config):
                              watch_timeout_s=args.watch_timeout, max_reconnects=args.max_reconnects,
                              max_pages=args.max_pages, max_restarts=args.max_restarts)
     try:
-        _, conversion, report = co.run_watch(config, wconfig, args.out, stop=stop, on_signal=lambda: bool(signalled))
+        _, conversion, report = co.run_watch(config, wconfig, args.out, stop=stop, on_signal=lambda: bool(signalled),
+                                             rule_profile=2 if args.ordering_rules == "0.2" else 1)
     except (cl.CollectorError, K.RecordingError) as exc:  # codes only; never a response body
         print(json.dumps({"status": "refused", "code": exc.code}) if args.json else f"REFUSED: {exc.code}")
         return 1

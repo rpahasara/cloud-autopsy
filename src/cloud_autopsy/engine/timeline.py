@@ -13,7 +13,9 @@ mechanism rules use the same ``compare`` directly; they never use display order.
 """
 
 from ..contracts import timeinterval as ti
-from . import TIMELINE_RULES_VERSION
+from . import TIMELINE_RULES_VERSION, TIMELINE_RULES_VERSION_V2
+
+OBSERVED = "observed"
 
 ORDERING_NOTE = ("Display order is deterministic but is not chronology; only 'before' orderings are "
                  "established, and 'unordered' records why an order is unknown.")
@@ -74,13 +76,31 @@ def build(inp):
     for a, b in zip(rows, rows[1:]):
         ordering = ti.compare(stamps[a["entry_id"]], stamps[b["entry_id"]], inp.clock_domains)
         adjacent.append({"a": a["entry_id"], "b": b["entry_id"], "order": ordering.order, "basis": ordering.basis})
-    return {"rule_version": TIMELINE_RULES_VERSION, "ordering_note": ORDERING_NOTE, "entries": rows,
+    return {"rule_version": inp.timeline_rules, "ordering_note": ORDERING_NOTE, "entries": rows,
             "adjacent_orderings": adjacent}
 
 
-def event_order(a, b, domains):
-    """Order evidence ``a`` relative to ``b`` by their required ``event`` timestamps."""
-    return ti.compare(_event(a), _event(b), domains)
+def event_order(a, b, domains, rules=TIMELINE_RULES_VERSION):
+    """Order evidence ``a`` relative to ``b`` by their ordering stamps (``ordering_stamp``)."""
+    return ti.compare(ordering_stamp(a, rules), ordering_stamp(b, rules), domains)
+
+
+def ordering_stamp(evidence, rules=TIMELINE_RULES_VERSION):
+    """The one stamp a piece of evidence is ordered by.
+
+    Timeline rules 0.1: its ``event`` stamp (every kind has one).
+    Timeline rules 0.2 (CA-P2-005b): its ``observed`` stamp when it has one, with no fallback to
+    ``event`` (a watched change's ``event`` stamp is a server-clock time such as creationTimestamp,
+    not the time of the change); otherwise its ``event`` stamp. Which stamp is used never depends on
+    whether it can order; ``timeinterval.compare`` then decides, failing closed as always.
+    resourceVersions are never an input."""
+    if rules == TIMELINE_RULES_VERSION_V2:
+        for stamp in evidence.times:
+            if stamp.timestamp_kind == OBSERVED:
+                return stamp
+    elif rules != TIMELINE_RULES_VERSION:
+        raise ValueError("unknown timeline rules")
+    return _event(evidence)
 
 
 def _event(evidence):

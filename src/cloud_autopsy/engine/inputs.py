@@ -21,7 +21,8 @@ from ..contracts import frozen_input as fi
 from ..contracts.evidence import ObservedEvidence
 from ..contracts.plan import RunPlan
 from ..contracts.sources import SourceRegistry
-from . import required_rule_versions
+from ..contracts.evidence import KIND_REGISTRY_VERSION_V3, OBSERVED_TIME
+from . import rule_profile
 from .clocks import ClockDeclaration, ClockDeclarationError, declare
 
 MAX_EVIDENCE = 5_000            # PROVISIONAL engine bound (unreviewed)
@@ -54,6 +55,11 @@ class InvestigationInput:
     clock_domain_records: tuple
     clock_declaration: ClockDeclaration
 
+    @property
+    def timeline_rules(self):
+        """The timeline-rules version the plan pins (it selects the ordering stamp)."""
+        return dict(self.plan.rule_versions)["timeline-rules"]
+
     def evidence(self, evidence_id):
         for member in self.members:
             if member.evidence.evidence_id == evidence_id:
@@ -74,8 +80,11 @@ def build_input(frozen, plan, registry, evidence_records, clock_declaration, exp
     if not isinstance(frozen, fi.FrozenInput) or not isinstance(plan, RunPlan) \
             or not isinstance(registry, SourceRegistry):
         raise InputError("input_invalid", "a FrozenInput, RunPlan and SourceRegistry are required")
-    if dict(plan.rule_versions) != required_rule_versions():
-        raise InputError("rule_versions_mismatch", "the plan does not pin exactly this engine's rule versions")
+    profile = rule_profile(plan.rule_versions)
+    if profile is None:
+        raise InputError("rule_versions_mismatch", "the plan does not pin exactly one of this engine's rule profiles")
+    if profile == 2 and plan.kind_registry_version != KIND_REGISTRY_VERSION_V3:
+        raise InputError("rule_profile_unsupported", "rule profile 2 needs contract profile 3 (observation kinds 0.3)")
     root, pages = frozen.root(), frozen.pages()
     fi.verify_full(root, pages, plan, registry, expected_manifest_digest)
 
@@ -105,6 +114,14 @@ def build_input(frozen, plan, registry, evidence_records, clock_declaration, exp
                                         "declaration was made for a different source registry")
     except ClockDeclarationError as exc:
         raise InputError(exc.code, "clock declaration refused") from None
+
+    if profile == 2:
+        # One collection session = one collector clock: observed brackets from different sessions
+        # are anchored to different wall readings and are never compared (R1, CA-P2-005b E6).
+        observed = {t.clock_domain_id for m in members.values() for t in m.evidence.times
+                    if t.timestamp_kind == OBSERVED_TIME}
+        if len(observed) > 1:
+            raise InputError("observed_clock_domains_mixed", "observed brackets come from more than one session clock")
 
     return InvestigationInput(
         plan=plan, registry=registry, manifest_digest=root["manifest_digest"], manifest_status=root["status"],

@@ -504,7 +504,11 @@ def _change_observations(resource, event, observed, state):
 
 # ------------------------------------------------------------------------------------- convert
 
-def convert(root, manifest, manifest_sha):
+def convert(root, manifest, manifest_sha, rule_profile=1):
+    """``rule_profile``: 1 (the default; timeline rules 0.1, ``event`` ordering) or 2 (CA-P2-005b,
+    timeline rules 0.2, ``observed``-first ordering). Chosen explicitly; never inferred."""
+    if rule_profile not in (1, 2):
+        raise K.RecordingError("recording_rules_unsupported", "rule profile must be 1 or 2")
     files, anchor_ns = _manifest(manifest)
     _check_layout(root, files)
     collector, server = manifest["clocks"]["collector"], manifest["clocks"]["api_server"]
@@ -546,7 +550,7 @@ def convert(root, manifest, manifest_sha):
                    "expected_acquisitions": [{"source_id": ctx["source_id"], "query_id": q, "mandatory": MANDATORY[q]}
                                              for q in sorted(QUERIES)],
                    "contract_versions": pl.required_contract_versions(ev.KIND_REGISTRY_VERSION_V3),
-                   "rule_versions": required_rule_versions(), "synthesis_mode": "disabled", "limits": dict(LIMITS)}
+                   "rule_versions": required_rule_versions(rule_profile), "synthesis_mode": "disabled", "limits": dict(LIMITS)}
     try:
         plan = pl.RunPlan.from_record(plan_record, registry)
     except ContractError as exc:
@@ -586,6 +590,7 @@ def convert(root, manifest, manifest_sha):
               "collector_clock": {"clock_domain_id": domain, "step_detected": collector["step_detected"],
                                   "max_drift_ms": collector["max_drift_ms"]},
               "api_server_clock": "unknown", "rv_comparison": rv.RV_COMPARISON, "verified_coverage_ms": verified,
+              "rule_profile": rule_profile,
               "acquisitions": acquisitions,
               "note": ("Coverage is verified only between the receipt of a consistent list and the send time of a "
                        "consistent-read probe that the watch later reached; bookmarks, events or an open connection "
@@ -710,9 +715,23 @@ def _records(plan, ctx, query, stem, plans):
     return records
 
 
+def bundle_rule_profile(bundle_dir):
+    """The rule profile a bundle's plan pins (1 or 2), read from its plan file; never guessed."""
+    from ..engine import rule_profile
+    try:
+        plan = canonical.loads(B._read(Path(bundle_dir) / "plan.json", K.MAX_MANIFEST_BYTES))
+    except (B.BundleError, ContractError):
+        raise K.RecordingError("replay_mismatch", "the bundle has no readable plan") from None
+    profile = rule_profile(plan.get("rule_versions") or {}) if isinstance(plan, dict) else None
+    if profile is None:
+        raise K.RecordingError("replay_mismatch", "the bundle pins no known rule profile")
+    return profile
+
+
 def verify_bundle(recording_dir, bundle_dir):
-    """Replay check: re-derive the bundle from the recording and require byte-identical files."""
-    conversion = K.convert(recording_dir, ev.KIND_REGISTRY_VERSION_V3)
+    """Replay check: re-derive the bundle from the recording, under the rule profile the bundle pins,
+    and require byte-identical files."""
+    conversion = K.convert(recording_dir, ev.KIND_REGISTRY_VERSION_V3, rule_profile=bundle_rule_profile(bundle_dir))
     import tempfile
     with tempfile.TemporaryDirectory(prefix="ca-replay-") as tmp:
         fresh = Path(tmp) / "bundle"

@@ -223,7 +223,8 @@ def watch_report(config, wconfig, conversion, counts):
                      "period is a gap. Collector data alone has no symptom source, so investigations abstain.")}
 
 
-def run_watch(config, wconfig, out_dir, transport=None, clock=None, stop=None, on_signal=None, session_id=None):
+def run_watch(config, wconfig, out_dir, transport=None, clock=None, stop=None, on_signal=None, session_id=None,
+              rule_profile=1):
     """One list + watch session into a new ``out_dir``: ``recording/``, ``bundle/`` and ``report.json``.
 
     ``session_id`` is generated here, once per collection (``new_session_id``); tests may pass one."""
@@ -243,7 +244,7 @@ def run_watch(config, wconfig, out_dir, transport=None, clock=None, stop=None, o
     for rel, data in sorted(files.items()):
         (recording / rel).parent.mkdir(exist_ok=True)
         _write_new(recording / rel, data)
-    conversion = K.convert(recording, ev.KIND_REGISTRY_VERSION_V3)
+    conversion = K.convert(recording, ev.KIND_REGISTRY_VERSION_V3, rule_profile=rule_profile)
     conversion.write_bundle(out / "bundle")
     W.verify_bundle(recording, out / "bundle")  # the bundle is exactly the recording's derivation
     doc = watch_report(config, wconfig, conversion, counts)

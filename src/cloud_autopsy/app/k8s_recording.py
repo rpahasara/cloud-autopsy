@@ -776,7 +776,7 @@ def _coverage(responses, needed):
     return "continuity_lost", {"start": _ms_text(start), "end": _ms_text(end)}, basis, None
 
 
-def convert(directory, kind_registry_version=ev.KIND_REGISTRY_VERSION):
+def convert(directory, kind_registry_version=ev.KIND_REGISTRY_VERSION, rule_profile=1):
     """Convert one recording directory into a plan pinning ``kind_registry_version``.
 
     Observation kinds 0.1 (the default) converts Pods, ReplicaSets and rollouts; Events and ConfigMaps
@@ -793,7 +793,9 @@ def convert(directory, kind_registry_version=ev.KIND_REGISTRY_VERSION):
                                                             "ca-k8s-recording/0.4-provisional (watch) recording")
     if watch:  # CA-P2-004f: list + watch recordings have their own converter
         from . import k8s_watch_recording
-        return k8s_watch_recording.convert(root, manifest, manifest_sha)
+        return k8s_watch_recording.convert(root, manifest, manifest_sha, rule_profile)
+    if rule_profile != 1:  # CA-P2-005b: rule profile 2 needs observed brackets (recording 0.4, kinds 0.3)
+        raise RecordingError("recording_rules_unsupported", "rule profile 2 is only for 0.4 (watch) recordings")
     v2 = kind_registry_version == ev.KIND_REGISTRY_VERSION_V2
     queries = QUERIES_V2 if v2 else QUERIES
     unsupported_resources = () if v2 else UNSUPPORTED

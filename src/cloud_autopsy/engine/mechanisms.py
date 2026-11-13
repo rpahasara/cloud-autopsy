@@ -99,7 +99,7 @@ class _Context:
                              for s in inp.registry.sources}
 
     def order(self, a, b):
-        return event_order(a, b, self.domains)
+        return event_order(a, b, self.domains, self.inp.timeline_rules)
 
     def logs(self, key, templates):
         return [log for log in self.logs_by_key.get(key, []) if log.attributes["template"] in templates]
