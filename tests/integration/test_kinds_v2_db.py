@@ -113,7 +113,7 @@ class KindsV2DatabaseTests(unittest.TestCase):
         self.assertEqual(ctx.exception.sqlstate, "23514")
 
     def test_the_database_accepts_a_profile_4_plan_after_0009(self):
-        # CA-P2-002e: migration 0009 makes observation kinds 0.4 (profile 4, with batch 0.2) supported.
+        # CA-P2-002e: migration 0009 makes profile 4 (observation kinds 0.4 with batch 0.3, M11) supported.
         loaded = self.created[ev.KIND_REGISTRY_VERSION_V2][0]
         record = loaded.plan.to_record()
         record["contract_versions"] = pl.required_contract_versions(ev.KIND_REGISTRY_VERSION_V4)

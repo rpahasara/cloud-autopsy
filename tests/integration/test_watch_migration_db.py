@@ -7,7 +7,8 @@ run. Then 0008 is applied to that same database. Required by the F6 authorizatio
 - the ledger checksums of 0001-0007 equal the pinned values (the files are unchanged);
 - every stored result still verifies on read, and the six result digests equal their pins;
 - before 0008 a profile-3 plan is refused by the database; after it, it is accepted;
-- CA-P2-002e: 0009 is then applied alone; it changes no historical row and makes profile-4 plans acceptable;
+- CA-P2-002e: 0009 is then applied alone; it changes no historical row, adds batch 0.3 and kinds 0.4, widens the
+  batch version check to 0.3, and makes profile-4 plans acceptable;
 - the widened CHECK accepts batch 0.1 and 0.2 only, and the supported-version table lists exactly
   this package's additional versions.
 Synthetic data only.
@@ -160,7 +161,8 @@ class Migration0008Tests(unittest.TestCase):
                          and self.after[t] != self.after9[t])
         self.assertEqual(changed, [])
         self.assertEqual(set(self.after), set(self.after9))
-        self.assertEqual(self.after9["contract_version_supported"][0], self.after["contract_version_supported"][0] + 1)
+        # 0009 appends exactly two supported versions: batch 0.3 (M11) and observation kinds 0.4.
+        self.assertEqual(self.after9["contract_version_supported"][0], self.after["contract_version_supported"][0] + 2)
 
     def test_profile_4_plans_need_0009(self):
         self.assertEqual(self.profile4_before, "23514")
@@ -185,14 +187,16 @@ class Migration0008Tests(unittest.TestCase):
         self.assertEqual(self.profile3_before, "23514")
         self.assertIsNone(self._try_profile3_plan(self.admin(), "profile3-after-0008"))
 
-    def test_the_widened_check_accepts_batch_0_1_and_0_2_only(self):
+    def test_the_widened_check_accepts_batch_0_1_to_0_3_only(self):
+        # 0008 widened the check to 0.1 or 0.2; 0009 (CA-P2-002e, M11) widens it to 0.1, 0.2 or 0.3.
         definition = self.admin().one(
             "SELECT pg_get_constraintdef(c.oid) FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid "
             "JOIN pg_namespace n ON n.oid = t.relnamespace WHERE n.nspname = 'ca' AND t.relname = 'acquisition_batch' "
             "AND c.conname = 'acquisition_batch_contract_version_check'")[0]
         self.assertIn("ca-acquisition-batch/0.1-provisional", definition)
         self.assertIn("ca-acquisition-batch/0.2-provisional", definition)
-        self.assertNotIn("0.3-provisional", definition)
+        self.assertIn("ca-acquisition-batch/0.3-provisional", definition)
+        self.assertNotIn("0.4-provisional", definition)
         versions = [r[0] for r in self.admin().run("SELECT DISTINCT contract_version FROM ca.acquisition_batch")]
         self.assertEqual(versions, ["ca-acquisition-batch/0.1-provisional"])
 

@@ -49,7 +49,7 @@ class Fixture4(T.Fixture):
 
     def __init__(self, rule_profile=2, domains=(T.COL, T.SRV, RUNTIME), **kw):
         super().__init__(rule_profile, kinds=V4, domains=domains, **kw)
-        self.batch_version = acq.BATCH_VERSION_V2
+        self.batch_version = acq.BATCH_VERSION_V3   # profile 4 pins batch 0.3 (M11)
         for source in self.registry_record["sources"]:
             if source["source_kind"] == "kubernetes_api":
                 source["query_ids"] = sorted(source["query_ids"] + ["k8s.pods.log"])
@@ -61,6 +61,34 @@ class Fixture4(T.Fixture):
         self.plan = T.pl.RunPlan.from_record(self.plan_record, self.registry)
         self.clocks = [ti.clock_domain(d, ti.UNKNOWN, continuity=ti.CONTINUOUS if d == T.COL else ti.UNKNOWN).to_record()
                        for d in sorted(set(domains))]
+
+
+    def batches(self, observations, partial=()):
+        """As the profile-3 fixture, but log batches carry a log_sequence_continuity basis (M11) that lists
+        each instance of their lines; batch 0.3 refuses log lines under a watch_continuity basis."""
+        if self.batch_version == acq.BATCH_VERSION_V2:
+            return super().batches(observations, partial)
+        records = []
+        self.batch_version = acq.BATCH_VERSION_V2       # the profile-3 fixture builds 0.2-shaped records...
+        try:
+            built = T.Fixture.batches(self, observations, partial)
+        finally:
+            self.batch_version = acq.BATCH_VERSION_V3
+        for record in built:
+            record["contract_version"] = acq.BATCH_VERSION_V3   # ...which 0.3 keeps field for field
+            basis = record.get("coverage_basis")
+            if record["query_id"] == "k8s.pods.log" and basis is not None:
+                last = {}
+                for o in record["observations"]:
+                    key = (o["source_uid"], o["attributes"]["container"], o["attributes"]["boot"])
+                    last[key] = max(last.get(key, 0), o["attributes"]["seq"])
+                record["coverage_basis"] = {
+                    **basis, "kind": acq.LOG_SEQUENCE_CONTINUITY, "resource_type": acq.LOG_RESOURCE_TYPE,
+                    "session_id": T.COL[len("ca-collector-"):],
+                    "instances": [{"pod_uid": u, "container": c, "boot": b, "last_seq": n, "ending": "stopped"}
+                                  for (u, c, b), n in sorted(last.items())]}
+            records.append(record)
+        return records
 
 
 def spec4(roll=None, pods=None, logs=None):
