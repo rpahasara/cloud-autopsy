@@ -12,9 +12,10 @@ Layout::
 
   recording.json = {
     "contract_version": "ca-k8s-recording/0.4-provisional", "recording_id", "data_classification": "synthetic",
-    "provenance": "collector", "source_id", "cluster_id", "namespace", "session_id",
+    "provenance": "collector", "source_id", "cluster_id", "namespace", "session_id": "cs-<16 hex>",
     "rv_comparison": "k8s-1.37-decimal",
-    "clocks": {"collector": {"clock_domain_id", "anchor_wall", "max_drift_ms", "step_detected"},
+    "clocks": {"collector": {"clock_domain_id": "ca-collector-<session_id>", "anchor_wall", "max_drift_ms",
+                             "step_detected"},
                "api_server": {"clock_domain_id"}},
     "streams": [{"resource": "pods" | "replicasets" | "deployments" | "events",
                  "parts": [{"file": "streams/<resource>-<nnnn>.json", "sha256"}, ...]}, ...]}
@@ -109,6 +110,11 @@ _CODE = re.compile(r"[a-z][a-z0-9_]{0,63}", re.ASCII)
 NS_PER_MS = 1_000_000
 MAX_NS = 32_503_680_000 * 10 ** 9  # year 3000: a bound, never a meaning
 MAX_OFFSET_NS = 2 * 3600 * 10 ** 9  # a recording's times lie within two hours of its anchor
+# R1 (CA-P2-005b E6): one physical collection session = one generated identity = one collector clock
+# domain. The recording ID is user-supplied and may repeat; the session identity may not be derived
+# from it. Replay reads the recorded identity and never generates one.
+SESSION_ID = re.compile(r"cs-[0-9a-f]{16}", re.ASCII)
+COLLECTOR_DOMAIN_PREFIX = "ca-collector-"
 
 
 def _bad(detail):
@@ -140,9 +146,11 @@ def _manifest(manifest):
         raise K.RecordingError("recording_classification_refused", "only synthetic recordings are accepted")
     if manifest["provenance"] != "collector" or manifest["rv_comparison"] != rv.RV_COMPARISON:
         raise K.RecordingError("recording_manifest_invalid", "a 0.4 recording comes from the collector under the F3 rule")
-    for field in ("recording_id", "source_id", "cluster_id", "session_id"):
+    for field in ("recording_id", "source_id", "cluster_id"):
         if not isinstance(manifest[field], str) or not K._ID.fullmatch(manifest[field]):
             raise K.RecordingError("recording_manifest_invalid", f"{field} must be a lowercase identifier")
+    if not isinstance(manifest["session_id"], str) or not SESSION_ID.fullmatch(manifest["session_id"]):
+        raise K.RecordingError("recording_manifest_invalid", "session_id must be a generated session identity")
     clocks_ = manifest["clocks"]
     if not isinstance(clocks_, dict) or set(clocks_) != {"collector", "api_server"}:
         raise K.RecordingError("recording_manifest_invalid", "clocks must name the collector and the API server")
@@ -154,6 +162,8 @@ def _manifest(manifest):
     for domain in (collector["clock_domain_id"], server["clock_domain_id"]):
         if not isinstance(domain, str) or not K._ID.fullmatch(domain):
             raise K.RecordingError("recording_manifest_invalid", "clock_domain_id must be an identifier")
+    if collector["clock_domain_id"] != COLLECTOR_DOMAIN_PREFIX + manifest["session_id"]:
+        raise K.RecordingError("recording_manifest_invalid", "the collector clock domain must be the session's own")
     if collector["clock_domain_id"] == server["clock_domain_id"] or type(collector["step_detected"]) is not bool:
         raise K.RecordingError("recording_manifest_invalid", "the collector and API-server clocks are separate domains")
     anchor = collector["anchor_wall"]

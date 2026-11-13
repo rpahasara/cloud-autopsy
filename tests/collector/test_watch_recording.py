@@ -22,6 +22,8 @@ from cloud_autopsy.contracts import evidence as ev
 from cloud_autopsy.contracts import timeinterval as ti
 
 ANCHOR = "2026-11-12T10:00:00.000000000Z"
+SESSION = "cs-00000000000000a1"
+DOMAIN = "ca-collector-" + SESSION
 ANCHOR_MS = 1_794_477_600_000  # 2026-11-12T10:00:00Z
 MS = 1_000_000
 
@@ -70,7 +72,8 @@ def quiet(resource):
     return [listing(1, items=[]), opened(2, "1000"), end(3, 900 * MS)]
 
 
-def write(directory, pods, step=False, others=None, extra_file=None):
+def write(directory, pods, step=False, others=None, extra_file=None, session=SESSION, domain=None,
+          recording_id="ca-watch-rec"):
     root = Path(directory)
     (root / "streams").mkdir(parents=True)
     streams = []
@@ -80,11 +83,11 @@ def write(directory, pods, step=False, others=None, extra_file=None):
         (root / "streams" / f"{resource}-0001.json").write_bytes(data)
         streams.append({"resource": resource, "parts": [{"file": f"streams/{resource}-0001.json",
                                                          "sha256": hashlib.sha256(data).hexdigest()}]})
-    manifest = {"contract_version": K.RECORDING_VERSION_V4, "recording_id": "ca-watch-rec",
+    manifest = {"contract_version": K.RECORDING_VERSION_V4, "recording_id": recording_id,
                 "data_classification": "synthetic", "provenance": "collector", "source_id": "k8s-api",
-                "cluster_id": "ca-kind-synthetic", "namespace": "ca-demo", "session_id": "ca-watch-rec",
+                "cluster_id": "ca-kind-synthetic", "namespace": "ca-demo", "session_id": session,
                 "rv_comparison": "k8s-1.37-decimal",
-                "clocks": {"collector": {"clock_domain_id": "ca-collector", "anchor_wall": ANCHOR,
+                "clocks": {"collector": {"clock_domain_id": domain or "ca-collector-" + session, "anchor_wall": ANCHOR,
                                          "max_drift_ms": 300 if step else 3, "step_detected": step},
                            "api_server": {"clock_domain_id": "k8s-apiserver"}},
                 "streams": streams}
@@ -138,8 +141,8 @@ class Derivation(unittest.TestCase):
                 stamp = times[version]
                 self.assertEqual(stamp["raw"], f"2026-11-12T10:00:00.{lower:09d}Z")
                 self.assertEqual(stamp["declared_precision_ns"], upper - lower)
-                self.assertEqual(stamp["clock_domain_id"], "ca-collector")
-                parsed = ti.source_timestamp(stamp["raw"], timestamp_kind="observed", clock_domain_id="ca-collector",
+                self.assertEqual(stamp["clock_domain_id"], DOMAIN)
+                parsed = ti.source_timestamp(stamp["raw"], timestamp_kind="observed", clock_domain_id=DOMAIN,
                                              declared_precision_ns=stamp["declared_precision_ns"])
                 self.assertEqual((parsed.local_lower_ms, parsed.local_upper_ms),
                                  (ANCHOR_MS + lower // MS, ANCHOR_MS + -(-upper // MS) - 1))
@@ -206,10 +209,10 @@ class Derivation(unittest.TestCase):
 
     def test_a_detected_clock_step_is_declared(self):
         _, conversion = self.convert(healthy(), step=True)
-        collector = next(c for c in conversion.clock_records if c["clock_domain_id"] == "ca-collector")
+        collector = next(c for c in conversion.clock_records if c["clock_domain_id"] == DOMAIN)
         self.assertEqual(collector["continuity"], ti.STEP_DECLARED)
         _, conversion = self.convert(healthy())
-        collector = next(c for c in conversion.clock_records if c["clock_domain_id"] == "ca-collector")
+        collector = next(c for c in conversion.clock_records if c["clock_domain_id"] == DOMAIN)
         self.assertEqual((collector["status"], collector["continuity"]), (ti.UNKNOWN, ti.CONTINUOUS))
 
     def test_kinds_0_3_and_recording_0_4_go_together(self):
@@ -217,6 +220,41 @@ class Derivation(unittest.TestCase):
         with self.assertRaises(K.RecordingError) as ctx:
             K.convert(root, ev.KIND_REGISTRY_VERSION_V2)
         self.assertEqual(ctx.exception.code, "recording_kinds_unsupported")
+
+
+class SessionIdentity(unittest.TestCase):
+    """R1: one physical session, one generated identity, one collector clock domain."""
+
+    def convert(self, **kw):
+        root = write(F.tempdir(self, "ca-watch-sess-") / "rec", healthy(), **kw)
+        return K.convert(root, ev.KIND_REGISTRY_VERSION_V3)
+
+    def test_two_sessions_with_the_same_recording_id_have_separate_clock_domains(self):
+        a = self.convert(session="cs-00000000000000a1")
+        b = self.convert(session="cs-00000000000000b2")
+        domains_a = {c["clock_domain_id"] for c in a.clock_records}
+        domains_b = {c["clock_domain_id"] for c in b.clock_records}
+        self.assertEqual(domains_a - domains_b, {"ca-collector-cs-00000000000000a1"})
+        self.assertEqual(domains_b - domains_a, {"ca-collector-cs-00000000000000b2"})
+        stamps = {t["clock_domain_id"] for c in (a, b) for r in c.batch_records for o in r["observations"]
+                  for t in o["times"] if t["timestamp_kind"] == "observed"}
+        self.assertEqual(stamps, {"ca-collector-cs-00000000000000a1", "ca-collector-cs-00000000000000b2"})
+        self.assertNotEqual(a.plan_record["registry_digest"], b.plan_record["registry_digest"])
+
+    def test_the_session_identity_and_clock_domain_must_agree(self):
+        for kw in (dict(domain="ca-collector"), dict(domain="ca-collector-cs-00000000000000ff"),
+                   dict(session="ca-watch-rec"), dict(session="cs-0000"), dict(session="CS-00000000000000A1")):
+            with self.subTest(kw=kw), self.assertRaises(K.RecordingError) as ctx:
+                self.convert(**kw)
+            self.assertEqual(ctx.exception.code, "recording_manifest_invalid")
+
+    def test_replay_uses_the_recorded_identity(self):
+        a, b = self.convert(), self.convert()
+        self.assertEqual(a.clock_records, b.clock_records)
+        self.assertEqual([r["coverage_basis"] for r in a.batch_records], [r["coverage_basis"] for r in b.batch_records])
+        bases = [r["coverage_basis"] for r in a.batch_records if r["coverage_basis"]]
+        self.assertTrue(bases)
+        self.assertEqual({(x["session_id"], x["clock_domain_id"]) for x in bases}, {(SESSION, DOMAIN)})
 
 
 class Forgery(unittest.TestCase):

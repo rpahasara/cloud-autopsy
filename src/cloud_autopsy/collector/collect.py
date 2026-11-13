@@ -20,6 +20,7 @@ re-checked by replay (``k8s_watch_recording.verify_bundle``) and reported.
 import hashlib
 import json
 import os
+import secrets
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -34,7 +35,17 @@ from . import watch as wt
 RESOURCES = ("deployments", "events", "pods", "replicasets")
 REPORT_VERSION = "ca-k8s-collection-report/0.1-provisional"
 CLOCK_DOMAIN = "k8s-apiserver"
-COLLECTOR_CLOCK_DOMAIN = "ca-collector"
+COLLECTOR_CLOCK_DOMAIN_PREFIX = "ca-collector-"   # + the session identity (R1, CA-P2-005b E6)
+
+
+def new_session_id():
+    """A fresh identity for one physical collection session: 64 random bits, never derived from the
+    user-supplied recording ID (which need not be unique). Recorded once; replay reads it back."""
+    return "cs-" + secrets.token_hex(8)
+
+
+def collector_clock_domain(session_id):
+    return COLLECTOR_CLOCK_DOMAIN_PREFIX + session_id
 WATCH_REPORT_VERSION = "ca-k8s-watch-collection-report/0.1-provisional"
 MAX_PART_BYTES = 900_000
 
@@ -159,7 +170,7 @@ def run(config, out_dir, transport=None, wall_ms=None, monotonic=None):
 
 # ------------------------------------------------------------------------- CA-P2-004f: watch
 
-def watch_recording_files(config, entries, clock, step_threshold_ms=250):
+def watch_recording_files(config, entries, clock, step_threshold_ms=250, session_id=None):
     """{relative path: bytes} of the 0.4 recording: the manifest and canonical stream parts."""
     files, streams = {}, []
     for resource in sorted(entries):
@@ -185,9 +196,9 @@ def watch_recording_files(config, entries, clock, step_threshold_ms=250):
         streams.append({"resource": resource, "parts": listed})
     manifest = {"contract_version": K.RECORDING_VERSION_V4, "recording_id": config.recording_id,
                 "data_classification": "synthetic", "provenance": "collector", "source_id": config.source_id,
-                "cluster_id": config.cluster_id, "namespace": config.namespace, "session_id": config.recording_id,
+                "cluster_id": config.cluster_id, "namespace": config.namespace, "session_id": session_id,
                 "rv_comparison": W.rv.RV_COMPARISON,
-                "clocks": {"collector": {"clock_domain_id": COLLECTOR_CLOCK_DOMAIN,
+                "clocks": {"collector": {"clock_domain_id": collector_clock_domain(session_id),
                                          "anchor_wall": W._ns_text(clock.anchor_wall_ns),
                                          "max_drift_ms": clock.max_drift_ms,
                                          "step_detected": clock.max_drift_ms > step_threshold_ms},
@@ -212,10 +223,13 @@ def watch_report(config, wconfig, conversion, counts):
                      "period is a gap. Collector data alone has no symptom source, so investigations abstain.")}
 
 
-def run_watch(config, wconfig, out_dir, transport=None, clock=None, stop=None, on_signal=None):
-    """One list + watch session into a new ``out_dir``: ``recording/``, ``bundle/`` and ``report.json``."""
+def run_watch(config, wconfig, out_dir, transport=None, clock=None, stop=None, on_signal=None, session_id=None):
+    """One list + watch session into a new ``out_dir``: ``recording/``, ``bundle/`` and ``report.json``.
+
+    ``session_id`` is generated here, once per collection (``new_session_id``); tests may pass one."""
     config.check()
     wconfig.check()
+    session_id = session_id or new_session_id()
     transport = transport or cl.HttpsTransport(config.server, config.ca_file, config.token_file, config.timeout_s)
     entries, clock, counts = wt.run_session(transport, config.namespace, wconfig, clock=clock, stop=stop,
                                             on_signal=on_signal)
@@ -223,7 +237,9 @@ def run_watch(config, wconfig, out_dir, transport=None, clock=None, stop=None, o
     out.mkdir(parents=False, exist_ok=False)
     recording = out / "recording"
     recording.mkdir()
-    files = watch_recording_files(config, entries, clock, wconfig.step_threshold_ms)
+    if not isinstance(session_id, str) or not W.SESSION_ID.fullmatch(session_id):
+        raise cl.CollectorError("session_id_invalid")
+    files = watch_recording_files(config, entries, clock, wconfig.step_threshold_ms, session_id)
     for rel, data in sorted(files.items()):
         (recording / rel).parent.mkdir(exist_ok=True)
         _write_new(recording / rel, data)

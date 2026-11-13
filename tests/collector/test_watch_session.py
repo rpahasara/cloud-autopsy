@@ -5,6 +5,7 @@ gap, the recording re-derives byte-identically, and no planted value, Status mes
 token is written. Short bounds keep each session to a couple of seconds.
 """
 
+import json
 import os
 import shutil
 import tempfile
@@ -74,7 +75,9 @@ class Session(unittest.TestCase):
         observed = [t for r in batches["k8s.pods"] if r["outcome"] == acq.COMPLETE for o in r["observations"]
                     for t in o["times"] if t["timestamp_kind"] == "observed"]
         self.assertTrue(observed)
-        self.assertTrue(all(t["clock_domain_id"] == co.COLLECTOR_CLOCK_DOMAIN for t in observed))
+        domains = {t["clock_domain_id"] for t in observed}
+        self.assertEqual(len(domains), 1)
+        self.assertRegex(domains.pop(), r"^ca-collector-cs-[0-9a-f]{16}$")
 
     def test_bookmarks_and_events_alone_never_cover_time(self):
         cluster = FW.FakeCluster(faults={r: {"probe_status": 500} for r in FW.KINDS}, bookmark_interval=0.05)
@@ -195,6 +198,27 @@ class OverTls(unittest.TestCase):
         self.assertEqual(F.scan([tmp / "out"]), set())
         token = (tmp / "token").read_bytes()
         self.assertNotIn(token, b"".join(p.read_bytes() for p in (tmp / "out").rglob("*") if p.is_file()))
+
+
+class SessionIdentities(unittest.TestCase):
+    def test_each_collection_generates_its_own_identity_even_with_the_same_recording_id(self):
+        ids = set()
+        for _ in range(2):
+            tmp = F.tempdir(self, "ca-watch-ids-")
+            cluster = FW.FakeCluster(bookmark_interval=0.05)
+            _, conversion, report = co.run_watch(config(tmp, "ca-same-id"), wt.WatchConfig(**QUICK), tmp / "out",
+                                                 transport=cluster)
+            manifest = json.loads((tmp / "out" / "recording" / "recording.json").read_bytes())
+            self.assertEqual(manifest["recording_id"], "ca-same-id")
+            self.assertEqual(manifest["clocks"]["collector"]["clock_domain_id"], "ca-collector-" + manifest["session_id"])
+            ids.add(manifest["session_id"])
+            W.verify_bundle(tmp / "out" / "recording", tmp / "out" / "bundle")  # replay reads the recorded identity
+        self.assertEqual(len(ids), 2)
+
+    def test_identities_are_random_and_well_formed(self):
+        ids = {co.new_session_id() for _ in range(1000)}
+        self.assertEqual(len(ids), 1000)
+        self.assertTrue(all(W.SESSION_ID.fullmatch(i) for i in ids))
 
 
 class Allowlist(unittest.TestCase):
