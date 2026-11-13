@@ -50,6 +50,7 @@ EVIDENCE_VERSION = "ca-evidence/0.1-provisional"
 KIND_REGISTRY_VERSION = "ca-observation-kinds/0.1-provisional"      # the baseline; unchanged
 KIND_REGISTRY_VERSION_V2 = "ca-observation-kinds/0.2-provisional"   # CA-P2-004d: 0.1 plus two Kubernetes kinds
 KIND_REGISTRY_VERSION_V3 = "ca-observation-kinds/0.3-provisional"   # CA-P2-004f: observed times, deletions
+KIND_REGISTRY_VERSION_V4 = "ca-observation-kinds/0.4-provisional"   # CA-P2-002e: pod logs from the Kubernetes API
 ID_ALGORITHM = "ca-evidence-id-sha256/0.1-provisional"
 CONTENT_ALGORITHM = "ca-evidence-content-sha256/0.1-provisional"
 ORIGIN_OBSERVED = "observed"
@@ -288,8 +289,33 @@ KINDS_ADDED_IN_V3 = {spec.observation_kind: spec for spec in (
              _Object({"object_kind": (_Text(10, r"Pod|ReplicaSet|Deployment|Event"), True)}),
              since=KIND_REGISTRY_VERSION_V3),
 )}
+# ``ca-observation-kinds/0.4-provisional`` (CA-P2-002e): every 0.3 kind, with ``log_line`` widened so a
+# container log read through the Kubernetes API (``pods/log``) can be recorded. Under 0.4 a ``log_line``
+# - may come from a ``loki`` source (exactly as in 0.1) or a ``kubernetes_api`` source;
+# - may carry an ``observed`` time (the same collector-clock bracket meaning as 0.3);
+# - may omit ``message``, and may carry the sequence-envelope attributes ``container``, ``boot`` and
+#   ``seq`` (see docs/phase2/milestone-incident/plan.md, section 4.2).
+# A ``kubernetes_api`` log line must carry the envelope and must never carry ``message``: free text read
+# from a container is never stored (plan section 6.3). Labelling is unchanged in principle: a record
+# carries the earliest version under which it is valid, so a 0.1-shaped ``loki`` line keeps its 0.1
+# label and its bytes.
+CONTAINER = _Text(63, r"[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?")
+BOOT = _Text(8, r"[0-9a-f]{8}")
+LOG_LINE_V4 = KindSpec("log_line", "LOG", ("loki", "kubernetes_api"), "Pod", ("event",), (OBSERVED_TIME,), _Object({
+    "pod": (K8S_NAME, True), "template": (_Nullable(TEMPLATE), True), "fields": (_LogFields(), True),
+    "message": (MESSAGE, False), "container": (CONTAINER, False), "boot": (BOOT, False),
+    "seq": (_Int(1, 1_000_000_000), False)}), since=KIND_REGISTRY_VERSION_V4)
+_ENVELOPE_ATTRIBUTES = ("container", "boot", "seq")
 KIND_REGISTRIES = {KIND_REGISTRY_VERSION: KINDS, KIND_REGISTRY_VERSION_V2: {**KINDS, **KINDS_ADDED_IN_V2},
-                   KIND_REGISTRY_VERSION_V3: {**KINDS, **KINDS_ADDED_IN_V2, **KINDS_ADDED_IN_V3}}
+                   KIND_REGISTRY_VERSION_V3: {**KINDS, **KINDS_ADDED_IN_V2, **KINDS_ADDED_IN_V3},
+                   KIND_REGISTRY_VERSION_V4: {**KINDS, **KINDS_ADDED_IN_V2, **KINDS_ADDED_IN_V3,
+                                              "log_line": LOG_LINE_V4}}
+_OBSERVED_TIME_VERSIONS = (KIND_REGISTRY_VERSION_V3, KIND_REGISTRY_VERSION_V4)
+
+
+def source_kinds_of(spec):
+    """The source kinds that may produce ``spec`` (one, or a tuple for 0.4 ``log_line``)."""
+    return spec.source_kind if isinstance(spec.source_kind, tuple) else (spec.source_kind,)
 
 
 def kinds_for(kind_registry_version):
@@ -484,7 +510,7 @@ def observe(observation, *, source_id, registry, delivery=None, kind_registry_ve
     if spec is None:
         raise EvidenceError(E.OBSERVATION_KIND_UNSUPPORTED, "observation_kind is not in the plan's kind registry")
     source = registry.get(source_id)
-    if source.source_kind != spec.source_kind:
+    if source.source_kind not in source_kinds_of(spec):
         raise EvidenceError(E.SOURCE_SCOPE_MISMATCH, "observation_kind is not produced by this source kind")
     if delivery is not None:
         validate_delivery(delivery, source)
@@ -527,6 +553,8 @@ def observe(observation, *, source_id, registry, delivery=None, kind_registry_ve
 
     attributes = spec.attributes.check(observation["attributes"], "attributes")
     _cross_checks(spec, entity, attributes)
+    if spec is LOG_LINE_V4:
+        _log_line_v4_checks(source.source_kind, attributes)
 
     content = content_material(spec.observation_kind, source_ref, source_uid, source_version, entity,
                                [_time_input(s) for s in stamps], attributes)
@@ -535,7 +563,7 @@ def observe(observation, *, source_id, registry, delivery=None, kind_registry_ve
                                                             source_version)),
         origin=ORIGIN_OBSERVED, source_id=source.source_id, cluster_id=source.cluster_id,
         namespace=source.namespace, source_binding_digest=source.binding_digest,
-        kind_registry_version=_label(spec, kinds), observation_kind=spec.observation_kind,
+        kind_registry_version=_label(spec, kinds, source.source_kind, attributes), observation_kind=spec.observation_kind,
         evidence_class=spec.evidence_class, source_ref=source_ref, source_uid=source_uid,
         source_version=source_version, entity=entity, times=tuple(stamps), attributes=attributes,
         content_digest=_sha_id(CONTENT_ALGORITHM, content))
@@ -543,13 +571,31 @@ def observe(observation, *, source_id, registry, delivery=None, kind_registry_ve
 
 def _extra_times(spec, kind_registry_version):
     """Timestamp kinds a later registry version adds to an existing kind (only under that version)."""
-    if kind_registry_version == KIND_REGISTRY_VERSION_V3 and spec.observation_kind in OBSERVED_TIME_KINDS:
+    if kind_registry_version in _OBSERVED_TIME_VERSIONS and spec.observation_kind in OBSERVED_TIME_KINDS:
         return (OBSERVED_TIME,)
     return ()
 
 
-def _label(spec, timestamp_kinds):
+def _log_line_v4_checks(source_kind, attributes):
+    """A pod log read through the Kubernetes API carries the full sequence envelope and no free text."""
+    present = [a for a in _ENVELOPE_ATTRIBUTES if a in attributes]
+    if present and len(present) != len(_ENVELOPE_ATTRIBUTES):
+        raise EvidenceError(E.ATTRIBUTE_MISSING, "attributes must carry container, boot and seq together")
+    if source_kind == "kubernetes_api":
+        if not present:
+            raise EvidenceError(E.ATTRIBUTE_MISSING, "a Kubernetes API log line must carry its sequence envelope")
+        if "message" in attributes:
+            raise EvidenceError(E.ATTRIBUTE_FORBIDDEN, "a Kubernetes API log line must not carry free text")
+    elif "message" not in attributes:
+        raise EvidenceError(E.ATTRIBUTE_MISSING, "attributes.message is required")
+
+
+def _label(spec, timestamp_kinds, source_kind, attributes):
     """The earliest registry version under which this exact record is valid."""
+    if spec is LOG_LINE_V4:
+        shaped_as_0_1 = (source_kind == "loki" and OBSERVED_TIME not in timestamp_kinds
+                         and not any(a in attributes for a in _ENVELOPE_ATTRIBUTES))
+        return KINDS["log_line"].since if shaped_as_0_1 else KIND_REGISTRY_VERSION_V4
     if spec.observation_kind in OBSERVED_TIME_KINDS and OBSERVED_TIME in timestamp_kinds:
         return KIND_REGISTRY_VERSION_V3
     return spec.since

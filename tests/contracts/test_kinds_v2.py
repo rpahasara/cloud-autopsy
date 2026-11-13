@@ -110,15 +110,16 @@ class VersionSeparationTests(unittest.TestCase):
             ev.ObservedEvidence.from_record(old, reg, V2)
 
     def test_unknown_registry_versions_are_refused(self):
-        # 0.3 exists since CA-P2-004f; 0.4 is still unknown.
+        # 0.3 exists since CA-P2-004f and 0.4 since CA-P2-002e; 0.5 is still unknown.
         with self.assertRaises(ContractError):
-            observe("event", "ca-observation-kinds/0.4-provisional")
+            observe("event", "ca-observation-kinds/0.5-provisional")
         with self.assertRaises(ContractError):
-            pl.required_contract_versions("ca-observation-kinds/0.4-provisional")
+            pl.required_contract_versions("ca-observation-kinds/0.5-provisional")
 
     def test_plans_pin_exactly_one_whole_profile(self):
-        # CA-P2-004f appended profile 3 (batch 0.2 and kinds 0.3); profiles 1 and 2 are unchanged.
-        self.assertEqual(len(CONTRACT_PROFILES), 3)
+        # CA-P2-004f appended profile 3 (batch 0.2 and kinds 0.3) and CA-P2-002e profile 4 (kinds 0.4);
+        # profiles 1 and 2 are unchanged.
+        self.assertEqual(len(CONTRACT_PROFILES), 4)
         diff = {k for k in CONTRACT_PROFILES[0] if CONTRACT_PROFILES[0][k] != CONTRACT_PROFILES[1][k]}
         self.assertEqual(diff, {"observation-kinds"})
         diff3 = {k for k in CONTRACT_PROFILES[1] if CONTRACT_PROFILES[1][k] != CONTRACT_PROFILES[2][k]}

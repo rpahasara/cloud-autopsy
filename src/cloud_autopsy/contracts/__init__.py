@@ -10,7 +10,8 @@ Contracts perform no I/O beyond the bytes or values passed to them.
 from .acquisition import BATCH_VERSION, BATCH_VERSION_V2
 from .canonical import CANON_VERSION, DIGEST_ALGORITHM
 from .evidence import (CONTENT_ALGORITHM, EVIDENCE_VERSION, ID_ALGORITHM, KIND_REGISTRY_VERSION,
-                       KIND_REGISTRY_VERSION_V2, KIND_REGISTRY_VERSION_V3, OBSERVATION_VERSION)
+                       KIND_REGISTRY_VERSION_V2, KIND_REGISTRY_VERSION_V3, KIND_REGISTRY_VERSION_V4,
+                       OBSERVATION_VERSION)
 from .frozen_input import FROZEN_INPUT_VERSION, GAP_POLICY_VERSION, MANIFEST_ALGORITHM
 from .plan import RUN_PLAN_VERSION
 from .sources import SOURCE_REGISTRY_VERSION
@@ -43,8 +44,11 @@ CONTRACT_PROFILES = (
     CONTRACT_VERSIONS,
     {**CONTRACT_VERSIONS, "observation-kinds": KIND_REGISTRY_VERSION_V2},
     {**CONTRACT_VERSIONS, "observation-kinds": KIND_REGISTRY_VERSION_V3, "acquisition-batch": BATCH_VERSION_V2},
+    # CA-P2-002e: profile 4 is profile 3 with observation kinds 0.4 (pod logs from the Kubernetes API).
+    {**CONTRACT_VERSIONS, "observation-kinds": KIND_REGISTRY_VERSION_V4, "acquisition-batch": BATCH_VERSION_V2},
 )
-# Versions a database must list as additionally supported (migrations 0006 and 0008), per contract.
-ADDITIONAL_CONTRACT_VERSIONS = {"observation-kinds": (KIND_REGISTRY_VERSION_V2, KIND_REGISTRY_VERSION_V3),
+# Versions a database must list as additionally supported (migrations 0006, 0008 and 0009), per contract.
+ADDITIONAL_CONTRACT_VERSIONS = {"observation-kinds": (KIND_REGISTRY_VERSION_V2, KIND_REGISTRY_VERSION_V3,
+                                                       KIND_REGISTRY_VERSION_V4),
                                 "acquisition-batch": (BATCH_VERSION_V2,)}
 CONTRACT_STATUS ="provisional: unreviewed; not RFC 8785 conformance evidence"

@@ -100,7 +100,7 @@ class KindsV2DatabaseTests(unittest.TestCase):
     def test_the_database_refuses_a_plan_pinning_an_unsupported_version(self):
         loaded = self.created[ev.KIND_REGISTRY_VERSION_V2][0]
         record = loaded.plan.to_record()
-        record["contract_versions"]["observation-kinds"] = "ca-observation-kinds/0.4-provisional"  # 0.3 exists since 0008
+        record["contract_versions"]["observation-kinds"] = "ca-observation-kinds/0.5-provisional"  # 0.4 exists since 0009
         record["plan_id"] = "unsupported-version"
         planner = self.fx.connect("ca_planner")
         with self.assertRaises(DbError) as ctx:
@@ -111,6 +111,21 @@ class KindsV2DatabaseTests(unittest.TestCase):
                             v=record["contract_version"], s=loaded.plan.window_start_ms, e=loaded.plan.window_end_ms,
                             b=canonical.canonical_bytes(record))
         self.assertEqual(ctx.exception.sqlstate, "23514")
+
+    def test_the_database_accepts_a_profile_4_plan_after_0009(self):
+        # CA-P2-002e: migration 0009 makes observation kinds 0.4 (profile 4, with batch 0.2) supported.
+        loaded = self.created[ev.KIND_REGISTRY_VERSION_V2][0]
+        record = loaded.plan.to_record()
+        record["contract_versions"] = pl.required_contract_versions(ev.KIND_REGISTRY_VERSION_V4)
+        record["plan_id"] = "profile-4-accepted"
+        planner = self.fx.connect("ca_planner")
+        with planner.transaction():
+            planner.run("INSERT INTO ca.run_plan (plan_digest, plan_id, registry_digest, contract_version, "
+                        "window_start_ms, window_end_ms, record_bytes) VALUES (:d, :p, :r, :v, :s, :e, :b)",
+                        d=canonical.digest(record), p=record["plan_id"], r=loaded.plan.registry_digest,
+                        v=record["contract_version"], s=loaded.plan.window_start_ms, e=loaded.plan.window_end_ms,
+                        b=canonical.canonical_bytes(record))
+        self.assertEqual(self.admin().one("SELECT count(*) FROM ca.run_plan WHERE plan_id = 'profile-4-accepted'")[0], 1)
 
     def test_0_1_and_0_2_runs_coexist_verified_and_equal_offline(self):
         for kinds, (loaded, inv) in self.created.items():

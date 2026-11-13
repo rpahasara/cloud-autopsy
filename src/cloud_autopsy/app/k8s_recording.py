@@ -785,6 +785,8 @@ def convert(directory, kind_registry_version=ev.KIND_REGISTRY_VERSION, rule_prof
     recording. Raises ``RecordingError`` when the recording is refused."""
     if kind_registry_version not in ev.KIND_REGISTRIES:
         raise RecordingError("recording_kinds_unsupported", "unsupported observation-kind registry version")
+    if kind_registry_version == ev.KIND_REGISTRY_VERSION_V4:  # CA-P2-002e: no recording produces pod logs yet
+        raise RecordingError("recording_kinds_unsupported", "observation kinds 0.4 has no recording converter yet")
     root = Path(os.path.abspath(directory))
     manifest, manifest_sha = _read_manifest(root)
     watch = isinstance(manifest, dict) and manifest.get("contract_version") == RECORDING_VERSION_V4
