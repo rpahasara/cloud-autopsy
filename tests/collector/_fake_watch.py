@@ -20,6 +20,7 @@ Faults, per resource (``faults[resource]``):
   regress_after: n      after n lines the stream sends an event with an older resourceVersion
   foreign_after: n      after n lines the stream sends an object from another namespace
   no_bookmarks          no bookmarks at all
+  hang_open_after: n    watch requests after the n-th block for hang_seconds (default 30), then 503
   list_status: code     every list request answers ``code``
   probe_status: code    every probe answers ``code``
 """
@@ -132,6 +133,9 @@ class FakeCluster:
         if fault.get("deny_watch") or (fault.get("deny_watch_after") is not None
                                        and self.watch_opens[resource] > fault["deny_watch_after"]):
             return 403, None
+        if fault.get("hang_open_after") is not None and self.watch_opens[resource] > fault["hang_open_after"]:
+            time.sleep(fault.get("hang_seconds", 30))  # an API server that accepts but never answers
+            return 503, None
         if fault.get("gone_on_resume") and self.watch_opens[resource] > 1:
             fault.pop("gone_on_resume")
             return 410, None
