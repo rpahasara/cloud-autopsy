@@ -24,6 +24,18 @@
       bundle re-derived byte-identically from the recording, abstention, and no planted value,
       Event text, token or continue token written.
 
+  kind_checks.py rbac-incident --server URL --ca-file CA --token-file TOKEN
+      CA-P2-004g: with the incident Role, pods/log of a ca-incident pod answers 200, and pods/log in
+      every other namespace, Secrets, ConfigMaps, exec/attach/portforward/proxy, nodes, namespaces and
+      every write answer 403 (raw requests with the real token).
+  kind_checks.py logs --out DIR --token-file TOKEN [--expect-ordered]
+      CA-P2-004g: a pod-log run in ca-incident. Recording 0.5 re-derives byte-identically; log coverage is
+      proven (every instance continuous from seq 1, stopped or covered past the final probe, no gap);
+      the rollout carries the typed declared-limit change 16 -> 4; symptom lines carry observed brackets
+      on the session clock; no planted log line, env value, Event text or token is written; and the log
+      batches stay partial under acquisition batch 0.2, so the investigation abstains. With
+      --expect-ordered, at least one symptom bracket lies strictly after the rollout bracket.
+
 Synthetic data only. Prints codes and counts, never response bodies or the token.
 """
 
@@ -147,6 +159,126 @@ def rbac(args):
         fail("the namespace is configuration, not part of the allowlist check")
     print(f"rbac: {refused} forbidden requests refused with 403; permitted list 200"
           f"{'; permitted watch 200' if args.watch_role else ''}; allowlist refuses all six")
+
+
+# CA-P2-004g: the incident Role (deploy/kind/rbac-incident.yaml).
+INCIDENT_REFUSALS = (
+    ("GET", "/api/v1/namespaces/ca-demo/pods/{pod}/log", "pods/log in ca-demo"),
+    ("GET", "/api/v1/namespaces/ca-other/pods/any-pod/log", "pods/log in ca-other"),
+    ("GET", "/api/v1/namespaces/kube-system/pods/any-pod/log", "pods/log in kube-system"),
+    ("GET", "/api/v1/namespaces/ca-incident/secrets", "secrets"),
+    ("GET", "/api/v1/namespaces/ca-incident/secrets/checkout-db", "a secret"),
+    ("GET", "/api/v1/namespaces/ca-incident/configmaps", "configmaps"),
+    ("GET", "/api/v1/namespaces/ca-incident/configmaps/ca-incident-workload", "a configmap"),
+    ("POST", "/api/v1/namespaces/ca-incident/pods/{pod}/exec?command=ls&stdout=true", "pods/exec"),
+    ("POST", "/api/v1/namespaces/ca-incident/pods/{pod}/attach?stdout=true", "pods/attach"),
+    ("POST", "/api/v1/namespaces/ca-incident/pods/{pod}/portforward", "pods/portforward"),
+    ("GET", "/api/v1/namespaces/ca-incident/pods/{pod}/proxy/", "pods/proxy"),
+    ("PATCH", "/api/v1/namespaces/ca-incident/pods/{pod}/ephemeralcontainers", "ephemeral containers"),
+    ("POST", "/api/v1/namespaces/ca-incident/pods/{pod}/eviction", "eviction"),
+    ("GET", "/api/v1/nodes", "cluster-scoped nodes"),
+    ("GET", "/api/v1/namespaces", "cluster-scoped namespaces"),
+    ("GET", "/api/v1/pods", "pods in all namespaces"),
+    ("POST", "/api/v1/namespaces/ca-incident/pods", "create"),
+    ("DELETE", "/api/v1/namespaces/ca-incident/pods/{pod}", "delete a pod"),
+    ("PATCH", "/apis/apps/v1/namespaces/ca-incident/deployments/checkout-api", "patch"),
+    ("PUT", "/apis/apps/v1/namespaces/ca-incident/deployments/checkout-api", "update"),
+    ("DELETE", "/apis/apps/v1/namespaces/ca-incident/replicasets", "deletecollection"),
+    ("GET", "/apis/apps/v1/namespaces/ca-incident/deployments/checkout-api/scale", "deployments/scale"),
+    ("POST", "/api/v1/namespaces/ca-collector/serviceaccounts/ca-collector/token", "tokenrequest"),
+)
+LOG_PLANTED = ("PLANTED-LOG-PASSWORD-1d2", "PLANTED-LOG-TOKEN-8e1", "PLANTED-LOG-EMAIL", "PLANTED-LOG-JWT",
+               "DEBUG_DUMP", "ramp:2:8:30")
+
+
+def rbac_incident(args):
+    token = Path(args.token_file).read_text(encoding="ascii").strip()
+    status, body = raw_request(args.server, args.ca_file, token, "GET", "/api/v1/namespaces/ca-incident/pods?limit=50")
+    if status != 200:
+        fail(f"the permitted list answered {status}; refusals below would prove nothing")
+    pods = [i["metadata"]["name"] for i in json.loads(body)["items"]]
+    if not pods:
+        fail("no pods to probe")
+    status, _ = raw_request(args.server, args.ca_file, token, "GET",
+                            f"/api/v1/namespaces/ca-incident/pods/{pods[0]}/log?limitBytes=1", read=False)
+    if status != 200:
+        fail(f"the permitted pods/log in ca-incident answered {status}")
+    status, body = raw_request(args.server, args.ca_file, token, "GET", "/api/v1/namespaces/ca-demo/pods?limit=50")
+    demo = [i["metadata"]["name"] for i in json.loads(body)["items"]] if status == 200 else ["any-pod"]
+    refused = 0
+    for method, path, why in INCIDENT_REFUSALS:
+        path = path.format(pod=(demo[0] if "ca-demo" in path else pods[0]) if demo else pods[0])
+        status, _ = raw_request(args.server, args.ca_file, token, method, path)
+        if status != 403:
+            fail(f"{method} {path.split('?')[0]} ({why}) answered {status}, expected 403")
+        refused += 1
+    print(f"rbac-incident: {refused} forbidden requests refused with 403; pods/log in ca-incident 200")
+
+
+def logs(args):
+    out = Path(args.out)
+    token = Path(args.token_file).read_text(encoding="ascii").strip()
+    found = []
+    needles = [n.encode() for n in PLANTED + LOG_PLANTED] + [token.encode()]
+    for path in sorted(out.rglob("*")):
+        if path.is_file():
+            data = path.read_bytes()
+            found += [f"{path.name}:{n.decode()[:14]}..." for n in needles if n in data]
+    if found:
+        fail(f"planted or secret values written: {found}")
+    manifest = json.loads((out / "recording" / "recording.json").read_bytes())
+    if manifest["contract_version"] != "ca-k8s-recording/0.5-provisional":
+        fail("not a 0.5 (pod-log) recording")
+    conversion = W.verify_bundle(out / "recording", out / "bundle")  # replay: byte-identical
+    report = conversion.report["pod_logs"]
+    instances = report["instances"]
+    stopped = sum(1 for i in instances.values() if i["stopped"])
+    handshake = sum(i["handshake_bounds"] for i in instances.values())
+    print(f"pod logs: {len(instances)} instances, {stopped} stopped, handshake bounds {handshake}, "
+          f"gaps {sorted({g[2] for g in report['gaps']})}, counts {report['counts']}")
+    if not report["coverage_proven"] or report["gaps"]:
+        fail(f"log coverage not proven: {report['gaps']}")
+    if len(instances) < 4 or stopped < 2:
+        fail("expected two stopped old instances and two new ones")
+    batches = conversion.batch_records
+    rollouts = [o for b in batches for o in b["observations"] if o["observation_kind"] == "deployment_rollout"]
+    typed = [fc for o in rollouts for fc in o["attributes"].get("field_changes", [])]
+    if [(fc["config_key"], fc["before_value"], fc["after_value"]) for fc in typed] != [("pool.maxConnections", "16", "4")]:
+        fail(f"expected exactly one typed limit change 16 -> 4, got {[(f['before_value'], f['after_value']) for f in typed]}")
+    session_domain = manifest["clocks"]["collector"]["clock_domain_id"]
+    symptoms = [o for b in batches if b["query_id"] == W.LOG_QUERY for o in b["observations"]
+                if o["attributes"]["template"] == "POOL_EXHAUSTED"]
+    if not symptoms:
+        fail("no POOL_EXHAUSTED line was collected")
+    if any("message" in o["attributes"] for o in symptoms):
+        fail("a log line carries free text")
+    log_batches = {(b["outcome"], b["reason"]) for b in batches if b["query_id"] == W.LOG_QUERY}
+    if log_batches != {("partial", "continuity_unproven")}:
+        fail(f"log batches must stay partial under batch 0.2: {log_batches}")
+
+    def bracket(o):
+        t = next((t for t in o["times"] if t["timestamp_kind"] == "observed"), None)
+        if t is None or t["clock_domain_id"] != session_domain:
+            return None
+        from cloud_autopsy.contracts import timeinterval as ti
+        stamp = ti.source_timestamp(t["raw"], timestamp_kind="observed", clock_domain_id=t["clock_domain_id"],
+                                    declared_precision_ns=t["declared_precision_ns"])
+        return (stamp.local_lower_ms, stamp.local_upper_ms)  # inclusive ms, outward-rounded
+
+    limit_rollout = next(o for o in rollouts if o["attributes"].get("field_changes"))
+    r = bracket(limit_rollout)
+    bounded = [bracket(o) for o in symptoms]
+    ordered = [b for b in bounded if b is not None and r is not None and b[0] > r[1]]
+    print(f"symptoms: {len(symptoms)} lines, {sum(b is not None for b in bounded)} with a session bracket, "
+          f"{len(ordered)} strictly after the rollout bracket {r}")
+    if args.expect_ordered and not ordered:
+        fail("no symptom bracket lies strictly after the rollout bracket")
+    inv = C.investigate_offline(B.load(out / "bundle"))
+    outcome = inv.result["outcome"]
+    if outcome["status"] != "abstained" or "limiting_evidence_gaps" not in outcome["reasons"]:
+        fail(f"expected an abstention with limiting_evidence_gaps under batch 0.2, got {outcome}")
+    print(f"logs: ok; replay byte-identical; coverage proven; abstained ({', '.join(outcome['reasons'])}); "
+          "no planted value, log text, token or event text written")
 
 
 def scan(out, token):
@@ -335,6 +467,14 @@ def main():
     p.add_argument("--expect", required=True, choices=("proven", "denied", "event_limit", "any"))
     p.add_argument("--min-segments", type=int, default=1)
     p.add_argument("--rule-profile", type=int, choices=(1, 2), default=1)
+    p = sub.add_parser("rbac-incident")
+    p.add_argument("--server", required=True)
+    p.add_argument("--ca-file", required=True)
+    p.add_argument("--token-file", required=True)
+    p = sub.add_parser("logs")
+    p.add_argument("--out", required=True)
+    p.add_argument("--token-file", required=True)
+    p.add_argument("--expect-ordered", action="store_true")
     p = sub.add_parser("sessions")
     p.add_argument("--out", required=True, action="append")
     p = sub.add_parser("run")
@@ -344,7 +484,8 @@ def main():
     p = sub.add_parser("db")
     p.add_argument("--json", required=True)
     args = parser.parse_args()
-    {"rbac": rbac, "run": run, "db": db, "watch": watch, "sessions": sessions}[args.command](args)
+    {"rbac": rbac, "run": run, "db": db, "watch": watch, "sessions": sessions, "rbac-incident": rbac_incident,
+     "logs": logs}[args.command](args)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,58 @@
+# CA-P2-004g synthetic incident namespace (all values invented). Only the incident workload runs here.
+# The workload script comes from deploy/kind/incident_workload.py via the ConfigMap
+# `ca-incident-workload`, which CI creates from that file (the collector can never read ConfigMaps).
+# Planted values (PLANTED-*) must never appear in anything the collector writes.
+# hostPath: read-only, the node's pod-log directory only, so the workload can confirm that each line it
+# wrote reached its own node log file (the write-after-append handshake, plan section 4.9). Disposable
+# kind cluster only; the collector has no such access.
+apiVersion: v1
+kind: Namespace
+metadata: {name: ca-incident}
+---
+apiVersion: v1
+kind: Secret
+metadata: {name: checkout-db, namespace: ca-incident}
+type: Opaque
+stringData:
+  password: PLANTED-SECRET-VALUE-d17
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout-api
+  namespace: ca-incident
+  annotations: {ca.synthetic/planted: PLANTED-ANNOTATION-91d}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: checkout-api}}
+  strategy: {type: RollingUpdate, rollingUpdate: {maxSurge: 1, maxUnavailable: 0}}
+  template:
+    metadata: {labels: {app: checkout-api}}
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 20
+      containers:
+        - name: checkout-api
+          image: docker.io/library/python:3.13.9-slim-trixie@sha256:326df678c20c78d465db501563f3492d17c42a4afe33a1f2bf5406a1d56b0e86
+          command: [python, -I, -u, /opt/ca/incident_workload.py]
+          env:
+            - {name: DB_POOL_MAX, value: "16"}
+            - {name: DEMAND, value: "ramp:2:8:30"}
+            - {name: PLANTED, value: "1"}
+            - {name: API_KEY, value: PLANTED-ENV-VALUE-7c1}
+            - name: DB_PASSWORD
+              valueFrom: {secretKeyRef: {name: checkout-db, key: password}}
+            - name: POD_UID
+              valueFrom: {fieldRef: {fieldPath: metadata.uid}}
+            - name: POD_NAME
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+            - name: POD_NAMESPACE
+              valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+          volumeMounts:
+            - {name: workload, mountPath: /opt/ca, readOnly: true}
+            - {name: pod-logs, mountPath: /var/log/pods, readOnly: true}
+      volumes:
+        - name: workload
+          configMap: {name: ca-incident-workload}
+        - name: pod-logs
+          hostPath: {path: /var/log/pods, type: Directory}

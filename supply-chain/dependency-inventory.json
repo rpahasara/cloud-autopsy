@@ -326,6 +326,24 @@
         "review": "pending"
       },
       "upgrade_owner": "Product owner (solo founder; maintainer role, CA-P2-004e authorization)"
+    },
+    {
+      "id": "python-3.13.9-slim-trixie",
+      "type": "container-image",
+      "name": "docker.io/library/python",
+      "version": "3.13.9-slim-trixie",
+      "pin": {
+        "kind": "image-digest",
+        "value": "docker.io/library/python:3.13.9-slim-trixie@sha256:326df678c20c78d465db501563f3492d17c42a4afe33a1f2bf5406a1d56b0e86"
+      },
+      "scope": "ci-only",
+      "purpose": "Synthetic incident workload (deploy/kind/incident_workload.py, standard library only) in the disposable kind cluster (CA-P2-004g); used instead of the planned BusyBox image, whose GPL-2.0 license needs an approved specialist review",
+      "license": {
+        "spdx": "PSF-2.0",
+        "source": "https://github.com/python/cpython/blob/v3.13.9/LICENSE",
+        "review": "pending"
+      },
+      "upgrade_owner": "Product owner (solo founder; maintainer role, CA-P2-004g authorization)"
     }
   ]
 }
