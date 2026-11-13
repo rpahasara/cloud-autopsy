@@ -33,7 +33,7 @@ Each one alone yields `limiting_evidence_gaps`, so every real investigation abst
 - A status-only change is counted under its own category, `status_only`. It is not withheld and yields no evidence.
 - Any change whose generation rises without a new revision stays `changes_withheld`, exactly as today. Examples are a replica-count change or a strategy change: a spec change that is not a rollout.
 
-**Why the coverage claim stays true.** The batch still claims that every change up to the proving resourceVersion was delivered and examined. The classification only states, from a field the API server maintains, that the desired state did no change. No mechanism reads Deployment status today, so no contradiction is hidden. If a future mechanism does read status, it must consume these events instead.
+**Why the coverage claim stays true.** The batch still claims that every change up to the proving resourceVersion was delivered and examined. The classification only states, from a field the API server maintains, that the desired state did not change. No mechanism reads Deployment status today, so no contradiction is hidden. If a future mechanism does read status, it must consume these events instead.
 
 **Tests:**
 - A status-only update is `status_only` and the batch is complete.
