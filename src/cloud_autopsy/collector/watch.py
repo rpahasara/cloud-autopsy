@@ -403,7 +403,22 @@ def run_session(transport, namespace, config, clock=None, stop=None, on_signal=N
         stream = res.stream
         if stream is not None:
             stream.close()
+    join_deadline = time.monotonic() + 10  # one bound for all threads, not ten seconds each
     for t in threads:
-        t.join(timeout=10)
+        t.join(timeout=max(0.0, join_deadline - time.monotonic()))
+    snapshot = {}
+    for name, res in resources.items():
+        with shared.lock:
+            entries = list(res.entries)
+        # A reader still blocked (for example on a watch request a stalled API server never answers)
+        # must not leave its stream without an end: that resource ends ``reader_stalled`` (a gap) in
+        # the snapshot written now; whatever the stalled thread does later is never recorded.
+        last = next((e for e in reversed(entries) if e["type"] != "probe"), None)  # probes may follow an end
+        open_segment = last is not None and last["type"] != "end" and not (
+            last["type"] == "list" and last["outcome"] not in ("consistent", "truncated"))
+        if not res.done.is_set() and open_segment:
+            entries.append({"seq": len(entries) + 1, "segment": last["segment"], "type": "end",
+                            "at_ns": clock.offset_ns(), "code": "reader_stalled", "http_status": None})
+        snapshot[name] = entries
     counts = {name: dict(sorted(r.counts.items())) for name, r in resources.items()}
-    return {name: list(r.entries) for name, r in resources.items()}, clock, counts
+    return snapshot, clock, counts

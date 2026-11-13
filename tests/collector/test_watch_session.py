@@ -164,6 +164,18 @@ class Session(unittest.TestCase):
             cl.Stream(None, Response()).readline(10)
         self.assertEqual(ctx.exception.code, "unavailable")
 
+    def test_a_reader_stuck_at_the_end_does_not_lose_the_other_resources(self):
+        """A watch request that hangs past the session end (a stalled API server) must not leave its
+        stream without an end, which would make the whole recording unusable. That resource ends
+        ``reader_stalled`` (a gap); the others keep their evidence and coverage."""
+        cluster = FW.FakeCluster(faults={"pods": {"eof_after": 1, "hang_open_after": 1, "hang_seconds": 30}},
+                                 bookmark_interval=0.05)
+        entries, acquisitions, batches, _ = self.run_watch(cluster)
+        self.assertEqual(acquisitions["k8s.pods"]["segments"][-1]["end"], "reader_stalled")
+        self.assertEqual([e["type"] for e in entries["pods"]].count("end"), 1)
+        self.assertTrue(acquisitions["k8s.replicasets"]["segments"][0]["proven"])
+        self.assert_honest(batches)
+
     def test_the_event_limit_truncates(self):
         cluster = FW.FakeCluster(bookmark_interval=0.08)
         steps = [lambda: cluster.touch("pods", n) for n in range(6)]
