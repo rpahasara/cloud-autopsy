@@ -147,6 +147,23 @@ class Session(unittest.TestCase):
                 self.assertEqual(acquisitions["k8s.pods"]["segments"][-1]["end"], code)
                 self.assert_honest(batches)
 
+    def test_an_unexpected_reader_failure_ends_the_segment_as_a_gap(self):
+        """Seen on kind (API-server restart): an unexpected exception inside a read must never kill a
+        reader silently. The segment ends ``reader_failed``, the recording stays complete and converts."""
+        cluster = FW.FakeCluster(faults={"events": {"crash_after": 1}}, bookmark_interval=0.05)
+        _, acquisitions, batches, _ = self.run_watch(cluster)
+        self.assertEqual(acquisitions["k8s.events"]["segments"][-1]["end"], "reader_failed")
+        self.assert_honest(batches)
+
+    def test_the_https_stream_reports_any_read_failure_as_unavailable(self):
+        class Response:
+            def readline(self, limit):
+                raise AttributeError("'NoneType' object has no attribute 'close'")
+
+        with self.assertRaises(cl.CollectorError) as ctx:
+            cl.Stream(None, Response()).readline(10)
+        self.assertEqual(ctx.exception.code, "unavailable")
+
     def test_the_event_limit_truncates(self):
         cluster = FW.FakeCluster(bookmark_interval=0.08)
         steps = [lambda: cluster.touch("pods", n) for n in range(6)]

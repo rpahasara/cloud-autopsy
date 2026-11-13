@@ -124,6 +124,12 @@ class _Resource:
     def run_reader(self):
         try:
             self._read()
+        except Exception:  # noqa: BLE001 -- never a silent thread death: the segment ends as a gap
+            with self.shared.lock:
+                ended = not self.entries or self.entries[-1]["type"] == "end" or (
+                    self.entries[-1]["type"] == "list" and not self.segment_open)
+            if self.segment and not ended:
+                self._end("reader_failed")
         finally:
             self.segment_open = False
             self.done.set()

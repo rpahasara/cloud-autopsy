@@ -155,6 +155,8 @@ class FakeStream:
         if f.get("eof_after") is not None and n >= f["eof_after"]:
             f.pop("eof_after")
             return b""
+        if f.get("crash_after") is not None and n >= f["crash_after"]:
+            raise AttributeError("'NoneType' object has no attribute 'close'")  # as http.client did on kind
         if f.get("eof_every") and n >= f["eof_every"]:
             return b""  # the server ends every watch after this many lines (like timeoutSeconds)
         if f.get("garbage_after") is not None and n >= f["garbage_after"]:

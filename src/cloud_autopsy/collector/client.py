@@ -115,6 +115,9 @@ class Stream:
             raise CollectorError("timeout") from None
         except (ssl.SSLError, ConnectionError, OSError, ValueError, http.client.HTTPException):
             raise CollectorError("unavailable") from None
+        except Exception:  # noqa: BLE001 -- seen on kind: http.client's chunked reader raised AttributeError
+            # when the API server restarted mid-chunk. Any failure while reading is "unavailable".
+            raise CollectorError("unavailable") from None
 
     def close(self):
         """Close from any thread: unblocks a pending ``readline``."""
