@@ -8,6 +8,12 @@
   kind_checks.py run   --out DIR --token-file TOKEN --expect consistent|truncated|denied|unavailable
       Checks a collector run: outcomes, fail-closed batches (never complete/empty, zero verified
       coverage), honest abstention, and that no planted value or the token appears in anything written.
+  kind_checks.py watch ... --rule-profile 2
+      CA-P2-005b: the run pins rule profile 2 (timeline rules 0.2) in its plan and report; every observed
+      bracket is on the session's own clock (ca-collector-<session_id>); converting twice is identical.
+  kind_checks.py sessions --out DIR --out DIR
+      Two real runs have different generated session identities and clock domains, and no observed
+      bracket of one is on the other's clock.
   kind_checks.py db    --json FILE
       Checks the database-verified creation output: verified, byte-identical, abstained.
   kind_checks.py rbac  ... --watch-role
@@ -35,6 +41,7 @@ sys.path.insert(0, str(REPO / "src"))
 from cloud_autopsy.app import bundle as B  # noqa: E402
 from cloud_autopsy.app import create as C  # noqa: E402
 from cloud_autopsy.app import k8s_watch_recording as W  # noqa: E402
+from cloud_autopsy.contracts.canonical import canonical_bytes  # noqa: E402
 from cloud_autopsy.collector import client as cl  # noqa: E402
 from cloud_autopsy.contracts import acquisition as acq  # noqa: E402
 from cloud_autopsy.contracts import frozen_input as fi  # noqa: E402
@@ -220,6 +227,24 @@ def watch(args):
     if leaks:
         fail(f"planted or secret values written: {leaks}")
     conversion = W.verify_bundle(out / "recording", out / "bundle")  # replay: byte-identical
+    manifest = json.loads((out / "recording" / "recording.json").read_bytes())
+    session, domain = manifest["session_id"], manifest["clocks"]["collector"]["clock_domain_id"]
+    if not W.SESSION_ID.fullmatch(session) or domain != f"ca-collector-{session}":
+        fail("the recording does not carry a generated session identity and its own clock")
+    plan = json.loads((out / "bundle" / "plan.json").read_bytes())
+    pinned = plan["rule_versions"]["timeline-rules"]
+    expected = {1: "ca-timeline-rules/0.1-provisional", 2: "ca-timeline-rules/0.2-provisional"}[args.rule_profile]
+    if pinned != expected or conversion.report["rule_profile"] != args.rule_profile:
+        fail(f"the bundle pins {pinned}, expected rule profile {args.rule_profile}")
+    again = W.K.convert(out / "recording", W.ev.KIND_REGISTRY_VERSION_V3, rule_profile=args.rule_profile)
+    if [canonical_bytes(r) for r in again.batch_records] != [canonical_bytes(r) for r in conversion.batch_records]:
+        fail("converting the recording twice differs")
+    observed_domains = {t["clock_domain_id"] for r in conversion.batch_records for o in r["observations"]
+                        for t in o["times"] if t["timestamp_kind"] == "observed"}
+    if observed_domains - {domain}:
+        fail(f"observed brackets on another clock: {sorted(observed_domains - {domain})}")
+    print(f"session {session}: clock {domain}; rule profile {args.rule_profile} ({pinned}); "
+          f"observed brackets on {len(observed_domains)} clock(s); deterministic conversion")
     acquisitions = {a["query_id"]: a for a in conversion.report["acquisitions"]}
     print("acquisitions:", {q: (a["outcomes"], a["verified_coverage_ms"], [s.get("end") for s in a["segments"]],
                                 a["withheld"], a["unconverted"]) for q, a in acquisitions.items()})
@@ -268,6 +293,25 @@ def watch(args):
           "replay byte-identical; abstained; no planted value, token, continue token or event text written")
 
 
+def sessions(args):
+    seen = []
+    for out in args.out:
+        manifest = json.loads((Path(out) / "recording" / "recording.json").read_bytes())
+        bundle = Path(out) / "bundle"
+        domains = set()
+        for path in sorted((bundle / "batches").iterdir()):
+            for o in json.loads(path.read_bytes())["observations"]:
+                domains |= {t["clock_domain_id"] for t in o["times"] if t["timestamp_kind"] == "observed"}
+        seen.append((manifest["recording_id"], manifest["session_id"], manifest["clocks"]["collector"]["clock_domain_id"],
+                     domains))
+    (_, s1, d1, o1), (_, s2, d2, o2) = seen
+    if s1 == s2 or d1 == d2:
+        fail("two collection sessions share a session identity or clock")
+    if (o1 & {d2}) or (o2 & {d1}):
+        fail("an observed bracket is on another session's clock")
+    print(f"sessions: {s1} and {s2} are distinct, each with its own clock; no bracket crosses sessions")
+
+
 def db(args):
     rows = json.loads(Path(args.json).read_bytes())
     if len(rows) != 1 or rows[0].get("status") != "ok" or rows[0].get("verified") is not True:
@@ -290,6 +334,9 @@ def main():
     p.add_argument("--token-file", required=True)
     p.add_argument("--expect", required=True, choices=("proven", "denied", "event_limit", "any"))
     p.add_argument("--min-segments", type=int, default=1)
+    p.add_argument("--rule-profile", type=int, choices=(1, 2), default=1)
+    p = sub.add_parser("sessions")
+    p.add_argument("--out", required=True, action="append")
     p = sub.add_parser("run")
     p.add_argument("--out", required=True)
     p.add_argument("--token-file")
@@ -297,7 +344,7 @@ def main():
     p = sub.add_parser("db")
     p.add_argument("--json", required=True)
     args = parser.parse_args()
-    {"rbac": rbac, "run": run, "db": db, "watch": watch}[args.command](args)
+    {"rbac": rbac, "run": run, "db": db, "watch": watch, "sessions": sessions}[args.command](args)
 
 
 if __name__ == "__main__":

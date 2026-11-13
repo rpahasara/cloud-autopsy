@@ -490,6 +490,26 @@ jobs:
           .venv-db/bin/python -I tools/create_investigation.py "$RUNNER_TEMP/run-watch1/bundle" --json > "$RUNNER_TEMP/db-watch.json"
           python -I tests/kind/kind_checks.py db --json "$RUNNER_TEMP/db-watch.json"
 
+      - name: "Run 1b: rule profile 2 (--ordering-rules 0.2) on the real cluster; separate session; database-verified"
+        if: steps.paths.outputs.run == 'true'
+        env:
+          CA_PG_DEMO_PORT: "0"
+        run: |
+          set -eu
+          c() { python -I tools/collect_k8s.py --server "$SERVER" --ca-file "$CRED/ca.crt" --token-file "$CRED/token" --namespace ca-demo --cluster-id ca-kind-synthetic "$@"; }
+          # The same recording ID as run 1 on purpose: the session identity must still differ.
+          c --recording-id ca-watch-run1 --out "$RUNNER_TEMP/run-watch1b" --watch-seconds 90 --probe-interval 5 --final-wait 60 --ordering-rules 0.2 &
+          pid=$!
+          sleep 20
+          "$KUBECTL" -n ca-demo rollout restart deployment/checkout-api
+          "$KUBECTL" -n ca-demo rollout status deployment/checkout-api --timeout=120s
+          wait "$pid"
+          python -I tests/kind/kind_checks.py watch --out "$RUNNER_TEMP/run-watch1b" --token-file "$CRED/token" --expect proven --rule-profile 2
+          python -I tests/kind/kind_checks.py sessions --out "$RUNNER_TEMP/run-watch1" --out "$RUNNER_TEMP/run-watch1b"
+          python -I tools/create_investigation.py --offline "$RUNNER_TEMP/run-watch1b/bundle"
+          .venv-db/bin/python -I tools/create_investigation.py "$RUNNER_TEMP/run-watch1b/bundle" --json > "$RUNNER_TEMP/db-watch1b.json"
+          python -I tests/kind/kind_checks.py db --json "$RUNNER_TEMP/db-watch1b.json"
+
       - name: "Run 2: the API server restarts mid-session (recorded as whatever happened)"
         if: steps.paths.outputs.run == 'true'
         run: |
@@ -533,5 +553,5 @@ jobs:
         if: always() && steps.paths.outputs.run == 'true'
         run: |
           "${KIND:-kind}" delete cluster --name "${CLUSTER:-none}" || true
-          rm -rf "${CRED:-/nonexistent}" "$RUNNER_TEMP"/run-watch* "$RUNNER_TEMP/db-watch.json"
+          rm -rf "${CRED:-/nonexistent}" "$RUNNER_TEMP"/run-watch* "$RUNNER_TEMP/db-watch.json" "$RUNNER_TEMP/db-watch1b.json"
           if docker ps --format '{{.Names}}' | grep -q "${CLUSTER:-none}"; then echo "FAIL: cluster container left behind"; exit 1; fi
