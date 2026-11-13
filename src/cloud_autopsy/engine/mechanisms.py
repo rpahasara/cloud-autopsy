@@ -39,7 +39,7 @@ from decimal import Decimal, InvalidOperation
 
 from ..contracts import canonical
 from ..contracts import timeinterval as ti
-from ..contracts.evidence import KINDS
+from ..contracts.evidence import kinds_for, source_kinds_of
 from . import CATALOG_VERSION
 from .timeline import event_order
 
@@ -92,9 +92,14 @@ class _Context:
         self.logs_by_key = {}
         for log in self.by_kind.get("log_line", []):
             self.logs_by_key.setdefault(_pod_key(log, log.attributes["pod"]), []).append(log)
+        # Which kinds each source kind can produce, from the kind registry the plan pins (CA-P2-005c).
+        # Under 0.1-0.3 this is the 0.1 mapping plus kinds no mechanism needs, so limiting gaps are
+        # unchanged; under 0.4 a ``kubernetes_api`` source also produces ``log_line`` (pods/log), so a
+        # gap on it limits every mechanism that needs logs.
         kinds_by_source_kind = {}
-        for spec in KINDS.values():
-            kinds_by_source_kind.setdefault(spec.source_kind, set()).add(spec.observation_kind)
+        for spec in kinds_for(inp.plan.kind_registry_version).values():
+            for source_kind in source_kinds_of(spec):
+                kinds_by_source_kind.setdefault(source_kind, set()).add(spec.observation_kind)
         self.source_kinds = {s.source_id: kinds_by_source_kind.get(s.source_kind, set())
                              for s in inp.registry.sources}
 
@@ -115,11 +120,18 @@ class _Context:
             hits = [predicate(p) for p in pods]
             if not any(hits):
                 continue
-            if all(hits) and len({p.source_uid for p in pods}) == 1:
+            if all(hits) and len({p.source_uid for p in pods}) == 1 and self._logs_bound_to(key, pods[0].source_uid):
                 trusted.append(key)
             else:
                 ambiguous.append(key)
         return trusted, ambiguous
+
+    def _logs_bound_to(self, key, pod_uid):
+        """CA-P2-005c: a log read through the Kubernetes API (it carries the sequence envelope) names the pod
+        UID it was bound to by the collector. If any such log of this pod name names another UID, the name
+        does not identify one pod, so the key is ambiguous. Logs without the envelope (0.1-0.3) are bound
+        by name only, exactly as before."""
+        return all(log.source_uid == pod_uid for log in self.logs_by_key.get(key, []) if "boot" in log.attributes)
 
     def limiting_gaps(self, mechanism):
         needed = set(MECHANISMS[mechanism]["needs_kinds"])

@@ -21,7 +21,7 @@ from ..contracts import frozen_input as fi
 from ..contracts.evidence import ObservedEvidence
 from ..contracts.plan import RunPlan
 from ..contracts.sources import SourceRegistry
-from ..contracts.evidence import KIND_REGISTRY_VERSION_V3, OBSERVED_TIME
+from ..contracts.evidence import KIND_REGISTRY_VERSION_V3, KIND_REGISTRY_VERSION_V4, OBSERVED_TIME
 from . import rule_profile
 from .clocks import ClockDeclaration, ClockDeclarationError, declare
 
@@ -83,8 +83,11 @@ def build_input(frozen, plan, registry, evidence_records, clock_declaration, exp
     profile = rule_profile(plan.rule_versions)
     if profile is None:
         raise InputError("rule_versions_mismatch", "the plan does not pin exactly one of this engine's rule profiles")
-    if profile == 2 and plan.kind_registry_version != KIND_REGISTRY_VERSION_V3:
-        raise InputError("rule_profile_unsupported", "rule profile 2 needs contract profile 3 (observation kinds 0.3)")
+    # Rule profile 2 needs observed brackets: contract profile 3 (kinds 0.3) or, since CA-P2-005c, contract
+    # profile 4 (kinds 0.4, which adds pod logs read through the Kubernetes API).
+    if profile == 2 and plan.kind_registry_version not in (KIND_REGISTRY_VERSION_V3, KIND_REGISTRY_VERSION_V4):
+        raise InputError("rule_profile_unsupported",
+                         "rule profile 2 needs contract profile 3 or 4 (observation kinds 0.3 or 0.4)")
     root, pages = frozen.root(), frozen.pages()
     fi.verify_full(root, pages, plan, registry, expected_manifest_digest)
 
