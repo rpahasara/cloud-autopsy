@@ -5,7 +5,7 @@
 - A Kubernetes API log line must carry the whole envelope and must never carry free text.
 - A 0.1-shaped ``loki`` line keeps its 0.1 label and its bytes under a 0.4 plan; every 0.4-only shape is
   labelled 0.4 and refused under 0.1-0.3, including a forged relabel.
-- Profile 4 pins kinds 0.4 with acquisition batch 0.2; profiles 1-3 are unchanged.
+- Profile 4 pins kinds 0.4 with acquisition batch 0.3 (M11); profiles 1-3 are unchanged.
 """
 
 import copy
@@ -132,13 +132,15 @@ class KindsV4(unittest.TestCase):
 
 
 class Profile4(unittest.TestCase):
-    def test_profile_4_pins_kinds_0_4_with_batch_0_2(self):
+    def test_profile_4_pins_kinds_0_4_with_batch_0_3(self):
         profile = pl.required_contract_versions(V4)
         self.assertEqual(profile, CONTRACT_PROFILES[3])
         self.assertEqual(profile["observation-kinds"], V4)
-        self.assertEqual(profile["acquisition-batch"], acq.BATCH_VERSION_V2)
-        self.assertEqual({k: v for k, v in profile.items() if k != "observation-kinds"},
-                         {k: v for k, v in CONTRACT_PROFILES[2].items() if k != "observation-kinds"})
+        self.assertEqual(profile["acquisition-batch"], acq.BATCH_VERSION_V3)  # M11
+        drop = ("observation-kinds", "acquisition-batch")
+        self.assertEqual({k: v for k, v in profile.items() if k not in drop},
+                         {k: v for k, v in CONTRACT_PROFILES[2].items() if k not in drop})
+        self.assertIn(acq.BATCH_VERSION_V3, ADDITIONAL_CONTRACT_VERSIONS["acquisition-batch"])
         self.assertIn(V4, ADDITIONAL_CONTRACT_VERSIONS["observation-kinds"])
 
     def test_profiles_1_to_3_are_unchanged(self):
