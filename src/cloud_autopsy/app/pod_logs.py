@@ -256,3 +256,102 @@ def derive(entries, pods, names, p_end_ns):
     out.lines.sort(key=lambda d: (d["uid"], d["container"], d["boot"], d["seq"]))
     out.counts = dict(sorted(out.counts.items()))
     return out
+
+
+# ------------------------------------------------------------------- recording 0.5: strict entry checks
+
+_LOG_ENTRY_KEYS = {
+    "log_open": {"seq", "type", "stream", "pod", "uid", "container", "mode", "sent_ns", "http_status", "error"},
+    "log_line": {"seq", "type", "stream", "received_ns", "line"},
+    "log_partial": {"seq", "type", "stream", "at_ns"},
+    "log_close": {"seq", "type", "stream", "at_ns", "code"},
+    "log_recheck": {"seq", "type", "stream", "sent_ns", "received_ns", "http_status", "uid"},
+}
+_LINE_KEYS = {"ts", "boot", "seq", "synced", "lag_ms", "template", "fields"}
+
+
+class LogEntryError(ValueError):
+    pass
+
+
+def check_line(line):
+    """A recorded sanitized line must be exactly what ``logline.sanitize`` can produce: nothing more."""
+    from ..collector import logline
+    import re
+    if not isinstance(line, dict):
+        raise LogEntryError("a log line must be an object")
+    if set(line) == {"invalid"}:
+        if line["invalid"] not in ("not_bytes", "not_ascii", "timestamp", "too_long", "envelope"):
+            raise LogEntryError("unknown invalid-line code")
+        return
+    if set(line) != _LINE_KEYS:
+        raise LogEntryError("a log line has exactly the sanitized fields")
+    if not isinstance(line["ts"], str) or not re.fullmatch(logline._TS, line["ts"], re.ASCII) \
+            or not isinstance(line["boot"], str) or not re.fullmatch(r"[0-9a-f]{8}", line["boot"], re.ASCII):
+        raise LogEntryError("a log line needs a timestamp and a boot")
+    for key, low in (("seq", 1), ("synced", 0), ("lag_ms", 0)):
+        value = line[key]
+        if key != "seq" and value is None:
+            continue
+        if type(value) is not int or not low <= value <= logline.MAX_SEQ:
+            raise LogEntryError(f"{key} must be an integer in range")
+    if (line["synced"] is None) != (line["lag_ms"] is None):
+        raise LogEntryError("synced and lag_ms come together")
+    template, fields = line["template"], line["fields"]
+    if not isinstance(fields, dict):
+        raise LogEntryError("fields must be an object")
+    if template is None:
+        if fields:
+            raise LogEntryError("an unmatched line carries no fields")
+        return
+    spec = logline._COMPILED.get(template)
+    if spec is None or set(fields) != {k for k, _ in spec} \
+            or not all(isinstance(fields[k], str) and p.fullmatch(fields[k]) for k, p in spec):
+        raise LogEntryError("a matched line carries exactly its template's typed fields")
+
+
+def check_entries(entries):
+    """Validate the recorded ``pod_logs`` stream: shapes, numbering, one open/close per stream, order."""
+    from ..collector import client as cl, podlogs
+    streams = {}
+    for i, e in enumerate(entries, 1):
+        if not isinstance(e, dict) or e.get("type") not in _LOG_ENTRY_KEYS or set(e) != _LOG_ENTRY_KEYS[e["type"]]:
+            raise LogEntryError("a log entry has an unknown type or fields")
+        if e["seq"] != i or type(e["stream"]) is not int or not 1 <= e["stream"] <= 1_000_000:
+            raise LogEntryError("log entries are numbered in order and name their stream")
+        s = streams.setdefault(e["stream"], {"open": False, "close": False, "recheck": False})
+        kind = e["type"]
+        if kind == "log_open":
+            if s["open"] or e["mode"] not in STREAM_MODES or not isinstance(e["pod"], str) \
+                    or not cl.POD_NAME.fullmatch(e["pod"]) or not isinstance(e["container"], str) \
+                    or not cl.CONTAINER_NAME.fullmatch(e["container"]) or not isinstance(e["uid"], str) \
+                    or not 0 < len(e["uid"]) <= 128 or not e["uid"].isprintable():
+                raise LogEntryError("a stream opens once, with a pod, UID, container and mode")
+            if e["http_status"] is not None and (type(e["http_status"]) is not int or not 100 <= e["http_status"] <= 599):
+                raise LogEntryError("http_status must be an HTTP status")
+            if e["error"] is not None and (not isinstance(e["error"], str) or len(e["error"]) > 64):
+                raise LogEntryError("error must be a short code")
+            s["open"] = True
+        elif not s["open"]:
+            raise LogEntryError("a stream's entries follow its open")
+        elif kind == "log_line":
+            if s["close"]:
+                raise LogEntryError("no line after a stream's close")
+            check_line(e["line"])
+        elif kind == "log_close":
+            if s["close"] or e["code"] not in podlogs.CLOSE_CODES:
+                raise LogEntryError("a stream closes once, with a known code")
+            s["close"] = True
+        elif kind == "log_recheck":
+            if not s["close"] or s["recheck"]:
+                raise LogEntryError("a recheck follows the close, once")
+            if e["http_status"] is not None and (type(e["http_status"]) is not int or not 100 <= e["http_status"] <= 599):
+                raise LogEntryError("http_status must be an HTTP status")
+            if e["uid"] is not None and (not isinstance(e["uid"], str) or not 0 < len(e["uid"]) <= 128):
+                raise LogEntryError("uid must be a short string")
+            if e["sent_ns"] > e["received_ns"]:
+                raise LogEntryError("a recheck is received after it is sent")
+            s["recheck"] = True
+    for s in streams.values():
+        if not s["close"]:
+            raise LogEntryError("every stream is closed")

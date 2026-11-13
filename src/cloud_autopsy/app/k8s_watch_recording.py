@@ -106,7 +106,12 @@ END_CODES = ("expired", "denied", "unavailable", "timeout", "rate_limited", "inv
              "rv_invalid", "rv_regression", "namespace_mismatch", "reconnects_exhausted", "relists_exhausted",
              "event_limit", "buffer_limit", "session_end", "signal", "list_failed", "list_truncated",
              "reader_failed", "reader_stalled")
-_PART = re.compile(r"streams/(pods|replicasets|deployments|events)-[0-9]{4}\.json", re.ASCII)
+_PART = re.compile(r"streams/(pods|replicasets|deployments|events|pod_logs)-[0-9]{4}\.json", re.ASCII)
+# CA-P2-004g, recording 0.5: the 0.4 manifest plus ``pod_logs`` and a fifth stream, ``pod_logs``.
+RECORDING_VERSION_V5 = K.RECORDING_VERSION_V5
+LOG_QUERY = "k8s.pods.log"
+RUNTIME_DOMAIN = "k8s-container-runtime"
+ENVELOPE = "CA1"
 _CODE = re.compile(r"[a-z][a-z0-9_]{0,63}", re.ASCII)
 NS_PER_MS = 1_000_000
 MAX_NS = 32_503_680_000 * 10 ** 9  # year 3000: a bound, never a meaning
@@ -141,7 +146,8 @@ def _int(value, where, low=0, high=MAX_NS):
 # ------------------------------------------------------------------------------------- reading
 
 def _manifest(manifest):
-    if not isinstance(manifest, dict) or set(manifest) != _MANIFEST_KEYS:
+    v5 = isinstance(manifest, dict) and manifest.get("contract_version") == RECORDING_VERSION_V5
+    if not isinstance(manifest, dict) or set(manifest) != (_MANIFEST_KEYS | {"pod_logs"} if v5 else _MANIFEST_KEYS):
         raise K.RecordingError("recording_manifest_invalid", "the manifest must have exactly the documented fields")
     if manifest["data_classification"] != "synthetic":
         raise K.RecordingError("recording_classification_refused", "only synthetic recordings are accepted")
@@ -176,9 +182,12 @@ def _manifest(manifest):
         raise K.RecordingError("recording_manifest_invalid", "anchor_wall must be RFC 3339 UTC with nine fraction digits")
     _int(collector["max_drift_ms"], "clocks.collector.max_drift_ms", 0, 10 ** 12)
     streams = manifest["streams"]
+    expected = sorted(list(QUERIES.values()) + (["pod_logs"] if v5 else []))
     if not isinstance(streams, list) or sorted(s.get("resource") if isinstance(s, dict) else None
-                                               for s in streams) != sorted(QUERIES.values()):
-        raise K.RecordingError("recording_manifest_invalid", "streams must list each of the four resources once")
+                                               for s in streams) != expected:
+        raise K.RecordingError("recording_manifest_invalid", "streams must list each resource once")
+    if v5:
+        _pod_log_manifest(manifest["pod_logs"])
     files = []
     for s in streams:
         if set(s) != {"resource", "parts"} or not isinstance(s["parts"], list) or not 1 <= len(s["parts"]) <= MAX_PARTS:
@@ -192,6 +201,25 @@ def _manifest(manifest):
                 raise K.RecordingError("recording_manifest_conflict", "a stream part is listed twice")
             files.append(part["file"])
     return files, parsed.epoch_ns
+
+
+def _pod_log_manifest(section):
+    """The 0.5 ``pod_logs`` section: the pinned template catalog, the envelope and the declared limits."""
+    from ..collector import limits as LIM
+    from ..collector import logline
+    if not isinstance(section, dict) or set(section) != {"catalog", "envelope", "declared_limits", "runtime_clock"}:
+        raise K.RecordingError("recording_manifest_invalid", "pod_logs has exactly the documented fields")
+    if section["catalog"] != {"version": logline.CATALOG_VERSION, "digest": logline.catalog_digest()}:
+        raise K.RecordingError("recording_manifest_invalid", "pod_logs names another template catalog")
+    if section["envelope"] != ENVELOPE or section["runtime_clock"] != {"clock_domain_id": RUNTIME_DOMAIN}:
+        raise K.RecordingError("recording_manifest_invalid", "pod_logs names another envelope or runtime clock")
+    try:
+        declared = LIM.check_declarations(section["declared_limits"])
+    except LIM.LimitDeclarationError as exc:
+        raise K.RecordingError("recording_manifest_invalid", str(exc)) from None
+    if LIM.as_records(declared) != section["declared_limits"]:
+        raise K.RecordingError("recording_manifest_invalid", "declared_limits must be sorted and unique")
+    return declared
 
 
 def _check_layout(root, files):
@@ -230,6 +258,13 @@ def _entries(root, stream):
                 or doc["part"] != n or not isinstance(doc["entries"], list):
             raise _bad("a stream part must name its resource and number")
         entries += doc["entries"]
+    if stream["resource"] == "pod_logs":
+        from . import pod_logs as PL
+        try:
+            PL.check_entries(entries)
+        except PL.LogEntryError as exc:
+            raise _bad(f"pod_logs: {exc}") from None
+        return entries
     for i, entry in enumerate(entries, 1):
         if not isinstance(entry, dict) or entry.get("type") not in _ENTRY_KEYS or set(entry) != _ENTRY_KEYS[entry["type"]]:
             raise _bad("an entry has an unknown type or fields")
@@ -512,18 +547,30 @@ def convert(root, manifest, manifest_sha, rule_profile=1):
         raise K.RecordingError("recording_rules_unsupported", "rule profile must be 1 or 2")
     files, anchor_ns = _manifest(manifest)
     _check_layout(root, files)
+    v5 = manifest["contract_version"] == RECORDING_VERSION_V5
+    kinds = ev.KIND_REGISTRY_VERSION_V4 if v5 else ev.KIND_REGISTRY_VERSION_V3
     collector, server = manifest["clocks"]["collector"], manifest["clocks"]["api_server"]
     domain, server_domain = collector["clock_domain_id"], server["clock_domain_id"]
     ctx = {"namespace": manifest["namespace"], "source_id": manifest["source_id"], "clock": server_domain,
            "rv_pattern": re.compile(r"[1-9][0-9]{0,127}", re.ASCII)}
     if not isinstance(ctx["namespace"], str):
         raise K.RecordingError("recording_manifest_invalid", "namespace must be a string")
-    streams = {s["resource"]: _segments(_absolute(_entries(root, s), anchor_ns), s["resource"], ctx["namespace"])
-               for s in manifest["streams"]}
+    if v5:
+        ctx["declared_limits"] = _pod_log_manifest(manifest["pod_logs"])
+    log_entries = None
+    streams = {}
+    for s in manifest["streams"]:
+        entries = _absolute(_entries(root, s), anchor_ns)
+        if s["resource"] == "pod_logs":
+            log_entries = entries
+        else:
+            streams[s["resource"]] = _segments(entries, s["resource"], ctx["namespace"])
 
     times = [t for segs in streams.values() for s in segs for t in
              [s.listing["sent_ns"], s.listing["last_page_ns"], s.end.get("at_ns")]
              + [e["received_ns"] for e in s.events] + [p["received_ns"] for p in s.probes] if t is not None]
+    for e in log_entries or []:
+        times += [e[k] for k in ("sent_ns", "received_ns", "at_ns") if k in e]
     if not times:
         raise K.RecordingError("recording_manifest_invalid", "a recording has at least one timed entry")
     window = (min(times) // NS_PER_MS, _ceil_ms(max(times)) + 1)
@@ -536,11 +583,16 @@ def convert(root, manifest, manifest_sha, rule_profile=1):
             ti.clock_domain(domain, ti.UNKNOWN, continuity=ti.STEP_DECLARED if collector["step_detected"]
                             else ti.CONTINUOUS).to_record(),
             ti.clock_domain(server_domain, ti.UNKNOWN).to_record()]
+        domains, queries = [domain, server_domain], sorted(QUERIES)
+        if v5:  # the container runtime's own timestamps: a separate domain, declared unknown, never ordered
+            clock_records.append(ti.clock_domain(RUNTIME_DOMAIN, ti.UNKNOWN).to_record())
+            domains.append(RUNTIME_DOMAIN)
+            queries = sorted(queries + [LOG_QUERY])
+        clock_records.sort(key=lambda c: c["clock_domain_id"])
         registry_record = {"contract_version": SOURCE_REGISTRY_VERSION, "registry_id": f"{recording_id}-sources",
                            "sources": [{"source_id": ctx["source_id"], "source_kind": "kubernetes_api",
                                         "cluster_id": manifest["cluster_id"], "namespace": ctx["namespace"],
-                                        "clock_domain_ids": sorted([domain, server_domain]),
-                                        "query_ids": sorted(QUERIES)}]}
+                                        "clock_domain_ids": sorted(domains), "query_ids": queries}]}
         registry = SourceRegistry.from_record(registry_record)
         clocks.declare(registry, clock_records)
     except (ContractError, clocks.ClockDeclarationError) as exc:
@@ -548,9 +600,9 @@ def convert(root, manifest, manifest_sha, rule_profile=1):
     plan_record = {"contract_version": pl.RUN_PLAN_VERSION, "plan_id": recording_id, "registry_id": registry.registry_id,
                    "registry_digest": registry.digest,
                    "window": {"start": K._ms_text(window[0]), "end": K._ms_text(window[1])},
-                   "expected_acquisitions": [{"source_id": ctx["source_id"], "query_id": q, "mandatory": MANDATORY[q]}
-                                             for q in sorted(QUERIES)],
-                   "contract_versions": pl.required_contract_versions(ev.KIND_REGISTRY_VERSION_V3),
+                   "expected_acquisitions": [{"source_id": ctx["source_id"], "query_id": q,
+                                              "mandatory": MANDATORY.get(q, True)} for q in queries],
+                   "contract_versions": pl.required_contract_versions(kinds),
                    "rule_versions": required_rule_versions(rule_profile), "synthesis_mode": "disabled", "limits": dict(LIMITS)}
     try:
         plan = pl.RunPlan.from_record(plan_record, registry)
@@ -575,7 +627,17 @@ def convert(root, manifest, manifest_sha, rule_profile=1):
             for observation in observations:  # the evidence contract, before anything is written
                 ev.observe(observation, source_id=ctx["source_id"], registry=registry,
                            delivery={"query_id": query, "batch_id": "check", "attempt": 1},
-                           kind_registry_version=ev.KIND_REGISTRY_VERSION_V3)
+                           kind_registry_version=kinds)
+        acquisitions.append(entry)
+        batches += records
+    log_report = None
+    if v5:
+        entry, records, log_report = _log_acquisition(plan, ctx, domain, streams["pods"], log_entries, window)
+        for record in records:
+            for observation in record["observations"]:
+                ev.observe(observation, source_id=ctx["source_id"], registry=registry,
+                           delivery={"query_id": LOG_QUERY, "batch_id": "check", "attempt": 1},
+                           kind_registry_version=kinds)
         acquisitions.append(entry)
         batches += records
     for record in batches:
@@ -585,7 +647,7 @@ def convert(root, manifest, manifest_sha, rule_profile=1):
             raise K.RecordingError("recording_conversion_invalid", exc.code) from None
     verified = sum(a["verified_coverage_ms"] for a in acquisitions)
     report = {"contract_version": REPORT_VERSION, "recording_id": recording_id, "recording_sha256": manifest_sha,
-              "recording_version": RECORDING_VERSION, "kind_registry_version": ev.KIND_REGISTRY_VERSION_V3,
+              "recording_version": manifest["contract_version"], "kind_registry_version": kinds,
               "bundle_id": recording_id, "source_id": ctx["source_id"], "cluster_id": manifest["cluster_id"],
               "namespace": ctx["namespace"], "plan_digest": plan.digest, "session_id": manifest["session_id"],
               "collector_clock": {"clock_domain_id": domain, "step_detected": collector["step_detected"],
@@ -597,6 +659,8 @@ def convert(root, manifest, manifest_sha, rule_profile=1):
                        "consistent-read probe that the watch later reached; bookmarks, events or an open connection "
                        "alone cover nothing. Withheld or unconverted changes make a segment partial "
                        "(changes_withheld). Every other period is a gap.")}
+    if log_report is not None:
+        report["pod_logs"] = log_report
     canonical.canonical_bytes(report)
     return K.Conversion(recording_id, registry_record, plan_record, tuple(clock_records), tuple(batches), report)
 
@@ -687,6 +751,83 @@ def _acquisition(plan, ctx, domain, session_id, query, resource, segments, state
     return entry, records
 
 
+def _pod_facts(segments):
+    """What the Pod watch says about each pod and name (plan section 5), for the log derivation."""
+    pods, names = {}, {}
+
+    def seen(item, at, kind, created_lower=None):
+        meta = item.get("metadata") or {}
+        uid, name = meta.get("uid"), meta.get("name")
+        if not isinstance(uid, str) or not isinstance(name, str):
+            return
+        containers = sorted({c.get("name") for c in (item.get("spec") or {}).get("containers") or []
+                             if isinstance(c, dict) and isinstance(c.get("name"), str)})
+        restarts = sum(s.get("restartCount", 0) for s in (item.get("status") or {}).get("containerStatuses") or []
+                       if isinstance(s, dict) and type(s.get("restartCount")) is int)
+        pod = pods.get(uid)
+        if pod is None:
+            pod = pods[uid] = {"name": name, "containers": containers, "created_lower_ns": created_lower,
+                               "restarts_first": restarts, "restarts_max": restarts, "deleted": False}
+        pod["containers"] = sorted(set(pod["containers"]) | set(containers))
+        pod["restarts_max"] = max(pod["restarts_max"], restarts)
+        if kind == "DELETED":
+            pod["deleted"] = True
+        names.setdefault(name, []).append((at, uid, kind))
+
+    p_end = None
+    for segment in segments:
+        listing = segment.listing
+        if listing["outcome"] not in ("consistent", "truncated"):
+            continue
+        for item in listing["items"]:
+            seen(item, listing["last_page_ns"], "LISTED")
+        for event in segment.events:
+            if event["object"] is None:
+                continue
+            lower = _lower_bound(segment, event["resource_version"]) if event["event"] == "ADDED" else None
+            seen(event["object"], event["received_ns"], event["event"], lower)
+        probe, _ = _proof(segment)
+        if probe is not None:
+            p_end = probe["sent_ns"] if p_end is None else max(p_end, probe["sent_ns"])
+    return pods, {k: sorted(v) for k, v in names.items()}, p_end
+
+
+def _log_acquisition(plan, ctx, domain, pod_segments, log_entries, window):
+    """The ``k8s.pods.log`` acquisition (CA-P2-004g): evidence lines, and their coverage as derived.
+
+    The acquisition-batch contract (0.2) lets only a ``watch_continuity`` basis make a batch complete, and
+    log coverage is not watch continuity. So until a batch version with a log-continuity basis exists,
+    every log batch is ``partial`` / ``continuity_unproven`` -- a limiting gap, and the investigation
+    abstains -- even when the derivation proves continuity (``coverage_proven`` in the report)."""
+    from . import pod_logs as PL
+    pods, names, p_end = _pod_facts(pod_segments)
+    derived = PL.derive(log_entries, pods, names, p_end if p_end is not None else MAX_NS)
+    observations = []
+    for line in derived.lines:
+        times = [{"timestamp_kind": "event", "raw": line["ts"], "clock_domain_id": RUNTIME_DOMAIN,
+                  "declared_precision_ns": None}]
+        if line["lower_ns"] is not None:
+            times.append(_observed(line["lower_ns"], line["upper_ns"], domain))
+        version = f"{line['boot']}.{line['seq']}"
+        observations.append(K._observation(
+            "log_line", f"k8s:pods/log/{ctx['namespace']}/{line['pod']}/{line['container']}#{version}", line["uid"],
+            version, "Pod", ctx["namespace"], line["pod"], times,
+            {"pod": line["pod"], "template": line["template"], "fields": line["fields"],
+             "container": line["container"], "boot": line["boot"], "seq": line["seq"]}))
+    plans = [(acq.PARTIAL, "continuity_unproven", window, observations, None, None, False)]
+    records = _records(plan, ctx, LOG_QUERY, "pods-log", plans)
+    entry = {"query_id": LOG_QUERY, "resource": "pod_logs", "segments": [], "verified_coverage_ms": 0,
+             "observations": len(observations), "withheld": {}, "unconverted": {},
+             "outcomes": sorted({r["outcome"] for r in records})}
+    report = {"coverage_proven": not derived.gaps, "gaps": [list(g) for g in derived.gaps],
+              "instances": derived.instances, "streams": {str(k): v for k, v in sorted(derived.streams.items())},
+              "counts": derived.counts, "p_end_known": p_end is not None,
+              "batch_note": ("Acquisition batch 0.2 has no log-continuity basis, so every log batch is partial "
+                             "(continuity_unproven) and limits the investigation, even when coverage_proven is "
+                             "true. A batch version with such a basis needs approval.")}
+    return entry, records, report
+
+
 def _records(plan, ctx, query, stem, plans):
     per_batch = LIMITS["max_observations_per_batch"]
     records, before, n = [], None, 0
@@ -732,7 +873,13 @@ def bundle_rule_profile(bundle_dir):
 def verify_bundle(recording_dir, bundle_dir):
     """Replay check: re-derive the bundle from the recording, under the rule profile the bundle pins,
     and require byte-identical files."""
-    conversion = K.convert(recording_dir, ev.KIND_REGISTRY_VERSION_V3, rule_profile=bundle_rule_profile(bundle_dir))
+    try:
+        manifest = canonical.loads(B._read(Path(recording_dir) / K.MANIFEST, K.MAX_MANIFEST_BYTES))
+    except (B.BundleError, ContractError):
+        raise K.RecordingError("replay_mismatch", "the recording has no readable manifest") from None
+    kinds = ev.KIND_REGISTRY_VERSION_V4 if isinstance(manifest, dict) and \
+        manifest.get("contract_version") == RECORDING_VERSION_V5 else ev.KIND_REGISTRY_VERSION_V3
+    conversion = K.convert(recording_dir, kinds, rule_profile=bundle_rule_profile(bundle_dir))
     import tempfile
     with tempfile.TemporaryDirectory(prefix="ca-replay-") as tmp:
         fresh = Path(tmp) / "bundle"

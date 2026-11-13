@@ -170,8 +170,9 @@ def run(config, out_dir, transport=None, wall_ms=None, monotonic=None):
 
 # ------------------------------------------------------------------------- CA-P2-004f: watch
 
-def watch_recording_files(config, entries, clock, step_threshold_ms=250, session_id=None):
-    """{relative path: bytes} of the 0.4 recording: the manifest and canonical stream parts."""
+def watch_recording_files(config, entries, clock, step_threshold_ms=250, session_id=None, declared_limits=()):
+    """{relative path: bytes} of the 0.4 recording (0.5 when ``entries`` has ``pod_logs``, CA-P2-004g):
+    the manifest and canonical stream parts."""
     files, streams = {}, []
     for resource in sorted(entries):
         parts, current, size = [], [], 0
@@ -194,7 +195,9 @@ def watch_recording_files(config, entries, clock, step_threshold_ms=250, session
             files[rel] = data
             listed.append({"file": rel, "sha256": hashlib.sha256(data).hexdigest()})
         streams.append({"resource": resource, "parts": listed})
-    manifest = {"contract_version": K.RECORDING_VERSION_V4, "recording_id": config.recording_id,
+    logs = "pod_logs" in entries
+    manifest = {"contract_version": K.RECORDING_VERSION_V5 if logs else K.RECORDING_VERSION_V4,
+                "recording_id": config.recording_id,
                 "data_classification": "synthetic", "provenance": "collector", "source_id": config.source_id,
                 "cluster_id": config.cluster_id, "namespace": config.namespace, "session_id": session_id,
                 "rv_comparison": W.rv.RV_COMPARISON,
@@ -204,6 +207,12 @@ def watch_recording_files(config, entries, clock, step_threshold_ms=250, session
                                          "step_detected": clock.max_drift_ms > step_threshold_ms},
                            "api_server": {"clock_domain_id": CLOCK_DOMAIN}},
                 "streams": streams}
+    if logs:
+        from . import limits as LIM
+        from . import logline
+        manifest["pod_logs"] = {"catalog": {"version": logline.CATALOG_VERSION, "digest": logline.catalog_digest()},
+                                "envelope": W.ENVELOPE, "declared_limits": LIM.as_records(declared_limits),
+                                "runtime_clock": {"clock_domain_id": W.RUNTIME_DOMAIN}}
     files[K.MANIFEST] = _bytes(manifest)
     return files
 
@@ -224,27 +233,35 @@ def watch_report(config, wconfig, conversion, counts):
 
 
 def run_watch(config, wconfig, out_dir, transport=None, clock=None, stop=None, on_signal=None, session_id=None,
-              rule_profile=1):
+              rule_profile=1, pod_logs=None, declared_limits=()):
     """One list + watch session into a new ``out_dir``: ``recording/``, ``bundle/`` and ``report.json``.
 
     ``session_id`` is generated here, once per collection (``new_session_id``); tests may pass one."""
     config.check()
     wconfig.check()
     session_id = session_id or new_session_id()
+    from . import limits as LIM
+    try:
+        declared_limits = LIM.check_declarations(declared_limits)
+    except LIM.LimitDeclarationError:
+        raise cl.CollectorError("declared_limits_invalid") from None
+    if declared_limits and pod_logs is None:
+        raise cl.CollectorError("declared_limits_need_pod_logs")  # values are read only for recording 0.5
     transport = transport or cl.HttpsTransport(config.server, config.ca_file, config.token_file, config.timeout_s)
     entries, clock, counts = wt.run_session(transport, config.namespace, wconfig, clock=clock, stop=stop,
-                                            on_signal=on_signal)
+                                            on_signal=on_signal, pod_logs=pod_logs, limits=declared_limits)
     out = Path(out_dir)
     out.mkdir(parents=False, exist_ok=False)
     recording = out / "recording"
     recording.mkdir()
     if not isinstance(session_id, str) or not W.SESSION_ID.fullmatch(session_id):
         raise cl.CollectorError("session_id_invalid")
-    files = watch_recording_files(config, entries, clock, wconfig.step_threshold_ms, session_id)
+    files = watch_recording_files(config, entries, clock, wconfig.step_threshold_ms, session_id, declared_limits)
     for rel, data in sorted(files.items()):
         (recording / rel).parent.mkdir(exist_ok=True)
         _write_new(recording / rel, data)
-    conversion = K.convert(recording, ev.KIND_REGISTRY_VERSION_V3, rule_profile=rule_profile)
+    kinds = ev.KIND_REGISTRY_VERSION_V4 if pod_logs is not None else ev.KIND_REGISTRY_VERSION_V3
+    conversion = K.convert(recording, kinds, rule_profile=rule_profile)
     conversion.write_bundle(out / "bundle")
     W.verify_bundle(recording, out / "bundle")  # the bundle is exactly the recording's derivation
     doc = watch_report(config, wconfig, conversion, counts)

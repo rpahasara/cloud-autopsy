@@ -99,6 +99,7 @@ SNAPSHOT_INSTANT, DECLARED_WINDOW = "snapshot_instant", "recorder_declared_windo
 CLIENT_BRACKET = "client_bracket"
 RECORDING_VERSION_V3 = "ca-k8s-recording/0.3-provisional"   # collector provenance (CA-P2-004e)
 RECORDING_VERSION_V4 = "ca-k8s-recording/0.4-provisional"   # collector list + watch (CA-P2-004f)
+RECORDING_VERSION_V5 = "ca-k8s-recording/0.5-provisional"   # 0.4 plus pod logs (CA-P2-004g)
 RESOURCES = {  # resource -> (accepted apiVersions, list kind, item kind)
     "pods": (("v1",), "PodList", "Pod"),
     "replicasets": (("apps/v1",), "ReplicaSetList", "ReplicaSet"),
@@ -836,14 +837,16 @@ def convert(directory, kind_registry_version=ev.KIND_REGISTRY_VERSION, rule_prof
     recording. Raises ``RecordingError`` when the recording is refused."""
     if kind_registry_version not in ev.KIND_REGISTRIES:
         raise RecordingError("recording_kinds_unsupported", "unsupported observation-kind registry version")
-    if kind_registry_version == ev.KIND_REGISTRY_VERSION_V4:  # CA-P2-002e: no recording produces pod logs yet
-        raise RecordingError("recording_kinds_unsupported", "observation kinds 0.4 has no recording converter yet")
     root = Path(os.path.abspath(directory))
     manifest, manifest_sha = _read_manifest(root)
-    watch = isinstance(manifest, dict) and manifest.get("contract_version") == RECORDING_VERSION_V4
-    if (kind_registry_version == ev.KIND_REGISTRY_VERSION_V3) != watch:
+    version = manifest.get("contract_version") if isinstance(manifest, dict) else None
+    watch = version in (RECORDING_VERSION_V4, RECORDING_VERSION_V5)
+    if (kind_registry_version == ev.KIND_REGISTRY_VERSION_V3) != (version == RECORDING_VERSION_V4):
         raise RecordingError("recording_kinds_unsupported", "observation kinds 0.3 is used with, and only with, a "
                                                             "ca-k8s-recording/0.4-provisional (watch) recording")
+    if (kind_registry_version == ev.KIND_REGISTRY_VERSION_V4) != (version == RECORDING_VERSION_V5):
+        raise RecordingError("recording_kinds_unsupported", "observation kinds 0.4 is used with, and only with, a "
+                                                            "ca-k8s-recording/0.5-provisional (pod logs) recording")
     if watch:  # CA-P2-004f: list + watch recordings have their own converter
         from . import k8s_watch_recording
         return k8s_watch_recording.convert(root, manifest, manifest_sha, rule_profile)
