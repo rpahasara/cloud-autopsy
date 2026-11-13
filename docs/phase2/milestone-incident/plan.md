@@ -2,6 +2,7 @@
 
 **Status:**
 - **Revision 3** corrects M10 ([§4.9](#timing)): no assumed delay is used for ordering.
+- **Revision 3.1** records two findings from CA-P2-004g: proven log coverage needs a new acquisition-batch version (**M11**, needs approval), and the BusyBox image cannot pass the license policy without an approved review (**M8** is therefore implemented with `python:3.13-slim`, the alternative revision 1 named).
 - **Revision 2.** The overall direction of M1–M9 was approved on condition that log continuity, pod identity, RBAC and environment handling, and the evaluation thresholds were corrected. This revision makes those corrections ([§2](#decisions), [§4](#collection), [§5](#identity), [§6](#rbac), [§10](#evaluation)) and records why they do not widen scope ([§13](#scope)).
 - It is a planning artifact, not a gate disposition, a specialist approval or a production-readiness claim.
 
@@ -49,8 +50,9 @@ Approved in direction, with the revision-2 corrections:
 | M5 | Observation kinds **0.4**, migration **`0009`**, recording **0.5** | **Narrowed.** `log_line` under kinds 0.4 belongs to the existing source kind `kubernetes_api`, because `pods/log` *is* a Kubernetes API subresource. No source-registry or batch-contract change ([§13](#scope)) |
 | M6 | No new mechanism and no new ordering rule. Profile 2 also accepts kinds 0.4 | Plus: the engine maps kinds to source kinds through the **pinned** registry, which matters once `log_line` has two source kinds ([§11](#slices)) |
 | M7 | ConfigMap values stay unread | Unchanged |
-| M8 | CI-only, digest-pinned `busybox` workload image | Unchanged |
+| M8 | CI-only, digest-pinned `busybox` workload image | **Revision 3.1.** BusyBox is GPL-2.0. The repository policy (`tools/supply_chain`) refuses any copyleft component, including a CI-only one, without an approved specialist license review, which only the product owner or licensing reviewer can record. CA-P2-004g therefore uses `python:3.13.9-slim` (PSF-2.0), pinned by digest and inventoried `ci-only`, running a standard-library workload. Reverting to BusyBox needs that approval record |
 | M9 | Development-set harness with sealed truth and a product scorer | Thresholds fixed ([§10](#evaluation)) |
+| **M11** | **New, needs approval (revision 3.1).** Acquisition batch **0.3**: batch 0.2 plus a second coverage basis kind, `log_sequence_continuity`, for `complete` and `empty` log batches. Its anchors are the instance's verified `STARTED` and either its `STOPPED` or a handshake-established line written after the final probe. As with `watch_continuity`, the converter derives the basis from the recording and checks it again on replay. Contract profile 4 would then pin batch 0.3, and migration `0009` would add its supported-version row and widen the batch version check (both are still unmerged) | Approve. Without it, every log batch must stay `partial`, so every run abstains, even when the derivation proves coverage. CA-P2-004g implements exactly that fail-closed state |
 | **M10** | **Revision 3, corrected.** No assumed runtime delay (δ) is used to build any bracket. A log line's lower bound comes only from a **protocol guarantee**: the pod's own creation, or the workload's **write-after-append handshake** ([§4.9](#timing)). Without one of these, the line keeps its evidence, but its time cannot be ordered against the rollout | δ = 2 s was not approved as a guarantee. It now appears only in sensitivity tests, which show why it is unsafe |
 
 ## 3. <a id="incident"></a>The synthetic incident
@@ -385,7 +387,7 @@ Each slice is a separate draft PR, stacked in order. Regression tests are writte
 
 **Narrower than revision 1:**
 - **No source-registry change.** Adding a source kind would have needed `ca-source-registry/0.2`. Instead, `log_line` under kinds 0.4 uses the existing `kubernetes_api` source kind.
-- **No batch-contract change.** Log batches use `coverage_basis: null`. Their continuity is proven from the recorded envelope and re-derived by the converter on every verification, and any shortfall is a gap.
+- **Correction (revision 3.1): a batch-contract change *is* needed.** Revision 2 claimed that log batches could use `coverage_basis: null`. That is wrong: under batch 0.2, a `complete` or `empty` batch needs a `watch_continuity` basis, so a null basis can only mark a batch `partial`. This is a limiting gap, and the investigation abstains. Proven log coverage therefore needs batch 0.3 with a log-continuity basis (**M11**). Until it is approved, CA-P2-004g records log batches as `partial` / `continuity_unproven`, and reports separately whether the derivation proved coverage.
 
 **Inside the already approved slices:**
 - **New mechanics.** The envelope, the stream rotation and the identity checks are workload, collector and converter work in CA-P2-004g and CA-P2-007a.
