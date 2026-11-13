@@ -114,3 +114,41 @@ After the second integration, the product owner approved a repository ruleset fo
 **Effect on integration:** a plain, non-force fast-forward of `main` stays possible, once both required checks have passed on the commit being integrated, as they do on its PR branch. History on `main` cannot be rewritten or deleted.
 
 **Scope:** this is repository governance chosen by the product owner. It is not a production authorization, a security approval, a gate disposition or a production-readiness claim.
+
+## Third integration: PRs #35–#39 (2026-11-13)
+
+**Decision (2026-11-13):** the product owner authorized integrating CA-P2-004f (continuous watch collection), CA-P2-005b (observed-ordering rules) and their plans and records into `main`. As before, this is a solo product-owner decision about repository history, not a gate disposition, specialist approval or production-readiness claim.
+
+**Included:**
+
+| PR | Branch | Head |
+|---|---|---|
+| #35 | `docs/second-integration-record` | `0d85ffe` |
+| #36 | `phase2/ca-p2-004f-plan` | `083d186` |
+| #37 | `phase2/ca-p2-004f-watch` | `ceeff9a` |
+| #38 | `phase2/ca-p2-005b-plan` | `f0cc1ed` |
+| #39 | `phase2/ca-p2-005b-ordering` | `7ea6022` |
+
+**Method:**
+- `integration/004f-005b` started at #39's head (which already contained #37's head) and merged #38, #36 and #35 with `--no-ff` merge commits, all clean. No rebase, squash or force-push; every original SHA is preserved.
+- Draft PR #40 ran CI on the exact integration commit; after it passed, #38 and #39 were retargeted to `main`, and `main` was moved with a plain, non-force fast-forward (`d19893d..9351762`) under ruleset `27133931`. GitHub records #35–#40 as merged.
+
+**Preserved references:** annotated tags `ca/pr-35-0d85ffe`, `ca/pr-36-083d186`, `ca/pr-37-ceeff9a`, `ca/pr-38-f0cc1ed`, `ca/pr-39-7ea6022` and `ca/main-before-integration-d19893d` (no existing tag was overwritten), and a verified `git bundle` of all refs kept outside the repository. No branch was deleted.
+
+**Checks before the push** (on `9351762`):
+- all five PR heads, the previous `main` and the frozen candidate `c21b50d` are ancestors;
+- `git diff c21b50d 9351762 -- prototype` is empty, and `verify-fixtures` passes with all three truth pins;
+- the six pinned result digests in `tests/engine/test_cross_scope.py` are unchanged, and the engine suite that asserts them passes;
+- migrations `0001`–`0007` are unchanged; `0008` is the authorized CA-P2-004f addition;
+- locally: documentation validators, contract (216), engine (57), app (66) and collector (75) suites pass;
+- CI run `43387651633` (pull request #40): `offline-checks`, `db-integration`, `collector-kind` and `collector-watch-kind` all passed, including the rule-profile-2 session on the disposable kind cluster.
+
+**Checks after the push:**
+- `origin/main` is `9351762`, and every `ca/*` tag except `ca/pr-14-890a03d` is reachable from it;
+- ruleset `27133931` is still active, with no bypass actors and the same three rules;
+- CI run `43388920581` (push to `main`): `offline-checks` and `db-integration` passed; the collector jobs do not run on pushes by design;
+- CI run `43389662036` (manual dispatch on `main`): all four jobs passed. The watch job recorded five sessions, each with its own clock, one of them under rule profile 2; every investigation abstained, and the database runs verified on read.
+
+**Final SHA of `main`:** `9351762436df5417a5b46aa03cbdd913be04c204`.
+
+**PR #14** is still not part of any integration. It stays a separate, unmerged draft on `spike/ca-scenario-001`.
