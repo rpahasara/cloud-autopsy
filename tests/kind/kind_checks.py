@@ -252,9 +252,21 @@ def logs(args):
         fail("no POOL_EXHAUSTED line was collected")
     if any("message" in o["attributes"] for o in symptoms):
         fail("a log line carries free text")
-    log_batches = {(b["outcome"], b["reason"]) for b in batches if b["query_id"] == W.LOG_QUERY}
-    if log_batches != {("partial", "continuity_unproven")}:
-        fail(f"log batches must stay partial under batch 0.2: {log_batches}")
+    log_batches = [b for b in batches if b["query_id"] == W.LOG_QUERY]
+    clean = [b for b in log_batches if b["outcome"] in ("complete", "empty")]
+    if not report["basis_emitted"] or not clean:
+        fail(f"proven log coverage must be a complete batch with a log basis (batch 0.3): {report['not_emitted_because']}")
+    basis = clean[0]["coverage_basis"]
+    if basis["kind"] != "log_sequence_continuity" or basis["session_id"] != manifest["session_id"]             or basis["clock_domain_id"] != session_domain or len(basis["instances"]) != len(instances):
+        fail("the log basis does not bind this session, its clock and every instance")
+    if any(b["coverage_basis"] and b["coverage_basis"]["kind"] != "watch_continuity"
+           for b in batches if b["query_id"] != W.LOG_QUERY):
+        fail("a non-log batch carries a log basis")
+    if any(o["observation_kind"] == "log_line" for b in batches if b["query_id"] != W.LOG_QUERY for o in b["observations"]):
+        fail("a log line outside the log acquisition")
+    print(f"log batches: {sorted({(b['outcome'], b['reason']) for b in log_batches}, key=str)}; basis instances "
+          f"{len(basis['instances'])} ({sorted({i['ending'] for i in basis['instances']})}); "
+          f"coverage {clean[0]['coverage']}")
 
     def bracket(o):
         t = next((t for t in o["times"] if t["timestamp_kind"] == "observed"), None)
@@ -273,12 +285,25 @@ def logs(args):
           f"{len(ordered)} strictly after the rollout bracket {r}")
     if args.expect_ordered and not ordered:
         fail("no symptom bracket lies strictly after the rollout bracket")
-    inv = C.investigate_offline(B.load(out / "bundle"))
+    loaded = B.load(out / "bundle")
+    inv = C.investigate_offline(loaded)
     outcome = inv.result["outcome"]
-    if outcome["status"] != "abstained" or "limiting_evidence_gaps" not in outcome["reasons"]:
-        fail(f"expected an abstention with limiting_evidence_gaps under batch 0.2, got {outcome}")
-    print(f"logs: ok; replay byte-identical; coverage proven; abstained ({', '.join(outcome['reasons'])}); "
-          "no planted value, log text, token or event text written")
+    by_query = {}
+    for g in inv.result["gaps"]:
+        key = (g.get("query_id"), g.get("subject"), ",".join(g.get("reasons") or []))
+        by_query[key] = by_query.get(key, 0) + 1
+    log_gaps = [k for k in by_query if k[0] == W.LOG_QUERY]
+    print("remaining gaps (query, subject, reasons): count")
+    for key, n in sorted(by_query.items(), key=str):
+        print(f"  {key}: {n}")
+    # The log proof itself is gap-free (checked above). Gaps that remain on the log acquisition come from the
+    # plan window reaching past the Pod watch anchors (coverage holes) and from lines received after the
+    # final probe (a partial tail batch); they are reported, never hidden, and they are not log-proof gaps.
+    print(f"log acquisition gaps outside the proof (window edges, tail): {sum(by_query[k] for k in log_gaps)}")
+    if outcome["status"] == "resolved":
+        print(f"RESOLVED: {outcome}")
+    print(f"logs: ok; replay byte-identical; log coverage proven as batch 0.3; outcome {outcome['status']} "
+          f"({', '.join(outcome.get('reasons') or [])}); no planted value, log text, token or event text written")
 
 
 def scan(out, token):

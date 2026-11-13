@@ -2,8 +2,9 @@
 
 Checks: the recording is 0.5 and re-derives byte-identically; continuity is proven only when every line
 from seq 1 arrived and the tail is covered; faults (denied, dropped line, disconnect, name reuse, garbage,
-partial line) become gaps; planted log and env values never reach any written file; and log batches stay
-partial (``continuity_unproven``) under acquisition batch 0.2, so investigations abstain.
+partial line) become gaps and keep every log batch partial; proven coverage is a complete batch with a
+``log_sequence_continuity`` basis (batch 0.3, M11) that a forged claim cannot pass on replay; planted log and env
+values never reach any written file.
 """
 
 import json
@@ -54,34 +55,64 @@ class Base(unittest.TestCase):
 
 
 class Clean(Base):
-    def test_a_clean_session_proves_continuity_but_the_batch_stays_partial(self):
+    def clean(self):
         cluster = FL.LogCluster()
-        report = self.run_session(cluster, [lambda: cluster.spawn("checkout-api-7c9f8-c1", UID_A),
-                                            lambda: setattr(cluster.workloads[UID_A], "symptom", True),
-                                            lambda: cluster.spawn("checkout-api-7c9f8-c2", UID_B),
-                                            lambda: cluster.stop(UID_B)])
+        return self.run_session(cluster, [lambda: cluster.spawn("checkout-api-7c9f8-c1", UID_A),
+                                          lambda: setattr(cluster.workloads[UID_A], "symptom", True),
+                                          lambda: cluster.spawn("checkout-api-7c9f8-c2", UID_B),
+                                          lambda: cluster.stop(UID_B)])
+
+    def test_proven_log_coverage_is_a_complete_batch_with_a_log_basis(self):
+        report = self.clean()
         self.assertEqual(report["gaps"], [], report)
-        self.assertTrue(report["coverage_proven"])
+        self.assertTrue(report["coverage_proven"] and report["basis_emitted"], report)
         inst = report["instances"]
         self.assertTrue(any(i["stopped"] for i in inst.values()))
         self.assertTrue(all(i["covered_to_end"] for i in inst.values()))
         self.assertTrue(any(i["handshake_bounds"] > 0 for i in inst.values()))
-        # The log acquisition is partial under batch 0.2 (no log-continuity basis exists).
         log_batches = [b for b in self.conversion.batch_records if b["query_id"] == W.LOG_QUERY]
-        self.assertEqual({(b["outcome"], b["reason"]) for b in log_batches}, {("partial", "continuity_unproven")})
+        complete = [b for b in log_batches if b["outcome"] in ("complete", "empty")]
+        self.assertTrue(complete)
+        basis = complete[0]["coverage_basis"]
+        manifest = json.loads((self.out / "recording" / "recording.json").read_bytes())
+        self.assertEqual((basis["kind"], basis["session_id"], basis["clock_domain_id"]),
+                         ("log_sequence_continuity", manifest["session_id"],
+                          manifest["clocks"]["collector"]["clock_domain_id"]))
+        self.assertEqual({(i["pod_uid"], i["ending"]) for i in basis["instances"]},
+                         {(UID_A, "drained"), (UID_B, "stopped")})
+        # the anchors are the Pod watch's own; the Pod batches are not made complete by log continuity
+        pod_bases = [b["coverage_basis"] for b in self.conversion.batch_records
+                     if b["query_id"] == "k8s.pods" and b["coverage_basis"] is not None]
+        for pb in pod_bases:
+            self.assertEqual(pb["kind"], "watch_continuity")
+        self.assertTrue(all(b["contract_version"] == "ca-acquisition-batch/0.3-provisional"
+                            for b in self.conversion.batch_records))
         lines = [o for b in log_batches for o in b["observations"]]
-        self.assertTrue(lines)
-        self.assertTrue(all(o["observation_kind"] == "log_line" and "message" not in o["attributes"] for o in lines))
+        self.assertTrue(lines and all("message" not in o["attributes"] for o in lines))
         self.assertTrue(all(any(t["timestamp_kind"] == "observed" for t in o["times"]) for o in lines))
-        # Replay is byte-identical, and the bundle investigates (and abstains: a limiting gap).
+        # Replay is byte-identical; the investigation runs, and abstains on the remaining non-log gaps.
         W.verify_bundle(self.out / "recording", self.out / "bundle")
         inv = C.investigate_offline(B.load(self.out / "bundle"))
         self.assertEqual(inv.result["outcome"]["status"], "abstained")
-        self.assertIn("limiting_evidence_gaps", inv.result["outcome"]["reasons"])
-        manifest = json.loads((self.out / "recording" / "recording.json").read_bytes())
-        self.assertEqual(manifest["contract_version"], "ca-k8s-recording/0.5-provisional")
         plan = json.loads((self.out / "bundle" / "plan.json").read_bytes())
         self.assertEqual(plan["contract_versions"]["observation-kinds"], ev.KIND_REGISTRY_VERSION_V4)
+        self.assertEqual(plan["contract_versions"]["acquisition-batch"], "ca-acquisition-batch/0.3-provisional")
+
+    def test_a_forged_log_basis_is_refused_on_replay(self):
+        self.clean()
+        batches = sorted((self.out / "bundle" / "batches").iterdir())
+        for path in batches:
+            doc = json.loads(path.read_bytes())
+            if doc["query_id"] == W.LOG_QUERY and doc["coverage_basis"]:
+                doc["coverage_basis"]["instances"][0]["last_seq"] += 1000
+                from cloud_autopsy.contracts.canonical import canonical_bytes
+                path.write_bytes(canonical_bytes(doc))
+                break
+        else:
+            self.fail("no complete log batch")
+        with self.assertRaises(Exception) as ctx:
+            W.verify_bundle(self.out / "recording", self.out / "bundle")
+        self.assertIn("replay_mismatch", repr(ctx.exception) + str(getattr(ctx.exception, "code", "")))
 
     def test_planted_log_and_env_values_are_never_written(self):
         cluster = FL.LogCluster(planted=True)
@@ -106,7 +137,12 @@ class Faults(Base):
         self.assertIn("not_collected", self.gaps({"deny": True})[0])
 
     def test_a_silently_dropped_line_is_a_sequence_gap(self):
-        self.assertIn("sequence_gap", self.gaps({"drop_seq": 3})[0])
+        gaps, report = self.gaps({"drop_seq": 3})
+        self.assertIn("sequence_gap", gaps)
+        self.assertFalse(report["basis_emitted"])
+        log_batches = [b for b in self.conversion.batch_records if b["query_id"] == W.LOG_QUERY]
+        self.assertEqual({(b["outcome"], b["reason"]) for b in log_batches}, {("partial", "continuity_unproven")})
+        self.assertTrue(all(b["coverage_basis"] is None for b in log_batches))
 
     def test_a_garbage_line_is_an_unparseable_gap(self):
         gaps, _ = self.gaps({"garbage_after": 2})

@@ -632,7 +632,8 @@ def convert(root, manifest, manifest_sha, rule_profile=1):
         batches += records
     log_report = None
     if v5:
-        entry, records, log_report = _log_acquisition(plan, ctx, domain, streams["pods"], log_entries, window)
+        entry, records, log_report = _log_acquisition(plan, ctx, domain, manifest["session_id"], streams["pods"],
+                                                      log_entries, window)
         for record in records:
             for observation in record["observations"]:
                 ev.observe(observation, source_id=ctx["source_id"], registry=registry,
@@ -792,39 +793,79 @@ def _pod_facts(segments):
     return pods, {k: sorted(v) for k, v in names.items()}, p_end
 
 
-def _log_acquisition(plan, ctx, domain, pod_segments, log_entries, window):
-    """The ``k8s.pods.log`` acquisition (CA-P2-004g): evidence lines, and their coverage as derived.
+def _log_acquisition(plan, ctx, domain, session_id, pod_segments, log_entries, window):
+    """The ``k8s.pods.log`` acquisition (CA-P2-004g, M11): evidence lines and their coverage, as derived.
 
-    The acquisition-batch contract (0.2) lets only a ``watch_continuity`` basis make a batch complete, and
-    log coverage is not watch continuity. So until a batch version with a log-continuity basis exists,
-    every log batch is ``partial`` / ``continuity_unproven`` -- a limiting gap, and the investigation
-    abstains -- even when the derivation proves continuity (``coverage_proven`` in the report)."""
+    Complete (or empty) batches with a ``log_sequence_continuity`` basis (batch 0.3) only when all hold:
+    - the Pod watch has exactly one collected segment, and it is proven (a probe the watch reached): its
+      anchors bound the interval, and the set of pods it reported is the set of instances claimed;
+    - the derivation has no gap at all: every container instance of every reported pod is attributed
+      (watch, recheck and content binding), continuous from ``seq=1``, handshake-consistent, and ends
+      ``stopped`` or ``drained`` past the final probe.
+    Those batches hold the lines received up to the end anchor; lines received later go to a partial tail
+    batch (``continuity_unproven``), as watch events after the proving probe do. Otherwise every log batch
+    is partial / ``continuity_unproven``. Log continuity never makes a Pod or Deployment batch complete."""
     from . import pod_logs as PL
     pods, names, p_end = _pod_facts(pod_segments)
+    collected = [s for s in pod_segments if s.listing["outcome"] in ("consistent", "truncated")]
+    probe, proving = _proof(collected[0]) if len(collected) == 1 and collected[0].listing["outcome"] == "consistent" \
+        else (None, None)
+    if probe is not None:
+        p_end = probe["sent_ns"]   # the end anchor the basis states
     derived = PL.derive(log_entries, pods, names, p_end if p_end is not None else MAX_NS)
-    observations = []
+    observations, tail = [], []
     for line in derived.lines:
         times = [{"timestamp_kind": "event", "raw": line["ts"], "clock_domain_id": RUNTIME_DOMAIN,
                   "declared_precision_ns": None}]
         if line["lower_ns"] is not None:
             times.append(_observed(line["lower_ns"], line["upper_ns"], domain))
         version = f"{line['boot']}.{line['seq']}"
-        observations.append(K._observation(
+        observation = K._observation(
             "log_line", f"k8s:pods/log/{ctx['namespace']}/{line['pod']}/{line['container']}#{version}", line["uid"],
             version, "Pod", ctx["namespace"], line["pod"], times,
             {"pod": line["pod"], "template": line["template"], "fields": line["fields"],
-             "container": line["container"], "boot": line["boot"], "seq": line["seq"]}))
-    plans = [(acq.PARTIAL, "continuity_unproven", window, observations, None, None, False)]
+             "container": line["container"], "boot": line["boot"], "seq": line["seq"]})
+        (tail if probe is not None and line["upper_ns"] > p_end else observations).append(observation)
+    batch_v3 = acq.plan_batch_version(plan) == acq.BATCH_VERSION_V3
+    proven = batch_v3 and probe is not None and not derived.gaps
+    verified_ms = 0
+    if proven:
+        listing = collected[0].listing
+        start_ms, end_ms = _ceil_ms(listing["first_page_ns"]), probe["sent_ns"] // NS_PER_MS
+        instances = sorted(({"pod_uid": key.split("/")[0], "container": key.split("/")[1], "boot": key.split("/")[2],
+                             "last_seq": info["last_seq"], "ending": "stopped" if info["stopped"] else "drained"}
+                            for key, info in derived.instances.items()),
+                           key=lambda i: (i["pod_uid"], i["container"], i["boot"]))
+        basis = {"kind": acq.LOG_SEQUENCE_CONTINUITY, "resource_type": acq.LOG_RESOURCE_TYPE,
+                 "session_id": session_id, "clock_domain_id": domain, "rv_comparison": rv.RV_COMPARISON,
+                 "start_anchor": {"kind": "list_first_page_received", "at": K._ms_text(start_ms),
+                                  "resource_version": listing["collection_resource_version"]},
+                 "end_anchor": {"kind": "probe_sent", "at": K._ms_text(end_ms),
+                                "resource_version": probe["resource_version"],
+                                "proven_by_resource_version": proving},
+                 "instances": instances}
+        plans = [(acq.COMPLETE, None, (start_ms, end_ms), observations, basis, f"rv:{proving}", False)]
+        if tail:
+            last_ms = max(_ceil_ms(o_line["upper_ns"]) for o_line in derived.lines) + 1
+            plans.append((acq.PARTIAL, "continuity_unproven", (end_ms, max(last_ms, end_ms + 1)), tail, None, None,
+                          False))
+        verified_ms = end_ms - start_ms
+    else:
+        plans = [(acq.PARTIAL, "continuity_unproven", window, observations + tail, None, None, False)]
     records = _records(plan, ctx, LOG_QUERY, "pods-log", plans)
-    entry = {"query_id": LOG_QUERY, "resource": "pod_logs", "segments": [], "verified_coverage_ms": 0,
-             "observations": len(observations), "withheld": {}, "unconverted": {},
+    entry = {"query_id": LOG_QUERY, "resource": "pod_logs", "segments": [], "verified_coverage_ms": verified_ms,
+             "observations": len(observations) + len(tail), "withheld": {}, "unconverted": {},
              "outcomes": sorted({r["outcome"] for r in records})}
-    report = {"coverage_proven": not derived.gaps, "gaps": [list(g) for g in derived.gaps],
+    why = None
+    if not proven:
+        why = ("batch_version" if not batch_v3 else "pod_watch_unproven" if probe is None else "log_gaps")
+    report = {"coverage_proven": not derived.gaps, "basis_emitted": proven, "not_emitted_because": why,
+              "gaps": [list(g) for g in derived.gaps],
               "instances": derived.instances, "streams": {str(k): v for k, v in sorted(derived.streams.items())},
-              "counts": derived.counts, "p_end_known": p_end is not None,
-              "batch_note": ("Acquisition batch 0.2 has no log-continuity basis, so every log batch is partial "
-                             "(continuity_unproven) and limits the investigation, even when coverage_proven is "
-                             "true. A batch version with such a basis needs approval.")}
+              "counts": derived.counts, "p_end_known": p_end is not None, "tail_lines": len(tail) if proven else 0,
+              "note": ("Log batches are complete only with a log_sequence_continuity basis (batch 0.3): one proven Pod "
+                       "watch segment and no log gap. That basis covers container logs only; it never makes a Pod "
+                       "or Deployment batch complete.")}
     return entry, records, report
 
 
@@ -846,7 +887,8 @@ def _records(plan, ctx, query, stem, plans):
                 coverage = {"start": K._ms_text(lo), "end": K._ms_text(hi)}
             cursor_after = after or f"{stem}-{n}"
             records.append({
-                "contract_version": acq.BATCH_VERSION_V2, "plan_digest": plan.digest, "source_id": ctx["source_id"],
+                "contract_version": acq.plan_batch_version(plan), "plan_digest": plan.digest,
+                "source_id": ctx["source_id"],
                 "query_id": query, "batch_key": f"{stem}-{n}", "sequence": n, "outcome": chunk_outcome,
                 "reason": reason, "coverage": coverage, "cursor": {"before": before, "after": cursor_after},
                 "truncation": {"truncated": bool(truncated), "reason": "event_limit" if truncated and reason == "event_limit"
