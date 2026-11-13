@@ -628,6 +628,12 @@ jobs:
           "$KUBECTL" apply -f deploy/kind/incident.yaml
           "$KUBECTL" -n ca-incident rollout status deployment/checkout-api --timeout=240s
           "$KUBECTL" -n ca-incident get deployments,replicasets,pods -o wide
+          # The workload image ran by exactly the inventoried digest (supply-chain/dependency-inventory.json).
+          want="sha256:326df678c20c78d465db501563f3492d17c42a4afe33a1f2bf5406a1d56b0e86"
+          ids="$("$KUBECTL" -n ca-incident get pods -o jsonpath='{.items[*].status.containerStatuses[0].imageID}')"
+          [ -n "$ids" ] || { echo "FAIL: no workload image IDs"; exit 1; }
+          for id in $ids; do case "$id" in *"@$want") ;; *) echo "FAIL: workload image digest: $id"; exit 1;; esac; done
+          echo "workload image digest verified: $want"
 
       - name: Incident collector identity (pods/log in ca-incident only) and a 30-minute token outside Git
         if: steps.paths.outputs.run == 'true'
