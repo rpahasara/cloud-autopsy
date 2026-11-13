@@ -104,7 +104,8 @@ _ENTRY_KEYS = {
 }
 END_CODES = ("expired", "denied", "unavailable", "timeout", "rate_limited", "invalid_line", "line_too_large",
              "rv_invalid", "rv_regression", "namespace_mismatch", "reconnects_exhausted", "relists_exhausted",
-             "event_limit", "buffer_limit", "session_end", "signal", "list_failed", "list_truncated")
+             "event_limit", "buffer_limit", "session_end", "signal", "list_failed", "list_truncated",
+             "reader_failed")
 _PART = re.compile(r"streams/(pods|replicasets|deployments|events)-[0-9]{4}\.json", re.ASCII)
 _CODE = re.compile(r"[a-z][a-z0-9_]{0,63}", re.ASCII)
 NS_PER_MS = 1_000_000
