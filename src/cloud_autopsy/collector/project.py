@@ -11,6 +11,7 @@ is a Secret is withheld entirely and counted (D6).
 """
 
 from ..contracts.evidence import _UNSAFE_TEXT
+from . import limits as LIM
 
 MAX_TEXT = 1024
 REVISION_ANNOTATION = "deployment.kubernetes.io/revision"
@@ -114,7 +115,7 @@ def pod(item, counts):
     return {"metadata": _metadata(item), "spec": out_spec, "status": out_status}
 
 
-def _template(template, counts):
+def _template(template, counts, limits=()):
     spec = _dict(_dict(template).get("spec"))
     containers = []
     for container in _list(spec.get("containers")):
@@ -131,15 +132,18 @@ def _template(template, counts):
                if _text(_dict(_dict(e.get("valueFrom")).get("configMapKeyRef")).get("name"), 253)]
         if env_from:
             entry["envFrom"] = env_from
+        # CA-P2-004g: only declared numeric limits, as literal integers (collector/limits.py).
+        env = env + LIM.project_env(container, entry.get("name"), limits, counts)
         if env:
             entry["env"] = env
         containers.append(entry)
     return {"spec": {"containers": containers, "volumes": _configmap_volumes(spec, counts)}}
 
 
-def replicaset(item, counts):
+def replicaset(item, counts, limits=()):
     spec = _dict(item.get("spec"))
-    return {"metadata": _metadata(item, revision=True), "spec": {"template": _template(spec.get("template"), counts)}}
+    return {"metadata": _metadata(item, revision=True),
+            "spec": {"template": _template(spec.get("template"), counts, limits)}}
 
 
 def deployment(item, counts):
@@ -180,6 +184,10 @@ def event(item, counts):
 PROJECTORS = {"pods": pod, "replicasets": replicaset, "deployments": deployment, "events": event}
 
 
-def project(resource, item, counts):
-    """The allowlisted projection of one item (or None when withheld). Counts go to the report."""
-    return PROJECTORS[resource](item if isinstance(item, dict) else {}, counts)
+def project(resource, item, counts, limits=()):
+    """The allowlisted projection of one item (or None when withheld). Counts go to the report.
+    ``limits``: validated declared numeric limits (CA-P2-004g); only ReplicaSet templates use them."""
+    item = item if isinstance(item, dict) else {}
+    if resource == "replicasets":
+        return replicaset(item, counts, limits)
+    return PROJECTORS[resource](item, counts)

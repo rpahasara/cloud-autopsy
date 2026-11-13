@@ -517,7 +517,50 @@ def _replicasets(items, ctx):
     return observations, by_deployment, out_of_scope
 
 
-def _changed_fields(old, new):
+def _declared_values(template, declared):
+    """{(container, env): value} of declared limits in a projected template; re-checked, never trusted."""
+    from ..collector import limits as LIM
+    out = {}
+    wanted = {(c, e) for c, e, _ in declared}
+    for container in ((template or {}).get("spec") or {}).get("containers") or []:
+        name = container.get("name") if isinstance(container, dict) else None
+        for env in (container.get("env") or []) if isinstance(container, dict) else []:
+            if isinstance(env, dict) and (name, env.get("name")) in wanted and "value" in env:
+                value = env["value"]
+                if "valueFrom" in env or not isinstance(value, str) or not LIM.VALUE.fullmatch(value):
+                    raise _ItemInvalid("declared_limit_invalid")
+                out[(name, env["name"])] = value
+    return out
+
+
+def _strip_declared(template, declared):
+    """The template without declared-limit env entries (their change is reported as typed field changes)."""
+    wanted = {(c, e) for c, e, _ in declared}
+    for container in template.get("spec", {}).get("containers", []):
+        if isinstance(container, dict) and isinstance(container.get("env"), list):
+            container["env"] = [e for e in container["env"]
+                                if not (isinstance(e, dict) and (container.get("name"), e.get("name")) in wanted
+                                        and "value" in e)]
+            if not container["env"]:
+                del container["env"]
+
+
+def _field_changes(old, new, declared):
+    """Typed changes of declared numeric limits between two ReplicaSet templates (CA-P2-004g)."""
+    before, after = _declared_values(old["template"], declared), _declared_values(new["template"], declared)
+    changes = []
+    for container, env, key in declared:
+        b, a = before.get((container, env)), after.get((container, env))
+        if b is None or a is None or b == a:
+            continue
+        changes.append({"field": f"spec.template.spec.containers[{container}].env[{env}]", "config_key": key,
+                        "before_value": b, "after_value": a,
+                        "before_value_sha256": hashlib.sha256(b.encode()).hexdigest(),
+                        "after_value_sha256": hashlib.sha256(a.encode()).hexdigest()})
+    return changes
+
+
+def _changed_fields(old, new, declared=()):
     """Changed pod-template paths between two ReplicaSet templates (only these, never values)."""
     _, old_c, _ = _single_container(old["template"])
     _, new_c, _ = _single_container(new["template"])
@@ -531,11 +574,15 @@ def _changed_fields(old, new):
         t = canonical.loads(canonical.canonical_bytes(template))
         for c in t.get("spec", {}).get("containers", []):
             c.pop("image", None)
+        if declared:
+            _strip_declared(t, declared)
         t.get("metadata", {}).get("labels", {}).pop("pod-template-hash", None)
         return canonical.canonical_bytes(t)
 
     if rest(old["template"]) != rest(new["template"]) and "spec.template.spec.configmap_refs" not in fields:
         fields.add("spec.template")
+    if declared:
+        fields |= {c["field"] for c in _field_changes(old, new, declared)}
     return sorted(fields)
 
 
@@ -562,13 +609,17 @@ def _deployments(items, replicasets, ctx):
                     and condition.get("reason") == "NewReplicaSetAvailable" and isinstance(condition.get("lastUpdateTime"), str):
                 times.append(_time(condition["lastUpdateTime"], ctx["clock"], "completed"))
         name = meta["name"]
+        declared = ctx.get("declared_limits", ())
+        attributes = {"revision": str(revision), "previous_revision": str(old["revision"]),
+                      "changed_fields": _changed_fields(old, new, declared), "image_before": old["image"],
+                      "image_after": new["image"], "config_refs_before": old["config_refs"],
+                      "config_refs_after": new["config_refs"], "old_replicaset": old["name"],
+                      "new_replicaset": new["name"]}
+        if declared:  # CA-P2-004g: typed changes of declared numeric limits only (recording 0.5)
+            attributes["field_changes"] = _field_changes(old, new, declared)
         observations.append(_observation(
             "deployment_rollout", f"k8s:deployment/{ctx['namespace']}/{name}@rev{revision}", meta["uid"],
-            meta["resource_version"], "Deployment", ctx["namespace"], name, times,
-            {"revision": str(revision), "previous_revision": str(old["revision"]),
-             "changed_fields": _changed_fields(old, new), "image_before": old["image"], "image_after": new["image"],
-             "config_refs_before": old["config_refs"], "config_refs_after": new["config_refs"],
-             "old_replicaset": old["name"], "new_replicaset": new["name"]}))
+            meta["resource_version"], "Deployment", ctx["namespace"], name, times, attributes))
     return observations, notes
 
 
