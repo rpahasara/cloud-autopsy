@@ -117,7 +117,8 @@ def _watch(args, config):
         logs = conversion.report.get("pod_logs")
         if logs is not None:
             print(f"pod logs: coverage proven={logs['coverage_proven']} instances={len(logs['instances'])} "
-                  f"gaps={sorted({g[2] for g in logs['gaps']})} (log batches stay partial under batch 0.2)")
+                  f"gaps={sorted({g[2] for g in logs['gaps']})} log basis emitted={logs['basis_emitted']}"
+                  f"{'' if logs['basis_emitted'] else ' (' + str(logs['not_emitted_because']) + ')'}")
     return 0
 
 
