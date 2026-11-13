@@ -1,6 +1,7 @@
 # Milestone plan: an end-to-end synthetic incident investigation
 
 **Status:**
+- **Revision 3** corrects M10 ([§4.9](#timing)): no assumed delay is used for ordering.
 - **Revision 2.** The overall direction of M1–M9 was approved on condition that log continuity, pod identity, RBAC and environment handling, and the evaluation thresholds were corrected. This revision makes those corrections ([§2](#decisions), [§4](#collection), [§5](#identity), [§6](#rbac), [§10](#evaluation)) and records why they do not widen scope ([§13](#scope)).
 - It is a planning artifact, not a gate disposition, a specialist approval or a production-readiness claim.
 
@@ -50,7 +51,7 @@ Approved in direction, with the revision-2 corrections:
 | M7 | ConfigMap values stay unread | Unchanged |
 | M8 | CI-only, digest-pinned `busybox` workload image | Unchanged |
 | M9 | Development-set harness with sealed truth and a product scorer | Thresholds fixed ([§10](#evaluation)) |
-| **M10** | **New, needs approval:** a declared bound **δ = 2 s** on the delay between the application writing a line and the container runtime appending it to the node log file. It is used **only** to lower the start of a log line's `observed` bracket ([§4.4](#brackets)) | Approve. It is an assumption, recorded in every recording and in the result's plan, not a measurement |
+| **M10** | **Revision 3, corrected.** No assumed runtime delay (δ) is used to build any bracket. A log line's lower bound comes only from a **protocol guarantee**: the pod's own creation, or the workload's **write-after-append handshake** ([§4.9](#timing)). Without one of these, the line keeps its evidence, but its time cannot be ordered against the rollout | δ = 2 s was not approved as a guarantee. It now appears only in sensitivity tests, which show why it is unsafe |
 
 ## 3. <a id="incident"></a>The synthetic incident
 
@@ -90,12 +91,13 @@ The transport also carries no sequence information. **Coverage is therefore prov
 Every line the workload writes has this form:
 
 ```
-CA1 boot=<8 hex> seq=<n> <TEMPLATE> [key=value ...]
+CA1 boot=<8 hex> seq=<n> [synced=<n-1> lag_ms=<n>] <TEMPLATE> [key=value ...]
 ```
 
 - **`boot`** is random for each process start (container instance).
 - **`seq`** starts at 1 and increases by exactly 1 per line.
 - **`seq=1` is always `STARTED pod_uid=<uid> container=<name>`.**
+- **`synced` and `lag_ms`** are the handshake fields from revision 3 ([§4.9](#timing)). They appear on every line after the first when the handshake is on.
 - **The envelope is a declared property of the synthetic workload,** named in the scope declaration with its version.
 
 A log without a valid envelope can never establish coverage, so it always produces a limiting gap. This is deliberate. It also means that, under this design, an ordinary application without such an envelope could not resolve an investigation. That limit is stated here, not hidden.
@@ -115,11 +117,11 @@ A log without a valid envelope can never establish coverage, so it always produc
 **Streams per container instance:**
 1. **History attach.** When the Pod watch first reports the instance, the collector opens a follow stream without `tailLines`, which returns the instance's whole log so far. This is how `seq=1` is obtained.
 2. **Rotation.** Every 5 s the collector opens a new stream with `tailLines=0` at send time `O`. It closes the previous stream only once the new one has delivered a line `s` and the previous one has delivered every line up to `s − 1`. If that overlap cannot be shown, the old stream stays open until the next rotation. If it ends first, continuity is broken.
-3. **Final drain.** At session end, after the final watch probe is sent at `P_end`, the collector waits δ and opens one last `tailLines=0` stream per live instance. It waits for a `HEARTBEAT` that is contiguous with what it already has.
+3. **Final drain.** At session end, after the final watch probe is sent at `P_end`, the collector opens one last `tailLines=0` stream per live instance. It waits for a `HEARTBEAT` that is contiguous with what it already has and whose write is established after `P_end` ([§4.9](#timing)). Without that, the instance's tail is unknown, which is a gap.
 
 **The `observed` bracket `[L, U)` of a line** (same encoding as [004f §6.2](../ca-p2-004/ca-p2-004f-plan.md#observed); no time-contract change):
 - **`U`** is the earliest receipt of the line. The application wrote it before any copy arrived.
-- **`L` from a `tailLines=0` stream** opened at `O` is `O − δ`. The stream returns only lines appended to the node file after the kubelet began following, which is after `O`. The application wrote the line at most δ earlier (M10).
+- **`L` from a `tailLines=0` stream** opened at `O` is `O` **only when the handshake establishes it** ([§4.9](#timing)). The stream returns only lines **appended** to the node file after the kubelet began following, which is after `O`. An append time is not a write time, so without the handshake the stream gives no lower bound.
 - **`L` when a line has several copies** is the largest of these values.
 - **`L` from a history attach:**
   - if the pod was **created during the session**, `L` is the pod's own creation lower bound from the watch (004f's `L` for its `ADDED` event), because a container cannot write before its pod exists;
@@ -157,14 +159,44 @@ A log without a valid envelope can never establish coverage, so it always produc
 **Timeline (all times on the collector clock).** The driver applies the Deployment after the session starts. The rollout's watch bracket is `[L_r, U_r)` and its commit is `c_r`.
 1. **New pods appear after the commit.** They are created after `c_r`. Their history attach yields `seq=1`, and rotations keep continuity.
 2. **The first symptom comes much later.** Demand reaches the new limit at least 30 s after a new container starts, so the first `POOL_EXHAUSTED` is appended no earlier than `c_r + 30 s`.
-3. **The stream delivering it is recent.** It was opened at most about 5 s before the append (the rotation period), so `L_sym ≥ c_r + 30 − 5 − δ = c_r + 23 s`.
+3. **The stream delivering it is recent.** A rotation stream opened at `O` delivers the symptom. That stream was opened at most about 5 s before the symptom's append, and its first delivered line `j` is followed by a handshaken line `j+1`. So `L_sym = O ≥ c_r + 30 − 5 = c_r + 25 s` (§4.9). This holds only on the handshake path. Without it, step 4 fails and the case abstains.
 4. **So the symptom is ordered after the rollout.** Since `U_r` is `c_r` plus the watch delivery delay (normally well under a second), `L_sym > U_r` holds unless that delay exceeds 23 s. If it ever does, the case abstains with `ordering_unknown`, which is fail-closed and reported.
 5. **The old pods leave cleanly.** They log no symptom (limit 16 > demand 8). They receive `SIGTERM` and log `STOPPED`, so they are complete. Surviving new pods are covered to `P_end` by the final drain.
 6. **Result.** No gap, a typed limit reduction, a symptom on the new revision ordered after the rollout, and no contradiction.
 
-This is what `rollout_limit_reduction` requires, so the run resolves. Nothing is assumed complete without proof, and the only assumption, δ, is declared.
+This is what `rollout_limit_reduction` requires, so the run resolves. Nothing is assumed complete without proof, and no timing assumption is used ([§4.9](#timing)). If the handshake evidence is missing or inconsistent, the symptom's bracket falls back to the pod-creation bound and P1 abstains with `ordering_unknown`. That would be reported as a limitation, not hidden.
 
 **The safeguards still bite in the failure cases.** N5 and N6 deny or cut log access, and the new offline cases (§9) break the envelope, the sequence, the identity and the overlap. Each of those must abstain.
+
+### 4.9 <a id="timing"></a>Timing bounds: assumed versus established (revision 3)
+
+**What each bound rests on:**
+
+| Bound | Basis | Used for ordering? |
+|---|---|---|
+| `U` = the earliest receipt of a line | **Protocol.** A line is written before any copy is received | Yes |
+| `L` = the pod's creation lower bound (004f watch bracket), for lines of a pod created during the session | **Protocol.** A container cannot write before its pod exists, and the watch bracket contains the pod's creation commit | Yes |
+| `L` = `O`, the send time of a `tailLines=0` stream, for line `k` | **Protocol plus a declared workload property.** Valid only if the stream's first delivered line `j` is followed, with `j < k`, by a line `j+1` carrying `synced=j` (the handshake) | Yes, only when the condition is met |
+| `L` = `O − δ`, for any δ | **Assumption.** No Kubernetes or container-runtime guarantee bounds the delay between a write and its append | **Never.** It appears in sensitivity tests only |
+| The runtime's own timestamp | An unknown clock | Never |
+
+**The handshake** (a synthetic-workload instrumentation):
+- **What the workload does.** After writing line `i`, it waits until line `i` appears in its own node log file before it writes line `i+1`. It reads that file through a read-only `hostPath` mount of `/var/log/pods/<namespace>_<pod>_<uid>/`. Line `i+1` then carries `synced=i`.
+- **Why it gives a lower bound.** Each write is causally after the previous line's append. The first line `j` delivered by a stream opened at `O` was appended after `O`. So line `j+1` was written after `O`, and every later line was written later still.
+- **Not used as a bound.** The workload also records `lag_ms`, its own measurement of how long each append took. That value is reported in the evaluation and never used as a bound.
+
+**Checks the converter applies:**
+- **The handshake must be consistent.** On every line of an instance, `synced` must equal `seq − 1`. A missing or inconsistent claim removes the handshake bound for that instance from then on; its lines keep the protocol-only bounds.
+- **A known violation is never hidden.** A violation is a `synced` claim that cannot hold: a line received before the line it claims to follow, or a claim about a line from another `boot`. It marks the instance `timing_inconsistent`. That is a limiting gap, so the run abstains. It never silently yields an ordering.
+- **No ordered bracket means no ordering.** When a needed ordering has no protocol-backed bracket, the evidence is still kept, but its ordering is `unknown`, and the engine abstains wherever the mechanism needs that ordering (`ordering_unknown`).
+
+**Timing sensitivity and fault tests** (offline; the fake server simulates the write-to-append delay `d`):
+- **Without the handshake,** for `d` in {0, 0.5, 1.9, 2.1, 5, 30} s: the computed bracket always contains the true write time. A symptom whose only bound would need `O − δ` stays unordered, and P1-shaped input abstains.
+- **With the handshake,** for the same `d`: every computed `L` is at or before the true write time. P1-shaped input resolves only when the true order supports it.
+- **The rejected δ rule,** for `d` > 2 s: the tests show that `O − δ` would place `L` after the true write time, and that the product never computes it.
+- **Handshake faults:** a missing `synced`, a skipped `synced`, a claim about a line that has not been received, and a claim across a `boot`. Each removes the bound or yields `timing_inconsistent`, and nothing resolves.
+
+**What this means for the positive cases.** P1 and P2 can resolve only on the handshake path. If the handshake proves unreliable on the kind cluster, they abstain with `ordering_unknown`. That would be reported as the result: the product cannot order an application symptom against a rollout without timing evidence of this kind.
 
 ### 4.8 <a id="metrics"></a>Metrics are deferred
 
@@ -357,7 +389,7 @@ Each slice is a separate draft PR, stacked in order. Regression tests are writte
 
 **Inside the already approved slices:**
 - **New mechanics.** The envelope, the stream rotation and the identity checks are workload, collector and converter work in CA-P2-004g and CA-P2-007a.
-- **New decision.** The only one is **M10** (δ), an explicit assumption that makes the bracket conservative instead of silently optimistic.
+- **M10 (revision 3).** δ is removed. The new item is the workload's write-after-append handshake ([§4.9](#timing)). It is test-workload instrumentation: a read-only `hostPath` of the workload's own log directory, in the disposable kind cluster only. It adds no product code, dependency or permission for the collector.
 
 **Unchanged:**
 - existing contracts, migrations `0001`–`0008`, the six pinned digests, the three truth pins and the frozen prototype;
@@ -376,7 +408,7 @@ These hold for the whole milestone:
 ## 15. <a id="risks"></a>Remaining risks
 
 **Assumptions:**
-- **δ is assumed, not measured.** If the runtime ever delayed a line by more than 2 s, a bracket could start too late. Its only use is the start of an `observed` bracket. The positive case keeps more than 20 s of margin, and the value is recorded in every run.
+- **The handshake is a declared property of the workload.** It is not verified independently of the workload. The collector checks it for internal consistency only: every line names its predecessor, and the claims are monotonic. A workload that lied about it could make a bracket start too late. This is the same trust placed in the envelope, and it is stated in every recording. Real applications would not have the handshake, so their logs would never order against a rollout.
 
 **Measured outcomes:**
 - **Ordering.** Positive runs can abstain from bracket overlap. This is measured and reported.
