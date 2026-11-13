@@ -2,7 +2,8 @@
 
 **Status:**
 - **Revision 3** corrects M10 ([§4.9](#timing)): no assumed delay is used for ordering.
-- **Revision 3.1** records two findings from CA-P2-004g: proven log coverage needs a new acquisition-batch version (**M11**, needs approval), and the BusyBox image cannot pass the license policy without an approved review (**M8** is therefore implemented with `python:3.13-slim`, the alternative revision 1 named).
+- **Revision 3.1** records two findings from CA-P2-004g: proven log coverage needs a new acquisition-batch version (**M11**), and the BusyBox image cannot pass the license policy without an approved review (**M8** therefore uses `python:3.13.9-slim-trixie`). Both were approved on 2026-11-14.
+- **Revision 3.2** records the separate Pod/Deployment completeness finding. It is analysed in the CA-P2-004g completeness analysis (`docs/phase2/ca-p2-004/ca-p2-004g-completeness.md`, in PR #45), which proposes M12a–d (not implemented; needs a decision).
 - **Revision 2.** The overall direction of M1–M9 was approved on condition that log continuity, pod identity, RBAC and environment handling, and the evaluation thresholds were corrected. This revision makes those corrections ([§2](#decisions), [§4](#collection), [§5](#identity), [§6](#rbac), [§10](#evaluation)) and records why they do not widen scope ([§13](#scope)).
 - It is a planning artifact, not a gate disposition, a specialist approval or a production-readiness claim.
 
@@ -50,16 +51,16 @@ Approved in direction, with the revision-2 corrections:
 | M5 | Observation kinds **0.4**, migration **`0009`**, recording **0.5** | **Narrowed.** `log_line` under kinds 0.4 belongs to the existing source kind `kubernetes_api`, because `pods/log` *is* a Kubernetes API subresource. No source-registry or batch-contract change ([§13](#scope)) |
 | M6 | No new mechanism and no new ordering rule. Profile 2 also accepts kinds 0.4 | Plus: the engine maps kinds to source kinds through the **pinned** registry, which matters once `log_line` has two source kinds ([§11](#slices)) |
 | M7 | ConfigMap values stay unread | Unchanged |
-| M8 | CI-only, digest-pinned `busybox` workload image | **Revision 3.1.** BusyBox is GPL-2.0. The repository policy (`tools/supply_chain`) refuses any copyleft component, including a CI-only one, without an approved specialist license review, which only the product owner or licensing reviewer can record. CA-P2-004g therefore uses `python:3.13.9-slim` (PSF-2.0), pinned by digest and inventoried `ci-only`, running a standard-library workload. Reverting to BusyBox needs that approval record |
+| M8 | CI-only, digest-pinned workload image: **`python:3.13.9-slim-trixie`** | **Approved 2026-11-14** for the disposable kind environment only. Revision 1 named BusyBox, but BusyBox is GPL-2.0, and the repository license policy refuses it without an approved specialist review. The `ci-only` inventory entry names PSF-2.0, which is CPython's license. The full image also contains Debian packages and other layers under their own licenses, some of them copyleft; full-image license clearance stays pending a specialist review. This approval is not a legal review. The image is never deployed and adds no product runtime dependency |
 | M9 | Development-set harness with sealed truth and a product scorer | Thresholds fixed ([§10](#evaluation)) |
-| **M11** | **New, needs approval (revision 3.1).** Acquisition batch **0.3**: batch 0.2 plus a second coverage basis kind, `log_sequence_continuity`, for `complete` and `empty` log batches. Its anchors are the instance's verified `STARTED` and either its `STOPPED` or a handshake-established line written after the final probe. As with `watch_continuity`, the converter derives the basis from the recording and checks it again on replay. Contract profile 4 would then pin batch 0.3, and migration `0009` would add its supported-version row and widen the batch version check (both are still unmerged) | Approve. Without it, every log batch must stay `partial`, so every run abstains, even when the derivation proves coverage. CA-P2-004g implements exactly that fail-closed state |
+| **M11** | Acquisition batch **0.3**: batch 0.2 plus a second coverage basis kind, `log_sequence_continuity`, for `complete` and `empty` log batches. The basis states the Pod watch anchors, the session clock and every instance (pod UID, container, boot, `last_seq`, `stopped` or `drained`). Contract profile 4 pins batch 0.3, and migration `0009` adds its supported-version row and widens the batch version check | **Approved 2026-11-14; implemented** in CA-P2-002e (contract) and CA-P2-004g (converter). Log continuity never implies Pod or Deployment watch continuity |
 | **M10** | **Revision 3, corrected.** No assumed runtime delay (δ) is used to build any bracket. A log line's lower bound comes only from a **protocol guarantee**: the pod's own creation, or the workload's **write-after-append handshake** ([§4.9](#timing)). Without one of these, the line keeps its evidence, but its time cannot be ordered against the rollout | δ = 2 s was not approved as a guarantee. It now appears only in sensitivity tests, which show why it is unsafe |
 
 ## 3. <a id="incident"></a>The synthetic incident
 
 **Namespace.** `ca-incident` contains only the incident workload. `crashy` stays in `ca-demo`.
 
-**Workload (`checkout-api`, busybox shell):**
+**Workload (`checkout-api`, a standard-library Python script in the CI-only `python:3.13.9-slim-trixie` image, M8):**
 - reads `DB_POOL_MAX` from its environment, and its own pod UID and container name from the Downward API;
 - writes **only** enveloped lines ([§4.2](#envelope)), from a single writer;
 - runs a deterministic demand schedule chosen by the scenario;
@@ -402,7 +403,7 @@ Each slice is a separate draft PR, stacked in order. Regression tests are writte
 These hold for the whole milestone:
 - **Synthetic only.** Only the disposable kind cluster is used: no real, shared or production cluster, and no cloud credentials.
 - **No access to Secrets, ConfigMaps, `pods/exec`, nodes or namespaces.** `pods/log` is read in `ca-incident` only.
-- **No new runtime dependency.** The busybox image is CI-only and inventoried.
+- **No new runtime dependency.** The workload image (`python:3.13.9-slim-trixie`) is CI-only and inventoried. Its full-image license clearance is pending (M8).
 - **No engine mechanism expansion** and no UI redesign.
 - **An abstention is never reported as resolved.** A synthetic positive is never presented as evidence about real incidents.
 - **No merge into `main`, force-push, deployment or settings change** without separate authorization.
