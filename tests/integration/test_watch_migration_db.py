@@ -7,6 +7,7 @@ run. Then 0008 is applied to that same database. Required by the F6 authorizatio
 - the ledger checksums of 0001-0007 equal the pinned values (the files are unchanged);
 - every stored result still verifies on read, and the six result digests equal their pins;
 - before 0008 a profile-3 plan is refused by the database; after it, it is accepted;
+- CA-P2-002e: 0009 is then applied alone; it changes no historical row and makes profile-4 plans acceptable;
 - the widened CHECK accepts batch 0.1 and 0.2 only, and the supported-version table lists exactly
   this package's additional versions.
 Synthetic data only.
@@ -90,10 +91,22 @@ class Migration0008Tests(unittest.TestCase):
             cls.profile3_before = cls._try_profile3_plan(admin, "profile3-before-0008")
         finally:
             admin.close()
-        cls.applied_second = migrate.apply(cls.fx.connect("ca_migrator"))
+        upto8 = cls.tmp / "migrations-0001-0008"
+        shutil.copytree(upto7, upto8)
+        shutil.copyfile(migrate.MIGRATIONS_DIR / "0008_watch_contract_versions.sql",
+                        upto8 / "0008_watch_contract_versions.sql")
+        cls.applied_second = migrate.apply(cls.fx.connect("ca_migrator"), upto8)
         admin = _db.superuser(cls.fx.name)
         try:
             cls.after = _snapshot(admin)
+            cls.profile4_before = cls._try_plan(admin, "profile4-before-0009", ev.KIND_REGISTRY_VERSION_V4)
+        finally:
+            admin.close()
+        # CA-P2-002e: then 0009 (every remaining migration) is applied to the same database.
+        cls.applied_third = migrate.apply(cls.fx.connect("ca_migrator"))
+        admin = _db.superuser(cls.fx.name)
+        try:
+            cls.after9 = _snapshot(admin)
         finally:
             admin.close()
 
@@ -104,9 +117,13 @@ class Migration0008Tests(unittest.TestCase):
 
     @classmethod
     def _try_profile3_plan(cls, admin, plan_id):
-        """Insert a profile-3 plan row through the planner role; return the SQLSTATE or None."""
+        return cls._try_plan(admin, plan_id, ev.KIND_REGISTRY_VERSION_V3)
+
+    @classmethod
+    def _try_plan(cls, admin, plan_id, kinds):
+        """Insert a plan row of the profile pinning ``kinds`` through the planner role; return the SQLSTATE or None."""
         record = cls.k8s_loaded.plan.to_record()
-        record["contract_versions"] = pl.required_contract_versions(ev.KIND_REGISTRY_VERSION_V3)
+        record["contract_versions"] = pl.required_contract_versions(kinds)
         record["plan_id"] = plan_id
         planner = cls.fx.connect("ca_planner")
         try:
@@ -136,6 +153,18 @@ class Migration0008Tests(unittest.TestCase):
         self.assertEqual(set(self.before), set(self.after))  # no table added or dropped
         # The only table that grew is the supported-version list: exactly two rows were appended.
         self.assertEqual(self.after["contract_version_supported"][0], self.before["contract_version_supported"][0] + 2)
+
+    def test_0009_was_applied_alone_after_0008_and_changes_no_historical_row(self):
+        self.assertEqual(self.applied_third, ["0009_pod_log_kinds.sql"])
+        changed = sorted(t for t in self.after if t != "contract_version_supported"
+                         and self.after[t] != self.after9[t])
+        self.assertEqual(changed, [])
+        self.assertEqual(set(self.after), set(self.after9))
+        self.assertEqual(self.after9["contract_version_supported"][0], self.after["contract_version_supported"][0] + 1)
+
+    def test_profile_4_plans_need_0009(self):
+        self.assertEqual(self.profile4_before, "23514")
+        self.assertIsNone(self._try_plan(self.admin(), "profile4-after-0009", ev.KIND_REGISTRY_VERSION_V4))
 
     def test_the_ledger_pins_0001_to_0007_unchanged(self):
         rows = {r[1]: r[2] for r in self.admin().run("SELECT version, filename, sha256 FROM ca_meta.schema_migration")}
