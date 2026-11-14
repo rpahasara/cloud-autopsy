@@ -21,7 +21,7 @@ for p in (REPO / "src", REPO / "tools" / "eval", REPO / "tests" / "collector"):
 import scenario as SC  # noqa: E402
 import score as S  # noqa: E402
 
-TRUTH = (REPO / "tools" / "eval" / "scenarios.json").resolve()
+TRUTH = {f.resolve() for f in (REPO / "tools" / "eval").glob("*.json")}   # every scenario file: 0.1, 0.2, matrix
 
 
 class Rendering(unittest.TestCase):
@@ -56,6 +56,7 @@ class TruthIsolation(unittest.TestCase):
         for path in (REPO / "src" / "cloud_autopsy").rglob("*.py"):
             text = path.read_text(encoding="utf-8")
             self.assertNotIn("scenarios.json", text, path)
+            self.assertNotIn("timing-matrix", text, path)
             self.assertNotIn("tools/eval", text, path)
 
     def test_conversion_investigation_and_evaluation_never_open_the_truth(self):
@@ -73,7 +74,7 @@ class TruthIsolation(unittest.TestCase):
         def hook(event, args):
             if event == "open" and args and isinstance(args[0], (str, bytes, Path)):
                 try:
-                    if Path(args[0] if not isinstance(args[0], bytes) else args[0].decode()).resolve() == TRUTH:
+                    if Path(args[0] if not isinstance(args[0], bytes) else args[0].decode()).resolve() in TRUTH:
                         opened.append(event)
                 except (OSError, ValueError):
                     pass
@@ -153,6 +154,115 @@ class Scoring(unittest.TestCase):
         summary = S.summarize(rows, doc)
         self.assertEqual(summary["scenarios"]["P1"]["harness_failures"], 1)
         self.assertFalse(summary["criteria"]["no_harness_failures"]["met"])
+
+
+class Integrity(unittest.TestCase):
+    """CA-P2-007b: scoring refuses anything but exactly the pre-registered run set."""
+
+    def setUp(self):
+        self.doc, _ = SC.load()
+        self.dir = Path(tempfile.mkdtemp(prefix="ca-eval-integrity-"))
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        lines = []
+        for sid, n in sorted(SC.expected_runs(self.doc)):
+            self.write(f"{sid}-{n:02d}.json", rec(sid, n))
+            lines.append(f"{sid} {n} 2026-11-14T00:00:00Z")
+        (self.dir / "attempts.log").write_text("\n".join(lines) + "\n", encoding="ascii")
+
+    def write(self, name, record):
+        (self.dir / name).write_text(json.dumps(record), encoding="utf-8")
+
+    def refused(self, fragment):
+        with self.assertRaises(S.IntegrityError) as ctx:
+            S.check_run_set(self.dir, self.doc)
+        self.assertTrue(any(fragment in p for p in ctx.exception.problems), ctx.exception.problems)
+
+    def test_the_exact_run_set_is_accepted(self):
+        self.assertEqual(len(S.check_run_set(self.dir, self.doc)), 41)
+
+    def test_a_missing_run_is_refused(self):
+        (self.dir / "P1-07.json").unlink()
+        self.refused("P1-07: no record")
+
+    def test_a_duplicate_run_is_refused(self):
+        self.write("P1-99.json", rec("P1", 7))
+        self.refused("P1-07: more than one record")
+
+    def test_an_unexpected_scenario_or_extra_repetition_is_refused(self):
+        self.write("X9-01.json", rec("X9", 1))
+        self.refused("X9 repetition 1 is not pre-registered")
+        (self.dir / "X9-01.json").unlink()
+        self.write("N1-04.json", rec("N1", 4))
+        self.refused("N1 repetition 4 is not pre-registered")
+
+    def test_a_file_name_disagreeing_with_its_ids_is_refused(self):
+        (self.dir / "P2-03.json").rename(self.dir / "P2-04x.json")
+        self.refused("file name disagrees")
+
+    def test_a_repeated_attempt_is_refused(self):
+        with open(self.dir / "attempts.log", "a", encoding="ascii") as f:
+            f.write("P2 5 2026-11-14T01:00:00Z\n")
+        self.refused("P2-05: attempted 2 times")
+
+    def test_a_missing_or_incomplete_attempt_log_is_refused(self):
+        log = self.dir / "attempts.log"
+        kept = [l for l in log.read_text(encoding="ascii").splitlines() if not l.startswith("N7 3 ")]
+        log.write_text("\n".join(kept) + "\n", encoding="ascii")
+        self.refused("N7-03: pre-registered but never attempted")
+        log.unlink()
+        self.refused("attempts.log: missing")
+
+    def test_a_record_is_never_overwritten(self):
+        import evaluate_run as E
+        out = self.dir / "write"
+        args = type("A", (), {"scenario": "P1", "repetition": 1, "out": str(self.dir / "none"), "steps": str(self.dir / "none"),
+                              "db_json": str(self.dir / "none"), "token_file": str(self.dir / "none"),
+                              "started": "x", "records": str(out), "config": None})
+        record = E.evaluate(args)
+        self.assertEqual(record["harness"], "failed")
+        out.mkdir()
+        (out / "P1-01.json").write_text("{}", encoding="utf-8")
+        argv = ["evaluate_run.py", "--scenario", "P1", "--repetition", "1", "--out", str(self.dir / "none"),
+                "--steps", str(self.dir / "none"), "--db-json", str(self.dir / "none"), "--token-file",
+                str(self.dir / "none"), "--started", "x", "--records", str(out)]
+        old = sys.argv
+        sys.argv = argv
+        try:
+            with self.assertRaises(FileExistsError):
+                E.main()
+        finally:
+            sys.argv = old
+        self.assertEqual((out / "P1-01.json").read_text(encoding="utf-8"), "{}")
+
+
+class Versions(unittest.TestCase):
+    def test_the_original_0_1_scenario_file_is_unchanged(self):
+        _, digest = SC.load()
+        self.assertEqual(digest, "sha256:970f12fc9109da0c2ddef1ef17bd557cc27e01646a399e3b12e67001875d48e9")
+
+    def test_0_2_differs_from_0_1_only_in_its_version_status_and_window_start(self):
+        v1, _ = SC.load()
+        v2, _ = SC.load(REPO / "tools" / "eval" / "scenarios-0.2.json")
+        self.assertEqual(v2["collection"]["incident_window_seconds"], [10, 140])
+        for doc in (v1, v2):
+            doc.pop("version"), doc.pop("status")
+        v2["collection"]["incident_window_seconds"] = v1["collection"]["incident_window_seconds"]
+        self.assertEqual(v1, v2)
+
+    def test_every_matrix_cell_renders_with_its_declared_timing_and_a_prediction(self):
+        doc, _ = SC.load(REPO / "tools" / "eval" / "timing-matrix-0.1.json")
+        tmp = Path(tempfile.mkdtemp(prefix="ca-matrix-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        self.assertEqual(len(SC.expected_runs(doc)), 45)
+        for s in doc["scenarios"]:
+            with self.subTest(cell=s["id"]):
+                self.assertTrue(s["prediction"])
+                SC.render(doc, s["id"], tmp)
+                params = (tmp / "params.env").read_text(encoding="ascii")
+                c = s["collection"]
+                self.assertIn(f"PROBE_INTERVAL='{c['probe_interval_seconds']}'", params)
+                self.assertIn(f"ACTION_AT='{c['action_at_seconds']}'", params)
+                self.assertIn(f"WINDOW='{c['incident_window_seconds'][0]}:140'", params)
 
 
 if __name__ == "__main__":

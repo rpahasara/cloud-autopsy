@@ -1,0 +1,651 @@
+{
+  "version": "ca-eval-timing-matrix/0.1-provisional",
+  "status": "pre-registered before any run, with a prediction per cell; no cell is chosen, dropped or re-run after seeing results",
+  "note": "Developer-authored synthetic development set. Truth is what the driver injects; it is never read by the collector, converter or engine, and never derived from a result.",
+  "collection": {
+    "session_seconds": 150,
+    "probe_interval_seconds": 5,
+    "final_wait_seconds": 60,
+    "incident_window_seconds": [
+      20,
+      140
+    ],
+    "action_at_seconds": 25,
+    "ordering_rules": "0.3",
+    "no_events": true,
+    "pod_logs": true,
+    "declared_limit": "checkout-api:DB_POOL_MAX:pool.maxConnections"
+  },
+  "thresholds": {
+    "negatives": {
+      "every_repetition_abstains": true,
+      "min_repetitions": 3
+    },
+    "false_cause_selections": 0,
+    "citation_validity": 1.0,
+    "planted_data_leaks": 0,
+    "deterministic_replay": "byte-identical in every run",
+    "positives": "measured against their predictions; no pass threshold"
+  },
+  "scenarios": [
+    {
+      "id": "TP01",
+      "kind": "positive",
+      "repetitions": 3,
+      "description": "DB_POOL_MAX lowered 16 -> 4 by a rollout; demand rises to 8 on the new pods. Timing: probe 5 s, action at +25 s, window +20 s.",
+      "initial": {
+        "DB_POOL_MAX": "16",
+        "DEMAND": "ramp:2:8:30:75",
+        "PLANTED": "0"
+      },
+      "action": {
+        "type": "set_env",
+        "namespace": "ca-incident",
+        "env": {
+          "DB_POOL_MAX": "4"
+        }
+      },
+      "rbac": "incident",
+      "log_max_bytes": null,
+      "truth": {
+        "cause": "rollout_limit_reduction",
+        "namespace": "ca-incident",
+        "deployment": "checkout-api",
+        "config_key": "pool.maxConnections",
+        "before": "16",
+        "after": "4"
+      },
+      "expected": {
+        "status": "resolved",
+        "mechanism": "rollout_limit_reduction"
+      },
+      "prediction": "resolve: v0.1 reference; rollout bracket opens at the +20 s probe, about 25 ms inside",
+      "collection": {
+        "probe_interval_seconds": 5,
+        "action_at_seconds": 25,
+        "incident_window_seconds": [
+          20,
+          140
+        ],
+        "log_rotation_seconds": 5
+      },
+      "min_correct_resolutions": null
+    },
+    {
+      "id": "TP02",
+      "kind": "positive",
+      "repetitions": 3,
+      "description": "DB_POOL_MAX lowered 16 -> 4 by a rollout; demand rises to 8 on the new pods. Timing: probe 5 s, action at +25 s, window +10 s.",
+      "initial": {
+        "DB_POOL_MAX": "16",
+        "DEMAND": "ramp:2:8:30:75",
+        "PLANTED": "0"
+      },
+      "action": {
+        "type": "set_env",
+        "namespace": "ca-incident",
+        "env": {
+          "DB_POOL_MAX": "4"
+        }
+      },
+      "rbac": "incident",
+      "log_max_bytes": null,
+      "truth": {
+        "cause": "rollout_limit_reduction",
+        "namespace": "ca-incident",
+        "deployment": "checkout-api",
+        "config_key": "pool.maxConnections",
+        "before": "16",
+        "after": "4"
+      },
+      "expected": {
+        "status": "resolved",
+        "mechanism": "rollout_limit_reduction"
+      },
+      "prediction": "resolve: about 10 s of margin",
+      "collection": {
+        "probe_interval_seconds": 5,
+        "action_at_seconds": 25,
+        "incident_window_seconds": [
+          10,
+          140
+        ],
+        "log_rotation_seconds": 5
+      },
+      "min_correct_resolutions": null
+    },
+    {
+      "id": "TP03",
+      "kind": "positive",
+      "repetitions": 3,
+      "description": "DB_POOL_MAX lowered 16 -> 4 by a rollout; demand rises to 8 on the new pods. Timing: probe 2 s, action at +25 s, window +20 s.",
+      "initial": {
+        "DB_POOL_MAX": "16",
+        "DEMAND": "ramp:2:8:30:75",
+        "PLANTED": "0"
+      },
+      "action": {
+        "type": "set_env",
+        "namespace": "ca-incident",
+        "env": {
+          "DB_POOL_MAX": "4"
+        }
+      },
+      "rbac": "incident",
+      "log_max_bytes": null,
+      "truth": {
+        "cause": "rollout_limit_reduction",
+        "namespace": "ca-incident",
+        "deployment": "checkout-api",
+        "config_key": "pool.maxConnections",
+        "before": "16",
+        "after": "4"
+      },
+      "expected": {
+        "status": "resolved",
+        "mechanism": "rollout_limit_reduction"
+      },
+      "prediction": "resolve: the latest probe before the rollout is at +22 or +24 s",
+      "collection": {
+        "probe_interval_seconds": 2,
+        "action_at_seconds": 25,
+        "incident_window_seconds": [
+          20,
+          140
+        ],
+        "log_rotation_seconds": 5
+      },
+      "min_correct_resolutions": null
+    },
+    {
+      "id": "TP04",
+      "kind": "positive",
+      "repetitions": 3,
+      "description": "DB_POOL_MAX lowered 16 -> 4 by a rollout; demand rises to 8 on the new pods. Timing: probe 8 s, action at +25 s, window +20 s.",
+      "initial": {
+        "DB_POOL_MAX": "16",
+        "DEMAND": "ramp:2:8:30:75",
+        "PLANTED": "0"
+      },
+      "action": {
+        "type": "set_env",
+        "namespace": "ca-incident",
+        "env": {
+          "DB_POOL_MAX": "4"
+        }
+      },
+      "rbac": "incident",
+      "log_max_bytes": null,
+      "truth": {
+        "cause": "rollout_limit_reduction",
+        "namespace": "ca-incident",
+        "deployment": "checkout-api",
+        "config_key": "pool.maxConnections",
+        "before": "16",
+        "after": "4"
+      },
+      "expected": {
+        "status": "resolved",
+        "mechanism": "rollout_limit_reduction"
+      },
+      "prediction": "uncertain: the rollout (about +24 s) races the +24 s probe; if it precedes it, the bracket opens at +16 s and narrowing is refused (abstain)",
+      "collection": {
+        "probe_interval_seconds": 8,
+        "action_at_seconds": 25,
+        "incident_window_seconds": [
+          20,
+          140
+        ],
+        "log_rotation_seconds": 5
+      },
+      "min_correct_resolutions": null
+    },
+    {
+      "id": "TP05",
+      "kind": "positive",
+      "repetitions": 3,
+      "description": "DB_POOL_MAX lowered 16 -> 4 by a rollout; demand rises to 8 on the new pods. Timing: probe 8 s, action at +25 s, window +10 s.",
+      "initial": {
+        "DB_POOL_MAX": "16",
+        "DEMAND": "ramp:2:8:30:75",
+        "PLANTED": "0"
+      },
+      "action": {
+        "type": "set_env",
+        "namespace": "ca-incident",
+        "env": {
+          "DB_POOL_MAX": "4"
+        }
+      },
+      "rbac": "incident",
+      "log_max_bytes": null,
+      "truth": {
+        "cause": "rollout_limit_reduction",
+        "namespace": "ca-incident",
+        "deployment": "checkout-api",
+        "config_key": "pool.maxConnections",
+        "before": "16",
+        "after": "4"
+      },
+      "expected": {
+        "status": "resolved",
+        "mechanism": "rollout_limit_reduction"
+      },
+      "prediction": "resolve: the bracket opens at +16 s or +24 s, both inside",
+      "collection": {
+        "probe_interval_seconds": 8,
+        "action_at_seconds": 25,
+        "incident_window_seconds": [
+          10,
+          140
+        ],
+        "log_rotation_seconds": 5
+      },
+      "min_correct_resolutions": null
+    },
+    {
+      "id": "TP06",
+      "kind": "positive",
+      "repetitions": 3,
+      "description": "DB_POOL_MAX lowered 16 -> 4 by a rollout; demand rises to 8 on the new pods. Timing: probe 5 s, action at +21 s, window +20 s.",
+      "initial": {
+        "DB_POOL_MAX": "16",
+        "DEMAND": "ramp:2:8:30:75",
+        "PLANTED": "0"
+      },
+      "action": {
+        "type": "set_env",
+        "namespace": "ca-incident",
+        "env": {
+          "DB_POOL_MAX": "4"
+        }
+      },
+      "rbac": "incident",
+      "log_max_bytes": null,
+      "truth": {
+        "cause": "rollout_limit_reduction",
+        "namespace": "ca-incident",
+        "deployment": "checkout-api",
+        "config_key": "pool.maxConnections",
+        "before": "16",
+        "after": "4"
+      },
+      "expected": {
+        "status": "resolved",
+        "mechanism": "rollout_limit_reduction"
+      },
+      "prediction": "uncertain: the rollout (about +20 s) races the +20 s probe; if it precedes it, the bracket opens at +15 s (abstain)",
+      "collection": {
+        "probe_interval_seconds": 5,
+        "action_at_seconds": 21,
+        "incident_window_seconds": [
+          20,
+          140
+        ],
+        "log_rotation_seconds": 5
+      },
+      "min_correct_resolutions": null
+    },
+    {
+      "id": "TP07",
+      "kind": "positive",
+      "repetitions": 3,
+      "description": "DB_POOL_MAX lowered 16 -> 4 by a rollout; demand rises to 8 on the new pods. Timing: probe 5 s, action at +21 s, window +10 s.",
+      "initial": {
+        "DB_POOL_MAX": "16",
+        "DEMAND": "ramp:2:8:30:75",
+        "PLANTED": "0"
+      },
+      "action": {
+        "type": "set_env",
+        "namespace": "ca-incident",
+        "env": {
+          "DB_POOL_MAX": "4"
+        }
+      },
+      "rbac": "incident",
+      "log_max_bytes": null,
+      "truth": {
+        "cause": "rollout_limit_reduction",
+        "namespace": "ca-incident",
+        "deployment": "checkout-api",
+        "config_key": "pool.maxConnections",
+        "before": "16",
+        "after": "4"
+      },
+      "expected": {
+        "status": "resolved",
+        "mechanism": "rollout_limit_reduction"
+      },
+      "prediction": "resolve: the bracket opens at +15 s or +20 s, both inside",
+      "collection": {
+        "probe_interval_seconds": 5,
+        "action_at_seconds": 21,
+        "incident_window_seconds": [
+          10,
+          140
+        ],
+        "log_rotation_seconds": 5
+      },
+      "min_correct_resolutions": null
+    },
+    {
+      "id": "TP08",
+      "kind": "positive",
+      "repetitions": 3,
+      "description": "DB_POOL_MAX lowered 16 -> 4 by a rollout; demand rises to 8 on the new pods. Timing: probe 8 s, action at +21 s, window +20 s.",
+      "initial": {
+        "DB_POOL_MAX": "16",
+        "DEMAND": "ramp:2:8:30:75",
+        "PLANTED": "0"
+      },
+      "action": {
+        "type": "set_env",
+        "namespace": "ca-incident",
+        "env": {
+          "DB_POOL_MAX": "4"
+        }
+      },
+      "rbac": "incident",
+      "log_max_bytes": null,
+      "truth": {
+        "cause": "rollout_limit_reduction",
+        "namespace": "ca-incident",
+        "deployment": "checkout-api",
+        "config_key": "pool.maxConnections",
+        "before": "16",
+        "after": "4"
+      },
+      "expected": {
+        "status": "resolved",
+        "mechanism": "rollout_limit_reduction"
+      },
+      "prediction": "abstain (unnecessary): the latest probe before the rollout is at +16 s, outside the window",
+      "collection": {
+        "probe_interval_seconds": 8,
+        "action_at_seconds": 21,
+        "incident_window_seconds": [
+          20,
+          140
+        ],
+        "log_rotation_seconds": 5
+      },
+      "min_correct_resolutions": null
+    },
+    {
+      "id": "TP09",
+      "kind": "positive",
+      "repetitions": 3,
+      "description": "DB_POOL_MAX lowered 16 -> 4 by a rollout; demand rises to 8 on the new pods. Timing: probe 8 s, action at +21 s, window +10 s.",
+      "initial": {
+        "DB_POOL_MAX": "16",
+        "DEMAND": "ramp:2:8:30:75",
+        "PLANTED": "0"
+      },
+      "action": {
+        "type": "set_env",
+        "namespace": "ca-incident",
+        "env": {
+          "DB_POOL_MAX": "4"
+        }
+      },
+      "rbac": "incident",
+      "log_max_bytes": null,
+      "truth": {
+        "cause": "rollout_limit_reduction",
+        "namespace": "ca-incident",
+        "deployment": "checkout-api",
+        "config_key": "pool.maxConnections",
+        "before": "16",
+        "after": "4"
+      },
+      "expected": {
+        "status": "resolved",
+        "mechanism": "rollout_limit_reduction"
+      },
+      "prediction": "resolve: the bracket opens at +16 s, inside",
+      "collection": {
+        "probe_interval_seconds": 8,
+        "action_at_seconds": 21,
+        "incident_window_seconds": [
+          10,
+          140
+        ],
+        "log_rotation_seconds": 5
+      },
+      "min_correct_resolutions": null
+    },
+    {
+      "id": "TP10",
+      "kind": "positive",
+      "repetitions": 3,
+      "description": "DB_POOL_MAX lowered 16 -> 4 by a rollout; demand rises to 8 on the new pods. Timing: probe 5 s, action at +25 s, window +20 s, log rotation 15 s.",
+      "initial": {
+        "DB_POOL_MAX": "16",
+        "DEMAND": "ramp:2:8:30:75",
+        "PLANTED": "0"
+      },
+      "action": {
+        "type": "set_env",
+        "namespace": "ca-incident",
+        "env": {
+          "DB_POOL_MAX": "4"
+        }
+      },
+      "rbac": "incident",
+      "log_max_bytes": null,
+      "truth": {
+        "cause": "rollout_limit_reduction",
+        "namespace": "ca-incident",
+        "deployment": "checkout-api",
+        "config_key": "pool.maxConnections",
+        "before": "16",
+        "after": "4"
+      },
+      "expected": {
+        "status": "resolved",
+        "mechanism": "rollout_limit_reduction"
+      },
+      "prediction": "resolve: slower log rotation widens symptom brackets, but symptoms start about 30 s after the rollout",
+      "collection": {
+        "probe_interval_seconds": 5,
+        "action_at_seconds": 25,
+        "incident_window_seconds": [
+          20,
+          140
+        ],
+        "log_rotation_seconds": 15
+      },
+      "min_correct_resolutions": null
+    },
+    {
+      "id": "TP11",
+      "kind": "positive",
+      "repetitions": 3,
+      "description": "DB_POOL_MAX lowered 16 -> 4 by a rollout; demand rises to 8 on the new pods. Timing: probe 5 s, action at +35 s, window +20 s.",
+      "initial": {
+        "DB_POOL_MAX": "16",
+        "DEMAND": "ramp:2:8:30:75",
+        "PLANTED": "0"
+      },
+      "action": {
+        "type": "set_env",
+        "namespace": "ca-incident",
+        "env": {
+          "DB_POOL_MAX": "4"
+        }
+      },
+      "rbac": "incident",
+      "log_max_bytes": null,
+      "truth": {
+        "cause": "rollout_limit_reduction",
+        "namespace": "ca-incident",
+        "deployment": "checkout-api",
+        "config_key": "pool.maxConnections",
+        "before": "16",
+        "after": "4"
+      },
+      "expected": {
+        "status": "resolved",
+        "mechanism": "rollout_limit_reduction"
+      },
+      "prediction": "resolve: later action; the bracket opens at the +30 s probe; symptoms end before +140 s",
+      "collection": {
+        "probe_interval_seconds": 5,
+        "action_at_seconds": 35,
+        "incident_window_seconds": [
+          20,
+          140
+        ],
+        "log_rotation_seconds": 5
+      },
+      "min_correct_resolutions": null
+    },
+    {
+      "id": "TN01",
+      "kind": "negative",
+      "repetitions": 3,
+      "description": "False-cause trap: a rollout that changes no limit (rollout restart) while demand (20) exceeds the unchanged limit (16). Timing: probe 8 s, action at +21 s, window +10 s.",
+      "initial": {
+        "DB_POOL_MAX": "16",
+        "DEMAND": "ramp:2:20:30:75",
+        "PLANTED": "0"
+      },
+      "action": {
+        "type": "rollout_restart",
+        "namespace": "ca-incident"
+      },
+      "rbac": "incident",
+      "log_max_bytes": null,
+      "truth": {
+        "cause": null,
+        "trap": "rollout without a limit change"
+      },
+      "expected": {
+        "status": "abstained"
+      },
+      "prediction": "abstain: no typed limit change (false-cause trap)",
+      "collection": {
+        "probe_interval_seconds": 8,
+        "action_at_seconds": 21,
+        "incident_window_seconds": [
+          10,
+          140
+        ],
+        "log_rotation_seconds": 5
+      }
+    },
+    {
+      "id": "TN02",
+      "kind": "negative",
+      "repetitions": 3,
+      "description": "Contradiction: the symptom (demand 20 > 16) starts before a limit-lowering rollout 16 -> 4. Timing: probe 2 s, action at +25 s, window +10 s.",
+      "initial": {
+        "DB_POOL_MAX": "16",
+        "DEMAND": "ramp:2:20:5:75",
+        "PLANTED": "0"
+      },
+      "action": {
+        "type": "set_env",
+        "namespace": "ca-incident",
+        "env": {
+          "DB_POOL_MAX": "4"
+        }
+      },
+      "rbac": "incident",
+      "log_max_bytes": null,
+      "truth": {
+        "cause": null,
+        "trap": "symptom precedes the change"
+      },
+      "expected": {
+        "status": "abstained"
+      },
+      "prediction": "abstain: symptoms precede the change (contradiction)",
+      "collection": {
+        "probe_interval_seconds": 2,
+        "action_at_seconds": 25,
+        "incident_window_seconds": [
+          10,
+          140
+        ],
+        "log_rotation_seconds": 5
+      }
+    },
+    {
+      "id": "TN03",
+      "kind": "negative",
+      "repetitions": 3,
+      "description": "Cross-scope trap: DB_POOL_MAX lowered 16 -> 4 in ca-other; the symptom (demand 20 > 16) is in ca-incident. Timing: probe 8 s, action at +25 s, window +10 s.",
+      "initial": {
+        "DB_POOL_MAX": "16",
+        "DEMAND": "ramp:2:20:30:75",
+        "PLANTED": "0"
+      },
+      "action": {
+        "type": "set_env",
+        "namespace": "ca-other",
+        "env": {
+          "DB_POOL_MAX": "4"
+        }
+      },
+      "rbac": "incident",
+      "log_max_bytes": null,
+      "other_namespace": true,
+      "truth": {
+        "cause": null,
+        "trap": "a limit change outside the investigated scope"
+      },
+      "expected": {
+        "status": "abstained"
+      },
+      "prediction": "abstain: the change is outside the investigated scope",
+      "collection": {
+        "probe_interval_seconds": 8,
+        "action_at_seconds": 25,
+        "incident_window_seconds": [
+          10,
+          140
+        ],
+        "log_rotation_seconds": 5
+      }
+    },
+    {
+      "id": "TN04",
+      "kind": "negative",
+      "repetitions": 3,
+      "description": "False-cause trap: DB_POOL_MAX raised 4 -> 16 by a rollout; demand (20) exceeds both limits. Timing: probe 2 s, action at +21 s, window +10 s.",
+      "initial": {
+        "DB_POOL_MAX": "4",
+        "DEMAND": "ramp:2:20:30:75",
+        "PLANTED": "0"
+      },
+      "action": {
+        "type": "set_env",
+        "namespace": "ca-incident",
+        "env": {
+          "DB_POOL_MAX": "16"
+        }
+      },
+      "rbac": "incident",
+      "log_max_bytes": null,
+      "truth": {
+        "cause": null,
+        "trap": "rollout raising the limit"
+      },
+      "expected": {
+        "status": "abstained"
+      },
+      "prediction": "abstain: the limit is raised (false-cause trap)",
+      "collection": {
+        "probe_interval_seconds": 2,
+        "action_at_seconds": 21,
+        "incident_window_seconds": [
+          10,
+          140
+        ],
+        "log_rotation_seconds": 5
+      }
+    }
+  ]
+}

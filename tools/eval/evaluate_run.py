@@ -62,8 +62,13 @@ def _bracket(observation, domain):
 
 
 def evaluate(args):
+    try:
+        config = json.loads(Path(args.config).read_bytes()) if getattr(args, "config", None) else None
+    except (OSError, ValueError):
+        config = None
     record = {"record_version": RECORD_VERSION, "scenario": args.scenario, "repetition": args.repetition,
-              "started": args.started, "steps": _steps(args.steps), "harness": "ok", "harness_failure": None}
+              "started": args.started, "steps": _steps(args.steps), "harness": "ok", "harness_failure": None,
+              "config": config}
     failed = [k for k, v in record["steps"].items() if v != "ok"]
     out = Path(args.out)
     if failed:
@@ -133,7 +138,11 @@ def evaluate(args):
         "rollouts": rollouts,
         "rollout_lower_minus_window_start_ms": (witnessed[0]["bracket_ms"][0] - window[0]) if witnessed and window else None,
         "symptoms": len(symptoms), "symptoms_bracketed": sum(1 for s in symptoms if s),
-        "symptoms_after_rollout": sum(1 for s in symptoms if s and witnessed and s[0] > witnessed[0]["bracket_ms"][1])}
+        "symptoms_after_rollout": sum(1 for s in symptoms if s and witnessed and s[0] > witnessed[0]["bracket_ms"][1]),
+        # the smallest gap between the rollout bracket's end and a symptom bracket's start (ordering margin)
+        "min_symptom_lower_minus_rollout_upper_ms": min((s[0] - witnessed[0]["bracket_ms"][1] for s in symptoms if s),
+                                                        default=None) if witnessed else None,
+        "rollout_bracket_width_ms": (witnessed[0]["bracket_ms"][1] - witnessed[0]["bracket_ms"][0]) if witnessed else None}
 
     rows = []
     try:
@@ -151,13 +160,15 @@ def main():
     p = argparse.ArgumentParser()
     for name in ("scenario", "out", "steps", "db-json", "token-file", "started", "records"):
         p.add_argument(f"--{name}", required=True)
+    p.add_argument("--config", default=None, help="the effective collection configuration (scenario.py)")
     p.add_argument("--repetition", type=int, required=True)
     args = p.parse_args()
     record = evaluate(args)
     records = Path(args.records)
     records.mkdir(parents=True, exist_ok=True)
     path = records / f"{args.scenario}-{args.repetition:02d}.json"
-    path.write_text(json.dumps(record, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+    with open(path, "x", encoding="utf-8") as f:   # exclusive: a repeated attempt can never overwrite a record
+        f.write(json.dumps(record, indent=1, sort_keys=True) + "\n")
     print(f"record {path.name}: harness {record['harness']} outcome "
           f"{(record.get('outcome') or {}).get('status')} {(record.get('outcome') or {}).get('reasons')}")
 

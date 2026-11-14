@@ -1,12 +1,14 @@
-# CA-P2-007a: developer-set evaluation of the synthetic incident milestone on disposable kind clusters.
-# Runs only when a branch named eval/ca-p2-007a-run-* is pushed; that branch's commit is the frozen baseline.
+# CA-P2-007a/b: developer-set evaluation of the synthetic incident milestone on disposable kind clusters.
+# Runs only when an evaluation branch is pushed; that branch's commit is the frozen baseline, and its name selects
+# the frozen scenario file: eval/ca-p2-007a-run-* -> scenarios.json (0.1), eval/ca-p2-007b-v02-run-* ->
+# scenarios-0.2.json, eval/ca-p2-007b-matrix-run-* -> timing-matrix-0.1.json. Nothing else is accepted.
 # One sequential job: every repetition gets its own fresh cluster, created and deleted around it; no parallel runs.
 # Every attempt is recorded and scored (tools/eval); nothing is retried or dropped. Synthetic data only.
 name: incident-eval
 
 on:
   push:
-    branches: ["eval/ca-p2-007a-run-*"]
+    branches: ["eval/ca-p2-007a-run-*", "eval/ca-p2-007b-v02-run-*", "eval/ca-p2-007b-matrix-run-*"]
 
 permissions:
   contents: read
@@ -49,13 +51,24 @@ jobs:
           .venv-db/bin/python -m pip install --disable-pip-version-check --require-hashes --no-deps \
             --only-binary=:all: -r requirements-db.txt
 
+      - name: Select the frozen scenario file from the branch name
+        run: |
+          set -eu
+          case "$GITHUB_REF_NAME" in
+            eval/ca-p2-007a-run-*) f=tools/eval/scenarios.json ;;
+            eval/ca-p2-007b-v02-run-*) f=tools/eval/scenarios-0.2.json ;;
+            eval/ca-p2-007b-matrix-run-*) f=tools/eval/timing-matrix-0.1.json ;;
+            *) echo "FAIL: not an evaluation branch"; exit 1 ;;
+          esac
+          echo "SCENARIO_FILE=$f" >> "$GITHUB_ENV"
+
       - name: Record the frozen baseline
         run: |
           set -eu
           {
             echo "## CA-P2-007a baseline"
             echo "- commit: \`$GITHUB_SHA\` (ref \`$GITHUB_REF_NAME\`)"
-            echo "- scenario file: \`$(python -I tools/eval/scenario.py digest)\`"
+            echo "- scenario file: \`$SCENARIO_FILE\` \`$(python -I tools/eval/scenario.py --file "$SCENARIO_FILE" digest)\`"
             echo "- kind ${KIND_VERSION}, kubectl ${KUBECTL_VERSION}, node image: \`$(grep -o 'image: .*' deploy/kind/cluster.yaml | head -1)\`"
             echo "- workload image: \`$(grep -o 'image: docker.io/library/python[^ ]*' deploy/kind/incident.yaml)\`"
             echo "- python $(python -c 'import platform; print(platform.python_version())'); runner $(uname -sr)"
@@ -67,7 +80,7 @@ jobs:
           set -u
           records="$RUNNER_TEMP/records"
           mkdir -p "$records"
-          python -I tools/eval/scenario.py order > "$RUNNER_TEMP/order.txt"
+          python -I tools/eval/scenario.py --file "$SCENARIO_FILE" order > "$RUNNER_TEMP/order.txt"
           while read -r sc rep; do
             echo "::group::$sc repetition $rep"
             started=$(date +%s)
@@ -81,9 +94,10 @@ jobs:
         run: |
           set -u
           for f in "$RECORDS"/*.json; do echo "=== $(basename "$f")"; cat "$f"; done
-          python -I tools/eval/score.py "$RECORDS" --json "$RUNNER_TEMP/report.json" --markdown "$RUNNER_TEMP/report.md"
+          cat "$RECORDS/attempts.log"
+          python -I tools/eval/score.py "$RECORDS" --scenarios "$SCENARIO_FILE" --json "$RUNNER_TEMP/report.json" --markdown "$RUNNER_TEMP/report.md"
           status=$?
-          cat "$RUNNER_TEMP/report.md" >> "$GITHUB_STEP_SUMMARY"
+          [ ! -f "$RUNNER_TEMP/report.md" ] || cat "$RUNNER_TEMP/report.md" >> "$GITHUB_STEP_SUMMARY"
           exit $status
 
       - name: Delete any leftover cluster

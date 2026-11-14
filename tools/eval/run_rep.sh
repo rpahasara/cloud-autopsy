@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# CA-P2-007a: one repetition of one frozen scenario on its own fresh disposable kind cluster.
-#   tools/eval/run_rep.sh SCENARIO_ID REPETITION RECORDS_DIR
+# CA-P2-007a/b: one repetition of one frozen scenario on its own fresh disposable kind cluster.
+#   [SCENARIO_FILE=tools/eval/<file>.json] tools/eval/run_rep.sh SCENARIO_ID REPETITION RECORDS_DIR
+# Every attempt is first appended to RECORDS_DIR/attempts.log (append-only); the record is then written with
+# exclusive create, so a repeated attempt can never overwrite an earlier record (the scorer refuses both).
 # Every step's status is recorded; a failure is recorded and the repetition still ends with a record. Nothing is
 # retried. The collector token lives in a 0700 temp directory and is deleted with the cluster.
 set -u
@@ -11,11 +13,14 @@ CLUSTER="ca-eval-$(echo "$SC" | tr 'A-Z' 'a-z')-$REP-${GITHUB_RUN_ID:-local}"
 STEPS="$WORK/steps.txt"
 : > "$STEPS"
 step() { echo "$1 $2" >> "$STEPS"; }
+SCENARIO_FILE="${SCENARIO_FILE:-tools/eval/scenarios.json}"
+mkdir -p "$RECORDS"
+echo "$SC $REP $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$RECORDS/attempts.log"
 
 START="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-if ! python -I tools/eval/scenario.py render "$SC" "$WORK"; then
+if ! python -I tools/eval/scenario.py --file "$SCENARIO_FILE" render "$SC" "$WORK"; then
   step render failed
-  python -I tools/eval/evaluate_run.py --scenario "$SC" --repetition "$REP" --out "$OUT" --steps "$STEPS"     --db-json "$WORK/db.json" --token-file "$WORK/none" --started "$START" --records "$RECORDS"
+  python -I tools/eval/evaluate_run.py --scenario "$SC" --repetition "$REP" --out "$OUT" --steps "$STEPS"     --db-json "$WORK/db.json" --token-file "$WORK/none" --started "$START" --records "$RECORDS" --config "$WORK/config.json"
   rm -rf "$WORK"
   exit 0
 fi
@@ -50,11 +55,12 @@ if "$KIND" create cluster --name "$CLUSTER" --config deploy/kind/cluster.yaml --
     [ -z "$LOG_MAX_BYTES" ] || EXTRA=(--log-max-bytes "$LOG_MAX_BYTES")
     timeout 420 python -I tools/collect_k8s.py --server "$SERVER" --ca-file "$CRED/ca.crt" --token-file "$CRED/token" \
       --namespace ca-incident --cluster-id ca-kind-synthetic --recording-id "ca-eval-$(echo "$SC" | tr 'A-Z' 'a-z')-$REP" \
-      --out "$OUT" --watch-seconds 150 --probe-interval 5 --final-wait 60 --ordering-rules 0.3 \
-      --pod-logs --declare-limit checkout-api:DB_POOL_MAX:pool.maxConnections --incident-window 20:140 --no-events \
+      --out "$OUT" --watch-seconds "$SESSION_SECONDS" --probe-interval "$PROBE_INTERVAL" --final-wait "$FINAL_WAIT" \
+      --ordering-rules "$ORDERING_RULES" --log-rotation "$LOG_ROTATION" \
+      --pod-logs --declare-limit checkout-api:DB_POOL_MAX:pool.maxConnections --incident-window "$WINDOW" --no-events \
       "${EXTRA[@]}" > "$WORK/collector.txt" 2>&1 &
     pid=$!
-    sleep 25
+    sleep "$ACTION_AT"
     case "$ACTION_TYPE" in
       set_env) "$KUBECTL" -n "$ACTION_NS" set env deployment/checkout-api $ACTION_ENV >/dev/null && step action ok || step action failed ;;
       rollout_restart) "$KUBECTL" -n "$ACTION_NS" rollout restart deployment/checkout-api >/dev/null && step action ok || step action failed ;;
@@ -75,7 +81,7 @@ else
 fi
 
 python -I tools/eval/evaluate_run.py --scenario "$SC" --repetition "$REP" --out "$OUT" --steps "$STEPS" \
-  --db-json "$WORK/db.json" --token-file "$WORK/cred/token" --started "$START" --records "$RECORDS" \
+  --db-json "$WORK/db.json" --token-file "$WORK/cred/token" --started "$START" --records "$RECORDS" --config "$WORK/config.json" \
   || echo "evaluate_run failed for $SC $REP"
 "$KIND" delete cluster --name "$CLUSTER" >/dev/null 2>&1 || true
 rm -rf "$WORK"
