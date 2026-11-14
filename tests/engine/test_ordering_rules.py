@@ -327,10 +327,11 @@ class VersionsAndReplay(Base):
 
     def test_t12_unknown_rule_versions_are_refused(self):
         from cloud_autopsy.engine import rule_profile
-        self.assertIsNone(rule_profile({**required_rule_versions(2), "timeline-rules": "ca-timeline-rules/0.3-provisional"}))
+        # 0.3 exists since the CA-P2-004g causal-scope guard (rule profile 3); 0.4 is still unknown.
+        self.assertIsNone(rule_profile({**required_rule_versions(2), "timeline-rules": "ca-timeline-rules/0.4-provisional"}))
         self.assertIsNone(rule_profile({**required_rule_versions(1), "mechanism-catalog": "x/0.2-provisional"}))
         with self.assertRaises(ValueError):
-            required_rule_versions(3)
+            required_rule_versions(4)
 
 
 if __name__ == "__main__":

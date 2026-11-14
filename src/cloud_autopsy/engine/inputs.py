@@ -85,7 +85,7 @@ def build_input(frozen, plan, registry, evidence_records, clock_declaration, exp
         raise InputError("rule_versions_mismatch", "the plan does not pin exactly one of this engine's rule profiles")
     # Rule profile 2 needs observed brackets: contract profile 3 (kinds 0.3) or, since CA-P2-005c, contract
     # profile 4 (kinds 0.4, which adds pod logs read through the Kubernetes API).
-    if profile == 2 and plan.kind_registry_version not in (KIND_REGISTRY_VERSION_V3, KIND_REGISTRY_VERSION_V4):
+    if profile in (2, 3) and plan.kind_registry_version not in (KIND_REGISTRY_VERSION_V3, KIND_REGISTRY_VERSION_V4):
         raise InputError("rule_profile_unsupported",
                          "rule profile 2 needs contract profile 3 or 4 (observation kinds 0.3 or 0.4)")
     root, pages = frozen.root(), frozen.pages()
@@ -118,7 +118,7 @@ def build_input(frozen, plan, registry, evidence_records, clock_declaration, exp
     except ClockDeclarationError as exc:
         raise InputError(exc.code, "clock declaration refused") from None
 
-    if profile == 2:
+    if profile in (2, 3):
         # One collection session = one collector clock: observed brackets from different sessions
         # are anchored to different wall readings and are never compared (R1, CA-P2-005b E6).
         observed = {t.clock_domain_id for m in members.values() for t in m.evidence.times
