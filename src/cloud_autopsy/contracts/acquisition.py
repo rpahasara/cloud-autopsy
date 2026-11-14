@@ -26,6 +26,20 @@ be coherent with the batch itself (coverage bounds equal the anchors, resourceVe
 derives every basis from recorded list, watch and probe entries and re-checks it on replay. New
 partial reasons: ``continuity_unproven``, ``event_limit`` (also a truncation reason) and
 ``changes_withheld``. A plan pins exactly one batch version; a batch of any other version is refused.
+
+``ca-acquisition-batch/0.3-provisional`` (CA-P2-002e, M11) keeps every 0.2 field and rule and adds a
+second basis kind, ``log_sequence_continuity`` (see ``_check_log_basis``), for complete and empty batches
+of container logs read through the Kubernetes API. It states that every container instance the proven
+Pod watch segment reported is continuous over that segment's verified interval: listed by pod UID,
+container and boot, each from ``seq=1`` to ``last_seq`` with a verified ending (``stopped``, or
+``drained``: a line established as written after the final probe). Its anchors are the Pod watch's own
+anchors, so the claim depends on Pod watch proof, but it never states Pod or Deployment coverage: a
+batch with this basis may hold only ``log_line`` observations of the listed instances, and under 0.3 a
+``watch_continuity`` batch may hold no ``log_line``. Coherence is checked here; truth is checked by
+re-deriving the basis from the recording on replay. Under 0.3 (M12d) the coverage of a complete or empty
+batch, for either basis kind, may be any non-empty interval *inside* the interval its anchors prove, never
+beyond it; the anchors still state the whole proof. Batches 0.1 and 0.2 are unchanged (coverage is exactly
+the anchors).
 """
 
 import re
@@ -42,6 +56,7 @@ from .versioning import check_envelope
 
 BATCH_VERSION = "ca-acquisition-batch/0.1-provisional"
 BATCH_VERSION_V2 = "ca-acquisition-batch/0.2-provisional"   # CA-P2-004f: adds coverage_basis
+BATCH_VERSION_V3 = "ca-acquisition-batch/0.3-provisional"   # CA-P2-002e (M11): adds log_sequence_continuity
 COMPLETE, EMPTY, PARTIAL, FAILED, DENIED = "complete", "empty", "partial", "failed", "denied"
 OUTCOMES = (COMPLETE, EMPTY, PARTIAL, FAILED, DENIED)
 PARTIAL_REASONS = ("rate_limited", "timeout", "page_limit", "response_too_large", "continuity_lost")
@@ -51,9 +66,18 @@ TRUNCATION_REASONS = ("page_limit", "response_too_large")
 PARTIAL_REASONS_V2 = PARTIAL_REASONS + ("continuity_unproven", "event_limit", "changes_withheld")
 TRUNCATION_REASONS_V2 = TRUNCATION_REASONS + ("event_limit",)
 WATCH_CONTINUITY = "watch_continuity"
+LOG_SEQUENCE_CONTINUITY = "log_sequence_continuity"
+LOG_RESOURCE_TYPE = "v1/pods/log"
+LOG_ENDINGS = ("stopped", "drained")
+MAX_LOG_INSTANCES = 256
 _BASIS_FIELDS = {"kind", "resource_type", "session_id", "clock_domain_id", "rv_comparison", "start_anchor",
                  "end_anchor"}
 _RESOURCE_TYPE = re.compile(r"[a-z0-9][a-z0-9./-]{0,127}", re.ASCII)
+_LOG_BASIS_FIELDS = _BASIS_FIELDS | {"instances"}
+_INSTANCE_FIELDS = {"pod_uid", "container", "boot", "last_seq", "ending"}
+_CONTAINER = re.compile(r"[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?", re.ASCII)
+_BOOT = re.compile(r"[0-9a-f]{8}", re.ASCII)
+_POD_UID = re.compile(r"[A-Za-z0-9-]{1,128}", re.ASCII)
 CURSOR = re.compile(r"[A-Za-z0-9._:=+/-]{1,256}", re.ASCII)  # opaque, printable, bounded
 MAX_DELIVERY_ATTEMPT = ev.MAX_DELIVERY_ATTEMPT
 _FIELDS = ("plan_digest", "source_id", "query_id", "batch_key", "sequence", "outcome", "reason", "coverage",
@@ -106,7 +130,8 @@ def decode_batch(record, plan, registry):
         raise
     version = plan_batch_version(plan)
     check_envelope(record, version)
-    v2 = version == BATCH_VERSION_V2
+    v3 = version == BATCH_VERSION_V3
+    v2 = version == BATCH_VERSION_V2 or v3   # 0.3 keeps every 0.2 field and rule
     fields = _FIELDS_V2 if v2 else _FIELDS
     missing = [f for f in fields if f not in record]
     if missing:
@@ -179,7 +204,12 @@ def decode_batch(record, plan, registry):
     if v2:
         basis = record["coverage_basis"]
         if outcome in (COMPLETE, EMPTY):
-            _check_basis(basis, coverage, cursor)
+            if v3 and isinstance(basis, dict) and basis.get("kind") == LOG_SEQUENCE_CONTINUITY:
+                _check_log_basis(basis, coverage, cursor, observations)
+            else:
+                _check_basis(basis, coverage, cursor, within=v3)
+                if v3 and any(isinstance(o, dict) and o.get("observation_kind") == "log_line" for o in observations):
+                    raise _invalid("watch continuity never covers container logs")
         elif basis is not None:
             raise _invalid("only a complete or empty batch has a coverage_basis")
 
@@ -198,9 +228,13 @@ def plan_batch_version(plan):
     return dict(plan.contract_versions)["acquisition-batch"]
 
 
-def _check_basis(basis, coverage, cursor):
+def _check_basis(basis, coverage, cursor, within=False):
     """Batch 0.2: a complete or empty batch states exactly how its coverage was established, and the
-    statement must be coherent with the batch. Truth is checked by re-derivation from the recording."""
+    statement must be coherent with the batch. Truth is checked by re-derivation from the recording.
+
+    ``within`` (batch 0.3, M12d): the batch's coverage may be any non-empty interval inside the proven
+    interval between the anchors, never beyond it; the anchors still state the whole proof. Under 0.2 the
+    coverage is exactly the anchors."""
     if not isinstance(basis, dict) or set(basis) != _BASIS_FIELDS:
         raise _invalid("a complete or empty batch needs exactly a watch_continuity coverage_basis")
     if basis["kind"] != WATCH_CONTINUITY or basis["rv_comparison"] != rv.RV_COMPARISON:
@@ -217,7 +251,13 @@ def _check_basis(basis, coverage, cursor):
     if not isinstance(end, dict) or set(end) != {"kind", "at", "resource_version", "proven_by_resource_version"} \
             or end["kind"] != "probe_sent":
         raise _invalid("coverage_basis.end_anchor must be a probe_sent anchor")
-    if start["at"] != coverage["start"] or end["at"] != coverage["end"]:
+    if within:
+        anchors = (exact_ms(start["at"], "coverage_basis.start_anchor.at"),
+                   exact_ms(end["at"], "coverage_basis.end_anchor.at"))
+        claimed = (exact_ms(coverage["start"], "coverage.start"), exact_ms(coverage["end"], "coverage.end"))
+        if not anchors[0] <= claimed[0] < claimed[1] <= anchors[1]:
+            raise _invalid("coverage must lie inside the interval proven between the basis anchors")
+    elif start["at"] != coverage["start"] or end["at"] != coverage["end"]:
         raise _invalid("coverage must be exactly the interval between the basis anchors")
     try:
         if rv.compare(start["resource_version"], end["resource_version"]) > 0:
@@ -228,3 +268,44 @@ def _check_basis(basis, coverage, cursor):
         raise _invalid("coverage_basis resourceVersions must be valid decimal resourceVersions") from None
     if cursor["after"] != f"rv:{end['proven_by_resource_version']}":
         raise _invalid("cursor.after must name the proving resourceVersion")
+
+
+def _check_log_basis(basis, coverage, cursor, observations):
+    """Batch 0.3: a complete or empty log batch states the Pod watch anchors it rests on and every
+    container instance whose continuity it claims; its observations must be lines of those instances."""
+    if not isinstance(basis, dict) or set(basis) != _LOG_BASIS_FIELDS:
+        raise _invalid("a log_sequence_continuity basis has exactly its documented fields")
+    if basis["resource_type"] != LOG_RESOURCE_TYPE:
+        raise _invalid("a log_sequence_continuity basis covers v1/pods/log only")
+    _check_basis({**{k: v for k, v in basis.items() if k != "instances"}, "kind": WATCH_CONTINUITY},
+                 coverage, cursor, within=True)   # the same anchor, resourceVersion and cursor coherence as the Pod watch
+    if basis["clock_domain_id"] != f"ca-collector-{basis['session_id']}":
+        raise _invalid("the basis clock is its collection session's own clock")
+    instances = basis["instances"]
+    if not isinstance(instances, list) or len(instances) > MAX_LOG_INSTANCES:
+        raise _invalid(f"instances must list at most {MAX_LOG_INSTANCES} container instances")
+    keys, listed = [], {}
+    for item in instances:
+        if not isinstance(item, dict) or set(item) != _INSTANCE_FIELDS:
+            raise _invalid("an instance has exactly pod_uid, container, boot, last_seq and ending")
+        if not isinstance(item["pod_uid"], str) or not _POD_UID.fullmatch(item["pod_uid"]) \
+                or not isinstance(item["container"], str) or not _CONTAINER.fullmatch(item["container"]) \
+                or not isinstance(item["boot"], str) or not _BOOT.fullmatch(item["boot"]):
+            raise _invalid("an instance names a pod UID, a container and a boot")
+        if type(item["last_seq"]) is not int or not 1 <= item["last_seq"] <= 1_000_000_000:
+            raise _invalid("last_seq must be a positive integer")
+        if item["ending"] not in LOG_ENDINGS:
+            raise _invalid("an instance ends stopped or drained")
+        key = (item["pod_uid"], item["container"], item["boot"])
+        keys.append(key)
+        listed[key] = item["last_seq"]
+    if keys != sorted(keys) or len(set(keys)) != len(keys):
+        raise _invalid("instances are sorted and unique by pod UID, container and boot")
+    for obs in observations:
+        attributes = obs.get("attributes") if isinstance(obs, dict) else None
+        if not isinstance(obs, dict) or obs.get("observation_kind") != "log_line" or not isinstance(attributes, dict):
+            raise _invalid("a log_sequence_continuity batch holds container log lines only")
+        key = (obs.get("source_uid"), attributes.get("container"), attributes.get("boot"))
+        seq = attributes.get("seq")
+        if key not in listed or type(seq) is not int or not 1 <= seq <= listed[key]:
+            raise _invalid("every line belongs to a listed instance, within its proven sequence")
