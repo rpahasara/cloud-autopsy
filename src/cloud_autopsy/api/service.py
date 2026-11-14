@@ -307,6 +307,9 @@ class ApiService:
         envelope = {"api_version": API_VERSION, "run_id": run_id, "result_digest": verified.result_digest,
                     "verified": True,
                     "verification": "re-executed from the sealed run; byte-identical to the stored result"}
+        acquisitions = getattr(verified, "acquisitions", None)
+        if acquisitions is not None:   # CA-P2-004g: what the sealed plan declared (never a coverage claim)
+            envelope["acquisitions"] = acquisitions
         if self.preview:
             envelope.update(verified=False, data_source="synthetic-preview",
                             verification="synthetic preview: computed in memory from fixtures; not read from "

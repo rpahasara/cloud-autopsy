@@ -426,6 +426,43 @@
       "version": "18.6-trixie"
     },
     {
+      "bom-ref": "python-3.13.9-slim-trixie",
+      "externalReferences": [
+        {
+          "type": "license",
+          "url": "https://github.com/python/cpython/blob/v3.13.9/LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "PSF-2.0"
+        }
+      ],
+      "name": "docker.io/library/python",
+      "properties": [
+        {
+          "name": "ca:pin-kind",
+          "value": "image-digest"
+        },
+        {
+          "name": "ca:pin",
+          "value": "docker.io/library/python:3.13.9-slim-trixie@sha256:326df678c20c78d465db501563f3492d17c42a4afe33a1f2bf5406a1d56b0e86"
+        },
+        {
+          "name": "ca:usage-scope",
+          "value": "ci-only"
+        },
+        {
+          "name": "ca:license-review",
+          "value": "pending"
+        }
+      ],
+      "purl": "pkg:docker/docker.io/library/python@sha256%3A326df678c20c78d465db501563f3492d17c42a4afe33a1f2bf5406a1d56b0e86",
+      "scope": "excluded",
+      "type": "container",
+      "version": "3.13.9-slim-trixie"
+    },
+    {
       "bom-ref": "python-dateutil",
       "externalReferences": [
         {
@@ -625,7 +662,7 @@
       ]
     }
   },
-  "serialNumber": "urn:uuid:cb4e64ca-e972-5329-87f1-2dc48e7f873b",
+  "serialNumber": "urn:uuid:d1adb4f6-7038-5e06-a054-608304981808",
   "specVersion": "1.6",
   "version": 1
 }

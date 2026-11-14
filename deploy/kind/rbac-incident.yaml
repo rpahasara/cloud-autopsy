@@ -1,0 +1,35 @@
+# CA-P2-004g: the collector's grant in the incident namespace, used only by the collector-logs-kind CI job.
+# The same read-only list/watch as rbac-watch.yaml, in ca-incident only, plus `get` on pods/log there
+# (plan M2). Deliberately absent: configmaps, secrets, every other subresource (exec, attach,
+# portforward, proxy, status, scale, ephemeral), every write verb, every other namespace, every
+# cluster-scoped resource, any ClusterRole(Binding), token requests. pods/log stays refused in ca-demo,
+# ca-other and kube-system (checked in CI with the real token).
+apiVersion: v1
+kind: Namespace
+metadata: {name: ca-collector}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: ca-collector, namespace: ca-collector}
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: ca-collector-incident, namespace: ca-incident}
+rules:
+  - apiGroups: [""]
+    resources: [pods, events]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+  - apiGroups: [apps]
+    resources: [deployments, replicasets]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: ca-collector-incident, namespace: ca-incident}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: ca-collector-incident}
+subjects:
+  - {kind: ServiceAccount, name: ca-collector, namespace: ca-collector}

@@ -32,6 +32,7 @@ CA-P2-004f adds, for the watch collector only:
 
 import http.client
 import ipaddress
+import re
 import socket
 import ssl
 import time
@@ -100,6 +101,31 @@ def build_watch_path(resource, namespace, resource_version, timeout_seconds):
         raise CollectorError("timeout_invalid")
     return (LIST_PATHS[resource][0].format(ns=namespace) + f"?watch=1&resourceVersion={resource_version}"
             f"&allowWatchBookmarks=true&timeoutSeconds={timeout_seconds}")
+
+
+POD_NAME = re.compile(r"[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?", re.ASCII)
+CONTAINER_NAME = re.compile(r"[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?", re.ASCII)
+
+
+def build_pod_path(namespace, name):
+    """``GET`` of one Pod by name (CA-P2-004g: the identity recheck after a log stream)."""
+    if not isinstance(namespace, str) or not NAMESPACE.fullmatch(namespace):
+        raise CollectorError("namespace_invalid")
+    if not isinstance(name, str) or not POD_NAME.fullmatch(name):
+        raise CollectorError("pod_name_invalid")
+    return f"/api/v1/namespaces/{namespace}/pods/{name}"
+
+
+def build_pod_log_path(namespace, name, container, tail_zero, limit_bytes):
+    """The only log paths this collector can form (CA-P2-004g): follow, runtime timestamps, one named
+    container, a byte limit; ``tailLines=0`` for rotation and drain streams. Never ``previous``."""
+    if not isinstance(container, str) or not CONTAINER_NAME.fullmatch(container):
+        raise CollectorError("container_invalid")
+    if type(limit_bytes) is not int or not 1 <= limit_bytes <= 1_048_576:
+        raise CollectorError("limit_invalid")
+    path = (build_pod_path(namespace, name) + f"/log?container={container}&follow=true&timestamps=true"
+            f"&limitBytes={limit_bytes}")
+    return path + "&tailLines=0" if tail_zero else path
 
 
 class Stream:

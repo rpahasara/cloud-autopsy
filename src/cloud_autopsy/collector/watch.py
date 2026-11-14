@@ -108,6 +108,8 @@ class _Resource:
         self.stream = None
         self.events = 0
         self.counts = {}
+        self.on_object = None   # CA-P2-004g: the pod-log manager hears listed and watched Pods
+        self.limits = ()        # CA-P2-004g: declared numeric limits (ReplicaSet projection only)
 
     # -------------------------------------------------------------------------- entries
     def _append(self, entry):
@@ -156,6 +158,9 @@ class _Resource:
             self.entries.append(entry)
             for key, value in result.counts.items():
                 self.counts[key] = self.counts.get(key, 0) + value
+        if self.on_object is not None and result.outcome in ("consistent", "truncated"):
+            for item in result.items:
+                self.on_object("LISTED", item)
         return result
 
     def _read(self):
@@ -307,7 +312,7 @@ class _Resource:
         if meta.get("namespace") != self.namespace:
             self._end("namespace_mismatch")
             return "done"
-        projected = project.project(self.name, obj, self.counts)
+        projected = project.project(self.name, obj, self.counts, self.limits)
         size = len(canonical.canonical_bytes(projected)) if projected is not None else 0
         with self.shared.lock:
             self.shared.buffer_bytes += size
@@ -320,6 +325,8 @@ class _Resource:
         self._append({"segment": self.segment, "type": "event", "received_ns": received, "event": kind,
                       "resource_version": value, "object": projected,
                       "withheld": None if projected is not None else "secret_event"})
+        if self.on_object is not None and projected is not None:
+            self.on_object(kind, projected)
         if self.events >= cfg.max_events:
             self._end("event_limit")
             return "done"
@@ -368,21 +375,36 @@ class _Resource:
         self.final_sent.set()
 
 
-def run_session(transport, namespace, config, clock=None, stop=None, on_signal=None):
+def run_session(transport, namespace, config, clock=None, stop=None, on_signal=None, pod_logs=None, limits=(),
+                resources=RESOURCES):
     """Run one session. Returns (entries by resource, clock, counts). ``stop`` is an Event that ends
-    the session early (``on_signal()`` True marks the end as a signal)."""
+    the session early (``on_signal()`` True marks the end as a signal).
+
+    CA-P2-004g: ``pod_logs`` (a ``podlogs.LogConfig``) also records the pods' logs; the entries are
+    returned under ``"pod_logs"``. ``limits``: validated declared numeric limits (``limits.py``)."""
     config.check()
     clock = clock or SessionClock()
     shared = _Shared(config)
     shared.deadline = time.monotonic() + config.session_seconds
     shared.final_deadline = None
-    resources = {name: _Resource(name, shared, transport, namespace, clock) for name in RESOURCES}
+    if not set(resources) <= set(RESOURCES) or not {"deployments", "pods", "replicasets"} <= set(resources):
+        raise cl.CollectorError("resources_invalid")   # only Events may be left out (recording 0.7)
+    resources = {name: _Resource(name, shared, transport, namespace, clock) for name in sorted(resources)}
+    resources["replicasets"].limits = tuple(limits)
+    logs = None
+    if pod_logs is not None:
+        from . import podlogs
+        logs = podlogs.PodLogManager(transport, namespace, clock, pod_logs)
+        resources["pods"].on_object = logs.on_pod
     threads = []
     for res in resources.values():
         threads.append(threading.Thread(target=res.run_reader, name=f"ca-watch-{res.name}", daemon=True))
         threads.append(threading.Thread(target=res.run_prober, name=f"ca-probe-{res.name}", daemon=True))
     for t in threads:
         t.start()
+    if logs is not None:
+        log_thread = threading.Thread(target=logs.run, name="ca-logs", daemon=True)
+        log_thread.start()
     stop = stop or threading.Event()
     end = time.monotonic() + config.session_seconds
     while time.monotonic() < end and not stop.is_set() and not all(r.done.is_set() for r in resources.values()):
@@ -403,6 +425,12 @@ def run_session(transport, namespace, config, clock=None, stop=None, on_signal=N
         stream = res.stream
         if stream is not None:
             stream.close()
+    log_entries = None
+    if logs is not None:
+        # The final Pod probe was sent before the readers finished: drain after it (plan 4.4 step 3).
+        resources["pods"].final_sent.wait(5)
+        log_entries = logs.finish()
+        log_thread.join(timeout=5)
     join_deadline = time.monotonic() + 10  # one bound for all threads, not ten seconds each
     for t in threads:
         t.join(timeout=max(0.0, join_deadline - time.monotonic()))
@@ -421,4 +449,7 @@ def run_session(transport, namespace, config, clock=None, stop=None, on_signal=N
                             "at_ns": clock.offset_ns(), "code": "reader_stalled", "http_status": None})
         snapshot[name] = entries
     counts = {name: dict(sorted(r.counts.items())) for name, r in resources.items()}
+    if logs is not None:
+        snapshot["pod_logs"] = log_entries
+        counts["pod_logs"] = dict(sorted(logs.counts.items()))
     return snapshot, clock, counts

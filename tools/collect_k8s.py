@@ -49,8 +49,19 @@ def main(argv=None):
     parser.add_argument("--final-wait", type=float, default=90.0)
     parser.add_argument("--watch-timeout", type=int, default=600, help="max timeoutSeconds per watch request")
     parser.add_argument("--max-reconnects", type=int, default=3)
-    parser.add_argument("--ordering-rules", choices=("0.1", "0.2"), default="0.1",
+    parser.add_argument("--no-events", action="store_true",
+                        help="incident mode only (with --incident-window): do not collect Kubernetes Events; declared "
+                             "before collection and recorded (recording 0.7). Scoped to the CA-P2 synthetic milestone")
+    parser.add_argument("--ordering-rules", choices=("0.1", "0.2", "0.3"), default="0.1",
                         help="timeline rules the plan pins: 0.1 (event ordering, default) or 0.2 (observed-first, CA-P2-005b)")
+    parser.add_argument("--pod-logs", action="store_true",
+                        help="also follow the namespace's pod logs (CA-P2-004g; recording 0.5, observation kinds 0.4)")
+    parser.add_argument("--log-rotation", type=float, default=5.0, help="seconds between overlapping log streams")
+    parser.add_argument("--log-drain-wait", type=float, default=10.0)
+    parser.add_argument("--incident-window", default=None, metavar="START:END",
+                        help="seconds after the session starts; fixed before collection (recording 0.6, M12)")
+    parser.add_argument("--declare-limit", action="append", default=[], metavar="CONTAINER:ENV:CATALOG_KEY",
+                        help="a declared numeric limit (only with --pod-logs), e.g. checkout-api:DB_POOL_MAX:pool.maxConnections")
     args = parser.parse_args(argv)
     config = co.CollectorConfig(server=args.server, ca_file=args.ca_file, token_file=args.token_file,
                                 namespace=args.namespace, cluster_id=args.cluster_id, recording_id=args.recording_id,
@@ -88,9 +99,22 @@ def _watch(args, config):
                              max_events=args.max_events, final_wait_s=args.final_wait, page_limit=args.page_limit,
                              watch_timeout_s=args.watch_timeout, max_reconnects=args.max_reconnects,
                              max_pages=args.max_pages, max_restarts=args.max_restarts)
+    pod_logs = None
+    if args.pod_logs:
+        from cloud_autopsy.collector import podlogs
+        pod_logs = podlogs.LogConfig(rotation_s=args.log_rotation, drain_wait_s=args.log_drain_wait)
+    declared = [tuple(d.split(":")) for d in args.declare_limit]
+    window = None
+    if args.incident_window is not None:
+        try:
+            window = tuple(int(v) for v in args.incident_window.split(":"))
+        except ValueError:
+            window = ("invalid",)
     try:
         _, conversion, report = co.run_watch(config, wconfig, args.out, stop=stop, on_signal=lambda: bool(signalled),
-                                             rule_profile=2 if args.ordering_rules == "0.2" else 1)
+                                             rule_profile={"0.1": 1, "0.2": 2, "0.3": 3}[args.ordering_rules],
+                                             pod_logs=pod_logs, declared_limits=declared, incident_window=window,
+                                             no_events=args.no_events)
     except (cl.CollectorError, K.RecordingError) as exc:  # codes only; never a response body
         print(json.dumps({"status": "refused", "code": exc.code}) if args.json else f"REFUSED: {exc.code}")
         return 1
@@ -102,6 +126,11 @@ def _watch(args, config):
             print(f"{a['query_id']:16} outcomes={'/'.join(a['outcomes']):28} verified_ms={a['verified_coverage_ms']:<7} "
                   f"segments={len(a['segments'])} ends={ends} withheld={a['withheld']} unconverted={a['unconverted']}")
         print(f"verified coverage: {report['verified_coverage_ms']} ms (collector clock; API-server clock unknown)")
+        logs = conversion.report.get("pod_logs")
+        if logs is not None:
+            print(f"pod logs: coverage proven={logs['coverage_proven']} instances={len(logs['instances'])} "
+                  f"gaps={sorted({g[2] for g in logs['gaps']})} log basis emitted={logs['basis_emitted']}"
+                  f"{'' if logs['basis_emitted'] else ' (' + str(logs['not_emitted_because']) + ')'}")
     return 0
 
 

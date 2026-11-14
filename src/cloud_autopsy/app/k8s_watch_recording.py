@@ -106,7 +106,35 @@ END_CODES = ("expired", "denied", "unavailable", "timeout", "rate_limited", "inv
              "rv_invalid", "rv_regression", "namespace_mismatch", "reconnects_exhausted", "relists_exhausted",
              "event_limit", "buffer_limit", "session_end", "signal", "list_failed", "list_truncated",
              "reader_failed", "reader_stalled")
-_PART = re.compile(r"streams/(pods|replicasets|deployments|events)-[0-9]{4}\.json", re.ASCII)
+_PART = re.compile(r"streams/(pods|replicasets|deployments|events|pod_logs)-[0-9]{4}\.json", re.ASCII)
+# CA-P2-004g, recording 0.5: the 0.4 manifest plus ``pod_logs`` and a fifth stream, ``pod_logs``.
+RECORDING_VERSION_V5 = K.RECORDING_VERSION_V5
+# CA-P2-004g, recording 0.6: 0.5 plus the M12a-c completeness classification (app/completeness.py) and a
+# predefined ``incident_window`` (offsets from the anchor, fixed before collection). The verified interval is
+# computed from bases only and reported beside it; the plan window is not narrowed (see M12d in
+# docs/phase2/ca-p2-004/ca-p2-004g-completeness.md).
+RECORDING_VERSION_V6 = K.RECORDING_VERSION_V6
+# Recording 0.7 (product-owner decision 2026-11-14, scoped to the CA-P2 synthetic rollout milestone): 0.6 with the
+# ``k8s.events`` acquisition explicitly not collected, declared before collection. The manifest names it in
+# ``not_collected`` with its reason; the stream is absent; the source registry and the run plan do not list the
+# query (the registry ID says so); the report repeats it. Nothing is claimed about Events -- no coverage and no
+# gap -- and the verified interval is computed over the acquisitions actually declared for the run. No mechanism
+# in catalog 0.1 reads ``k8s_event``. Recordings 0.4-0.6 keep the Events acquisition and convert unchanged.
+RECORDING_VERSION_V7 = K.RECORDING_VERSION_V7
+LOG_VERSIONS = (RECORDING_VERSION_V5, RECORDING_VERSION_V6, RECORDING_VERSION_V7)
+WINDOW_VERSIONS = (RECORDING_VERSION_V6, RECORDING_VERSION_V7)
+EVENTS_EXCLUSION = {"query_id": "k8s.events",
+                    "reason": "no_bookmarks_cannot_prove_quiet_periods; product-owner decision, CA-P2 synthetic rollout milestone only"}
+
+
+def run_queries(manifest):
+    """The acquisitions declared for this recording: all four Kubernetes queries, except under 0.7 (no Events)."""
+    if manifest.get("contract_version") == RECORDING_VERSION_V7:
+        return {q: r for q, r in QUERIES.items() if q != "k8s.events"}
+    return dict(QUERIES)
+LOG_QUERY = "k8s.pods.log"
+RUNTIME_DOMAIN = "k8s-container-runtime"
+ENVELOPE = "CA1"
 _CODE = re.compile(r"[a-z][a-z0-9_]{0,63}", re.ASCII)
 NS_PER_MS = 1_000_000
 MAX_NS = 32_503_680_000 * 10 ** 9  # year 3000: a bound, never a meaning
@@ -141,7 +169,11 @@ def _int(value, where, low=0, high=MAX_NS):
 # ------------------------------------------------------------------------------------- reading
 
 def _manifest(manifest):
-    if not isinstance(manifest, dict) or set(manifest) != _MANIFEST_KEYS:
+    version = manifest.get("contract_version") if isinstance(manifest, dict) else None
+    v5 = version in LOG_VERSIONS
+    keys = _MANIFEST_KEYS | ({"pod_logs"} if v5 else set()) | ({"incident_window"} if version in WINDOW_VERSIONS else set()) \
+        | ({"not_collected"} if version == RECORDING_VERSION_V7 else set())
+    if not isinstance(manifest, dict) or set(manifest) != keys:
         raise K.RecordingError("recording_manifest_invalid", "the manifest must have exactly the documented fields")
     if manifest["data_classification"] != "synthetic":
         raise K.RecordingError("recording_classification_refused", "only synthetic recordings are accepted")
@@ -176,9 +208,16 @@ def _manifest(manifest):
         raise K.RecordingError("recording_manifest_invalid", "anchor_wall must be RFC 3339 UTC with nine fraction digits")
     _int(collector["max_drift_ms"], "clocks.collector.max_drift_ms", 0, 10 ** 12)
     streams = manifest["streams"]
+    if version == RECORDING_VERSION_V7 and manifest["not_collected"] != [EVENTS_EXCLUSION]:
+        raise K.RecordingError("recording_manifest_invalid", "a 0.7 recording declares exactly the Events exclusion")
+    expected = sorted(list(run_queries(manifest).values()) + (["pod_logs"] if v5 else []))
     if not isinstance(streams, list) or sorted(s.get("resource") if isinstance(s, dict) else None
-                                               for s in streams) != sorted(QUERIES.values()):
-        raise K.RecordingError("recording_manifest_invalid", "streams must list each of the four resources once")
+                                               for s in streams) != expected:
+        raise K.RecordingError("recording_manifest_invalid", "streams must list each resource once")
+    if v5:
+        _pod_log_manifest(manifest["pod_logs"])
+    if version in WINDOW_VERSIONS:
+        _incident_window(manifest["incident_window"])
     files = []
     for s in streams:
         if set(s) != {"resource", "parts"} or not isinstance(s["parts"], list) or not 1 <= len(s["parts"]) <= MAX_PARTS:
@@ -192,6 +231,35 @@ def _manifest(manifest):
                 raise K.RecordingError("recording_manifest_conflict", "a stream part is listed twice")
             files.append(part["file"])
     return files, parsed.epoch_ns
+
+
+def _pod_log_manifest(section):
+    """The 0.5 ``pod_logs`` section: the pinned template catalog, the envelope and the declared limits."""
+    from ..collector import limits as LIM
+    from ..collector import logline
+    if not isinstance(section, dict) or set(section) != {"catalog", "envelope", "declared_limits", "runtime_clock"}:
+        raise K.RecordingError("recording_manifest_invalid", "pod_logs has exactly the documented fields")
+    if section["catalog"] != {"version": logline.CATALOG_VERSION, "digest": logline.catalog_digest()}:
+        raise K.RecordingError("recording_manifest_invalid", "pod_logs names another template catalog")
+    if section["envelope"] != ENVELOPE or section["runtime_clock"] != {"clock_domain_id": RUNTIME_DOMAIN}:
+        raise K.RecordingError("recording_manifest_invalid", "pod_logs names another envelope or runtime clock")
+    try:
+        declared = LIM.check_declarations(section["declared_limits"])
+    except LIM.LimitDeclarationError as exc:
+        raise K.RecordingError("recording_manifest_invalid", str(exc)) from None
+    if LIM.as_records(declared) != section["declared_limits"]:
+        raise K.RecordingError("recording_manifest_invalid", "declared_limits must be sorted and unique")
+    return declared
+
+
+def _incident_window(window):
+    """The predefined incident window: offsets in ms from the anchor, fixed before collection."""
+    if not isinstance(window, dict) or set(window) != {"start_offset_ms", "end_offset_ms"}:
+        raise K.RecordingError("recording_manifest_invalid", "incident_window has exactly start_offset_ms and end_offset_ms")
+    start, end = window["start_offset_ms"], window["end_offset_ms"]
+    if type(start) is not int or type(end) is not int or not 0 <= start < end <= MAX_OFFSET_NS // NS_PER_MS:
+        raise K.RecordingError("recording_manifest_invalid", "incident_window is a non-empty interval after the anchor")
+    return start, end
 
 
 def _check_layout(root, files):
@@ -230,6 +298,13 @@ def _entries(root, stream):
                 or doc["part"] != n or not isinstance(doc["entries"], list):
             raise _bad("a stream part must name its resource and number")
         entries += doc["entries"]
+    if stream["resource"] == "pod_logs":
+        from . import pod_logs as PL
+        try:
+            PL.check_entries(entries)
+        except PL.LogEntryError as exc:
+            raise _bad(f"pod_logs: {exc}") from None
+        return entries
     for i, entry in enumerate(entries, 1):
         if not isinstance(entry, dict) or entry.get("type") not in _ENTRY_KEYS or set(entry) != _ENTRY_KEYS[entry["type"]]:
             raise _bad("an entry has an unknown type or fields")
@@ -505,30 +580,51 @@ def _change_observations(resource, event, observed, state):
 
 # ------------------------------------------------------------------------------------- convert
 
-def convert(root, manifest, manifest_sha, rule_profile=1):
+def convert(root, manifest, manifest_sha, rule_profile=1, _incident_window_ms=None):
     """``rule_profile``: 1 (the default; timeline rules 0.1, ``event`` ordering) or 2 (CA-P2-005b,
-    timeline rules 0.2, ``observed``-first ordering). Chosen explicitly; never inferred."""
-    if rule_profile not in (1, 2):
-        raise K.RecordingError("recording_rules_unsupported", "rule profile must be 1 or 2")
+    timeline rules 0.2, ``observed``-first ordering). Chosen explicitly; never inferred.
+
+    Recording 0.6 (M12d): when ``_window_decision`` allows it, the conversion is derived a second time with the
+    plan window set to the incident window declared before collection (``_incident_window_ms``, internal)."""
+    if rule_profile not in (1, 2, 3):
+        raise K.RecordingError("recording_rules_unsupported", "rule profile must be 1, 2 or 3")
     files, anchor_ns = _manifest(manifest)
     _check_layout(root, files)
+    v5 = manifest["contract_version"] in LOG_VERSIONS
+    v6 = manifest["contract_version"] in WINDOW_VERSIONS
+    v7 = manifest["contract_version"] == RECORDING_VERSION_V7
+    queries_run = run_queries(manifest)
+    kinds = ev.KIND_REGISTRY_VERSION_V4 if v5 else ev.KIND_REGISTRY_VERSION_V3
     collector, server = manifest["clocks"]["collector"], manifest["clocks"]["api_server"]
     domain, server_domain = collector["clock_domain_id"], server["clock_domain_id"]
     ctx = {"namespace": manifest["namespace"], "source_id": manifest["source_id"], "clock": server_domain,
            "rv_pattern": re.compile(r"[1-9][0-9]{0,127}", re.ASCII)}
     if not isinstance(ctx["namespace"], str):
         raise K.RecordingError("recording_manifest_invalid", "namespace must be a string")
-    streams = {s["resource"]: _segments(_absolute(_entries(root, s), anchor_ns), s["resource"], ctx["namespace"])
-               for s in manifest["streams"]}
+    if v5:
+        ctx["declared_limits"] = _pod_log_manifest(manifest["pod_logs"])
+    ctx["v6"] = v6
+    log_entries = None
+    streams = {}
+    for s in manifest["streams"]:
+        entries = _absolute(_entries(root, s), anchor_ns)
+        if s["resource"] == "pod_logs":
+            log_entries = entries
+        else:
+            streams[s["resource"]] = _segments(entries, s["resource"], ctx["namespace"])
 
     times = [t for segs in streams.values() for s in segs for t in
              [s.listing["sent_ns"], s.listing["last_page_ns"], s.end.get("at_ns")]
              + [e["received_ns"] for e in s.events] + [p["received_ns"] for p in s.probes] if t is not None]
+    for e in log_entries or []:
+        times += [e[k] for k in ("sent_ns", "received_ns", "at_ns") if k in e]
     if not times:
         raise K.RecordingError("recording_manifest_invalid", "a recording has at least one timed entry")
     window = (min(times) // NS_PER_MS, _ceil_ms(max(times)) + 1)
     if window[1] - window[0] > LIMITS["max_window_ms"]:
         raise K.RecordingError("recording_manifest_invalid", "a recording spans at most one hour")
+    if _incident_window_ms is not None:
+        window = tuple(_incident_window_ms)
 
     recording_id = manifest["recording_id"]
     try:
@@ -536,11 +632,17 @@ def convert(root, manifest, manifest_sha, rule_profile=1):
             ti.clock_domain(domain, ti.UNKNOWN, continuity=ti.STEP_DECLARED if collector["step_detected"]
                             else ti.CONTINUOUS).to_record(),
             ti.clock_domain(server_domain, ti.UNKNOWN).to_record()]
-        registry_record = {"contract_version": SOURCE_REGISTRY_VERSION, "registry_id": f"{recording_id}-sources",
+        domains, queries = [domain, server_domain], sorted(queries_run)
+        if v5:  # the container runtime's own timestamps: a separate domain, declared unknown, never ordered
+            clock_records.append(ti.clock_domain(RUNTIME_DOMAIN, ti.UNKNOWN).to_record())
+            domains.append(RUNTIME_DOMAIN)
+            queries = sorted(queries + [LOG_QUERY])
+        clock_records.sort(key=lambda c: c["clock_domain_id"])
+        registry_record = {"contract_version": SOURCE_REGISTRY_VERSION,
+                           "registry_id": f"{recording_id}-src-noevents" if v7 else f"{recording_id}-sources",
                            "sources": [{"source_id": ctx["source_id"], "source_kind": "kubernetes_api",
                                         "cluster_id": manifest["cluster_id"], "namespace": ctx["namespace"],
-                                        "clock_domain_ids": sorted([domain, server_domain]),
-                                        "query_ids": sorted(QUERIES)}]}
+                                        "clock_domain_ids": sorted(domains), "query_ids": queries}]}
         registry = SourceRegistry.from_record(registry_record)
         clocks.declare(registry, clock_records)
     except (ContractError, clocks.ClockDeclarationError) as exc:
@@ -548,9 +650,9 @@ def convert(root, manifest, manifest_sha, rule_profile=1):
     plan_record = {"contract_version": pl.RUN_PLAN_VERSION, "plan_id": recording_id, "registry_id": registry.registry_id,
                    "registry_digest": registry.digest,
                    "window": {"start": K._ms_text(window[0]), "end": K._ms_text(window[1])},
-                   "expected_acquisitions": [{"source_id": ctx["source_id"], "query_id": q, "mandatory": MANDATORY[q]}
-                                             for q in sorted(QUERIES)],
-                   "contract_versions": pl.required_contract_versions(ev.KIND_REGISTRY_VERSION_V3),
+                   "expected_acquisitions": [{"source_id": ctx["source_id"], "query_id": q,
+                                              "mandatory": MANDATORY.get(q, True)} for q in queries],
+                   "contract_versions": pl.required_contract_versions(kinds),
                    "rule_versions": required_rule_versions(rule_profile), "synthesis_mode": "disabled", "limits": dict(LIMITS)}
     try:
         plan = pl.RunPlan.from_record(plan_record, registry)
@@ -566,8 +668,8 @@ def convert(root, manifest, manifest_sha, rule_profile=1):
                 state.learn_replicaset(event["object"])
 
     acquisitions, batches = [], []
-    for query in sorted(QUERIES):
-        resource = QUERIES[query]
+    for query in sorted(queries_run):
+        resource = queries_run[query]
         entry, records = _acquisition(plan, ctx, domain, manifest["session_id"], query, resource,
                                       streams[resource], state)
         for record in records:
@@ -575,7 +677,18 @@ def convert(root, manifest, manifest_sha, rule_profile=1):
             for observation in observations:  # the evidence contract, before anything is written
                 ev.observe(observation, source_id=ctx["source_id"], registry=registry,
                            delivery={"query_id": query, "batch_id": "check", "attempt": 1},
-                           kind_registry_version=ev.KIND_REGISTRY_VERSION_V3)
+                           kind_registry_version=kinds)
+        acquisitions.append(entry)
+        batches += records
+    log_report = None
+    if v5:
+        entry, records, log_report = _log_acquisition(plan, ctx, domain, manifest["session_id"], streams["pods"],
+                                                      log_entries, window)
+        for record in records:
+            for observation in record["observations"]:
+                ev.observe(observation, source_id=ctx["source_id"], registry=registry,
+                           delivery={"query_id": LOG_QUERY, "batch_id": "check", "attempt": 1},
+                           kind_registry_version=kinds)
         acquisitions.append(entry)
         batches += records
     for record in batches:
@@ -585,7 +698,7 @@ def convert(root, manifest, manifest_sha, rule_profile=1):
             raise K.RecordingError("recording_conversion_invalid", exc.code) from None
     verified = sum(a["verified_coverage_ms"] for a in acquisitions)
     report = {"contract_version": REPORT_VERSION, "recording_id": recording_id, "recording_sha256": manifest_sha,
-              "recording_version": RECORDING_VERSION, "kind_registry_version": ev.KIND_REGISTRY_VERSION_V3,
+              "recording_version": manifest["contract_version"], "kind_registry_version": kinds,
               "bundle_id": recording_id, "source_id": ctx["source_id"], "cluster_id": manifest["cluster_id"],
               "namespace": ctx["namespace"], "plan_digest": plan.digest, "session_id": manifest["session_id"],
               "collector_clock": {"clock_domain_id": domain, "step_detected": collector["step_detected"],
@@ -597,11 +710,34 @@ def convert(root, manifest, manifest_sha, rule_profile=1):
                        "consistent-read probe that the watch later reached; bookmarks, events or an open connection "
                        "alone cover nothing. Withheld or unconverted changes make a segment partial "
                        "(changes_withheld). Every other period is a gap.")}
+    if log_report is not None:
+        report["pod_logs"] = log_report
+    if v7:
+        report["not_collected"] = [dict(EVENTS_EXCLUSION, statement="Kubernetes Events: Not collected")]
+    if v6:
+        report["intervals"] = _intervals(manifest, anchor_ns, batches, plan)
+        decision = _window_decision(report["intervals"], batches, domain)
+        report["intervals"].update(decision)
+        if decision["narrowed"] and _incident_window_ms is None:
+            again = convert(root, manifest, manifest_sha, rule_profile,
+                            _incident_window_ms=tuple(report["intervals"]["requested_incident_window_ms"]))
+            # The second derivation keeps the first one's measurement: V and the decision come from the
+            # full-span derivation, where every proof is visible whole.
+            plan_window = again.plan_record["window"]
+            again.report["intervals"] = dict(report["intervals"])
+            again.report["intervals"]["plan_window_ms"] = [pl.exact_ms(plan_window["start"], "start"),
+                                                           pl.exact_ms(plan_window["end"], "end")]
+            canonical.canonical_bytes(again.report)
+            return again
+        if _incident_window_ms is not None and not decision["narrowed"]:
+            raise K.RecordingError("recording_conversion_invalid", "the narrowed derivation disagrees with the decision")
     canonical.canonical_bytes(report)
     return K.Conversion(recording_id, registry_record, plan_record, tuple(clock_records), tuple(batches), report)
 
 
 def _acquisition(plan, ctx, domain, session_id, query, resource, segments, state):
+    if ctx.get("v6"):
+        return _acquisition_v6(plan, ctx, domain, session_id, query, resource, segments, state)
     stem = query.replace("k8s.", "")
     entry = {"query_id": query, "resource": resource, "segments": [], "verified_coverage_ms": 0,
              "observations": 0, "withheld": {}, "unconverted": {}, "outcomes": []}
@@ -687,6 +823,341 @@ def _acquisition(plan, ctx, domain, session_id, query, resource, segments, state
     return entry, records
 
 
+RELEVANT_KINDS = ("deployment_rollout", "configmap_change", "k8s_object_deleted", "alert_firing")
+
+
+def _bracket_ms(observation, domain):
+    """The observation's ``observed`` bracket on the session clock as inclusive ms, or None."""
+    for t in observation["times"]:
+        if t["timestamp_kind"] == ev.OBSERVED_TIME and t["clock_domain_id"] == domain:
+            stamp = ti.source_timestamp(t["raw"], timestamp_kind=t["timestamp_kind"], clock_domain_id=domain,
+                                        declared_precision_ns=t["declared_precision_ns"])
+            return stamp.local_lower_ms, stamp.local_upper_ms
+    return None
+
+
+def _window_decision(intervals, batches, domain):
+    """M12d: may the plan window be the incident window declared before collection? Only when all hold:
+    1. a common verified interval exists, computed from the batches' proofs (basis anchors) alone, and it
+       contains the whole incident window;
+    2. every batch of every acquisition is clean (complete or empty): no partial tail, no unproven segment;
+    3. causal-scope safeguard: every causally relevant observation that carries an ``observed`` bracket -- a
+       change (rollout, ConfigMap change, deletion), an alert, or a symptom log line -- has that bracket
+       entirely inside the incident window. A cause, a symptom or a contradiction outside the window therefore
+       keeps the full-span window (and its gaps): it is never narrowed away, and evidence outside the window
+       can never resolve it.
+    Nothing is ever dropped: when the window is narrowed, every observation stays in its batch and in front of
+    the engine. Returns the decision and every reason it was refused."""
+    from ..engine.mechanisms import SYMPTOM_BY_CONFIG_KEY
+    requested, verified = intervals["requested_incident_window_ms"], intervals["verified_interval_ms"]
+    reasons, outside = [], []
+    if verified is None:
+        reasons.append("no_common_verified_interval")
+    elif not (verified[0] <= requested[0] and requested[1] <= verified[1]):
+        reasons.append("incident_window_not_inside_verified_interval")
+    if intervals["acquisitions_with_unclean_batches"]:
+        reasons.append("unclean_batches")
+    symptoms = set(SYMPTOM_BY_CONFIG_KEY.values())
+    for b in batches:
+        for o in b["observations"]:
+            relevant = o["observation_kind"] in RELEVANT_KINDS or (
+                o["observation_kind"] == "log_line" and o["attributes"].get("template") in symptoms)
+            bracket = _bracket_ms(o, domain) if relevant else None
+            if bracket is not None and not (requested[0] <= bracket[0] and bracket[1] < requested[1]):
+                outside.append({"source_ref": o["source_ref"], "observation_kind": o["observation_kind"],
+                                "bracket_ms": list(bracket), "query_id": b["query_id"]})
+    if outside:
+        reasons.append("relevant_evidence_outside_incident_window")
+    outside.sort(key=lambda d: (d["bracket_ms"], d["source_ref"]))
+    return {"narrowed": not reasons, "narrowing_refused": reasons,
+            "relevant_outside_count": len(outside), "relevant_outside": outside[:50]}
+
+
+def _intervals(manifest, anchor_ns, batches, plan):
+    """Recording 0.6 (M12d, measurement only): the predefined incident window beside the jointly verified
+    interval, computed solely from complete and empty batches (their bases). The plan window is not changed:
+    under batch 0.3 a basis's coverage must equal its anchors and lie inside the plan window, so a window
+    strictly inside the verified interval is not expressible without a contract change."""
+    start, end = _incident_window(manifest["incident_window"])
+    requested = [anchor_ns // NS_PER_MS + start, anchor_ns // NS_PER_MS + end]
+    per_query = {}
+    for b in batches:
+        if b["outcome"] in (acq.COMPLETE, acq.EMPTY):
+            basis = b["coverage_basis"]   # the proof: its anchors, never the claimed (possibly narrower) coverage
+            lo = pl.exact_ms(basis["start_anchor"]["at"], "start")
+            hi = pl.exact_ms(basis["end_anchor"]["at"], "end")
+            per_query.setdefault(b["query_id"], []).append((lo, hi))
+    unclean = sorted({b["query_id"] for b in batches if b["outcome"] not in (acq.COMPLETE, acq.EMPTY)})
+    verified = None
+    queries = [a["query_id"] for a in plan.to_record()["expected_acquisitions"]]
+    if all(q in per_query for q in queries):
+        lo = max(min(i[0] for i in per_query[q]) for q in queries)
+        hi = min(max(i[1] for i in per_query[q]) for q in queries)
+        # one interval only: every acquisition's clean coverage must be contiguous over [lo, hi]
+        contiguous = all(_covers(per_query[q], lo, hi) for q in queries)
+        verified = [lo, hi] if lo < hi and contiguous else None
+    inside = verified is not None and verified[0] <= requested[0] and requested[1] <= verified[1]
+    return {"requested_incident_window_ms": requested, "verified_interval_ms": verified,
+            "requested_inside_verified": inside, "acquisitions_with_unclean_batches": unclean,
+            "plan_window_ms": [plan.window_start_ms, plan.window_end_ms],
+            "note": ("The verified interval is computed only from complete and empty batches. The plan window is "
+                     "the recording's span and is not narrowed; outside the verified interval, coverage is a gap.")}
+
+
+def _covers(intervals, lo, hi):
+    at = lo
+    for a, b in sorted(intervals):
+        if a > at:
+            break
+        at = max(at, b)
+    return at >= hi
+
+
+def _acquisition_v6(plan, ctx, domain, session_id, query, resource, segments, state):
+    """Recording 0.6 (M12a-c). As ``_acquisition``, except:
+    - a consistent list opens the first proven batch as its starting state (listed objects keep only their
+      API-server ``event`` time, so they stay distinguishable from changes witnessed with an ``observed``
+      bracket); a truncated list or an unproven segment keeps the 0.4 partial batches;
+    - unconverted changes classified by ``completeness.classify`` are counted by class, with provenance, and
+      do not make the batch partial; every other unconverted change is withheld exactly as before."""
+    from . import completeness as CM
+    stem = query.replace("k8s.", "")
+    entry = {"query_id": query, "resource": resource, "segments": [], "verified_coverage_ms": 0,
+             "observations": 0, "withheld": {}, "unconverted": {}, "outcomes": [], "classified": {},
+             "classified_items": []}
+    plans = []
+    first = segments[0] if segments else None
+    if first is None or first.listing["outcome"] not in ("consistent", "truncated"):
+        code = first.listing["outcome"] if first else "invalid"
+        outcome, reason = K._V3_FAILURES.get(code, (acq.FAILED, "source_unavailable"))
+        records = _records(plan, ctx, query, stem, [(outcome, reason, None, [], None, None, False)])
+        entry["outcomes"] = [outcome]
+        entry["segments"].append({"segment": 1, "list": code, "proven": False})
+        return entry, records
+
+    for segment in segments:
+        listing = segment.listing
+        info = {"segment": segment.number, "list": listing["outcome"], "reconnects": segment.disconnects,
+                "end": segment.end["code"], "proven": False, "probes": len(segment.probes)}
+        entry["segments"].append(info)
+        if listing["outcome"] not in ("consistent", "truncated"):
+            continue
+        start_rv = listing["collection_resource_version"]
+        probe, proving = _proof(segment) if listing["outcome"] == "consistent" else (None, None)
+        steps = []   # (step for completeness.classify, observations)
+        for item in listing["items"]:
+            meta = item["metadata"]
+            key = (meta.get("uid"), meta.get("resourceVersion"))
+            if key in state.seen:
+                continue
+            reason, observations = None, []
+            try:
+                observations = _convert_object(resource, item, state, change=False)
+                state.seen.add(key)
+            except K._ItemInvalid as exc:
+                reason = exc.code
+            steps.append(({"uid": meta.get("uid"), "rv": meta.get("resourceVersion"), "event": "LISTED",
+                           "object": item, "reason": reason, "in_proof": probe is not None}, observations))
+        withheld = listing["withheld"]
+        if withheld:
+            entry["withheld"]["list"] = entry["withheld"].get("list", 0) + withheld
+        n_listed = len(steps)
+        for event in segment.events:
+            lower = _lower_bound(segment, event["resource_version"])
+            observed = _observed(lower, event["received_ns"], domain)
+            observations, reason = _change_observations(resource, event, observed, state)
+            in_proof = proving is not None and rv.compare(event["resource_version"], proving) <= 0
+            obj = event["object"]
+            steps.append(({"uid": (obj or {}).get("metadata", {}).get("uid"), "rv": event["resource_version"],
+                           "event": event["event"], "object": obj, "reason": reason, "in_proof": in_proof,
+                           "withheld_object": obj is None}, observations))
+        classes = CM.classify(resource, [s for s, _ in steps])
+        baseline, proven, tail, missing = [], [], [], 0
+        for i, (step, observations) in enumerate(steps):
+            listed = i < n_listed
+            if step["reason"]:
+                cls = classes.get(i)
+                if cls is not None:
+                    entry["classified"][cls] = entry["classified"].get(cls, 0) + 1
+                    entry["classified_items"].append([step["uid"], step["rv"], step["event"], cls])
+                else:
+                    bucket = entry["withheld"] if step.get("withheld_object") else entry["unconverted"]
+                    bucket[step["reason"]] = bucket.get(step["reason"], 0) + 1
+                    if step["in_proof"]:
+                        missing += 1
+            if listed:
+                baseline.extend(observations)
+            else:
+                (proven if step["in_proof"] else tail).extend(observations)
+        last_ns = max([segment.end["at_ns"]] + [e["received_ns"] for e in segment.events])
+        if probe is not None and not withheld:
+            start_ms, end_ms = _ceil_ms(listing["first_page_ns"]), probe["sent_ns"] // NS_PER_MS
+            coverage = (start_ms, end_ms)
+            if missing:
+                plans.append((acq.PARTIAL, "changes_withheld", coverage, baseline + proven, None, None, False))
+            else:
+                basis = {"kind": acq.WATCH_CONTINUITY, "resource_type": RESOURCE_TYPES[resource],
+                         "session_id": session_id, "clock_domain_id": domain, "rv_comparison": rv.RV_COMPARISON,
+                         "start_anchor": {"kind": "list_first_page_received", "at": K._ms_text(start_ms),
+                                          "resource_version": start_rv},
+                         "end_anchor": {"kind": "probe_sent", "at": K._ms_text(end_ms),
+                                        "resource_version": probe["resource_version"],
+                                        "proven_by_resource_version": proving}}
+                plans.append((acq.COMPLETE, None, coverage, baseline + proven, basis, f"rv:{proving}", False))
+                info["proven"] = True
+                entry["verified_coverage_ms"] += end_ms - start_ms
+            tail_start = end_ms
+        else:   # the 0.4 shape: the list state is unplaced, nothing is proven
+            plans.append((acq.PARTIAL, "page_limit" if listing["outcome"] == "truncated" else "continuity_lost",
+                          (listing["sent_ns"] // NS_PER_MS, _ceil_ms(listing["first_page_ns"]) + 1), baseline, None,
+                          None, listing["outcome"] == "truncated"))
+            if listing["outcome"] == "truncated":
+                continue
+            tail_start = _ceil_ms(listing["first_page_ns"])
+            if probe is not None:   # proven but the list withheld objects: changes stay partial too
+                tail = proven + tail
+        limited = segment.end["code"] in ("event_limit", "buffer_limit")
+        if tail or limited or probe is None:
+            reason = "event_limit" if limited else "continuity_unproven"
+            tail_end = max(_ceil_ms(last_ns) + 1, tail_start + 1)
+            plans.append((acq.PARTIAL, reason, (tail_start, tail_end), tail, None, None, limited))
+    records = _records(plan, ctx, query, stem, plans)
+    entry["outcomes"] = sorted({r["outcome"] for r in records})
+    entry["observations"] = sum(len(r["observations"]) for r in records)
+    entry["classified_items"].sort()
+    return entry, records
+
+
+def _pod_facts(segments):
+    """What the Pod watch says about each pod and name (plan section 5), for the log derivation."""
+    pods, names = {}, {}
+
+    def seen(item, at, kind, created_lower=None):
+        meta = item.get("metadata") or {}
+        uid, name = meta.get("uid"), meta.get("name")
+        if not isinstance(uid, str) or not isinstance(name, str):
+            return
+        containers = sorted({c.get("name") for c in (item.get("spec") or {}).get("containers") or []
+                             if isinstance(c, dict) and isinstance(c.get("name"), str)})
+        restarts = sum(s.get("restartCount", 0) for s in (item.get("status") or {}).get("containerStatuses") or []
+                       if isinstance(s, dict) and type(s.get("restartCount")) is int)
+        pod = pods.get(uid)
+        if pod is None:
+            pod = pods[uid] = {"name": name, "containers": containers, "created_lower_ns": created_lower,
+                               "restarts_first": restarts, "restarts_max": restarts, "deleted": False,
+                               "init_containers": False}
+        if (item.get("spec") or {}).get("initContainers"):
+            pod["init_containers"] = True
+        pod["containers"] = sorted(set(pod["containers"]) | set(containers))
+        pod["restarts_max"] = max(pod["restarts_max"], restarts)
+        if kind == "DELETED":
+            pod["deleted"] = True
+        names.setdefault(name, []).append((at, uid, kind))
+
+    p_end = None
+    for segment in segments:
+        listing = segment.listing
+        if listing["outcome"] not in ("consistent", "truncated"):
+            continue
+        for item in listing["items"]:
+            seen(item, listing["last_page_ns"], "LISTED")
+        for event in segment.events:
+            if event["object"] is None:
+                continue
+            lower = _lower_bound(segment, event["resource_version"]) if event["event"] == "ADDED" else None
+            seen(event["object"], event["received_ns"], event["event"], lower)
+        probe, _ = _proof(segment)
+        if probe is not None:
+            p_end = probe["sent_ns"] if p_end is None else max(p_end, probe["sent_ns"])
+    return pods, {k: sorted(v) for k, v in names.items()}, p_end
+
+
+def _log_acquisition(plan, ctx, domain, session_id, pod_segments, log_entries, window):
+    """The ``k8s.pods.log`` acquisition (CA-P2-004g, M11): evidence lines and their coverage, as derived.
+
+    Complete (or empty) batches with a ``log_sequence_continuity`` basis (batch 0.3) only when all hold:
+    - the Pod watch has exactly one collected segment, and it is proven (a probe the watch reached): its
+      anchors bound the interval, and the set of pods it reported is the set of instances claimed;
+    - the derivation has no gap at all: every container instance of every reported pod is attributed
+      (watch, recheck and content binding), continuous from ``seq=1``, handshake-consistent, and ends
+      ``stopped`` or ``drained`` past the final probe.
+    Those batches hold the lines received up to the end anchor; lines received later go to a partial tail
+    batch (``continuity_unproven``), as watch events after the proving probe do. Otherwise every log batch
+    is partial / ``continuity_unproven``. Log continuity never makes a Pod or Deployment batch complete."""
+    from . import pod_logs as PL
+    pods, names, p_end = _pod_facts(pod_segments)
+    collected = [s for s in pod_segments if s.listing["outcome"] in ("consistent", "truncated")]
+    probe, proving = _proof(collected[0]) if len(collected) == 1 and collected[0].listing["outcome"] == "consistent" \
+        else (None, None)
+    if probe is not None:
+        p_end = probe["sent_ns"]   # the end anchor the basis states
+    derived = PL.derive(log_entries, pods, names, p_end if p_end is not None else MAX_NS)
+    if ctx.get("v6"):
+        # Recording 0.6: init containers are never followed, so a pod with any has unproven logs; and a symptom
+        # line whose write time has no protocol lower bound could precede the change unseen (it cannot be
+        # ordered), so it is a gap, never a silently unordered line.
+        from ..engine.mechanisms import SYMPTOM_BY_CONFIG_KEY
+        extra = {(uid, c, "init_containers_not_collected") for uid, p in pods.items() if p.get("init_containers")
+                 for c in p["containers"]}
+        extra |= {(line["uid"], line["container"], "symptom_unplaced") for line in derived.lines
+                  if line["template"] in SYMPTOM_BY_CONFIG_KEY.values() and line["lower_ns"] is None}
+        derived.gaps = sorted(set(derived.gaps) | extra)
+    observations, tail = [], []
+    for line in derived.lines:
+        times = [{"timestamp_kind": "event", "raw": line["ts"], "clock_domain_id": RUNTIME_DOMAIN,
+                  "declared_precision_ns": None}]
+        if line["lower_ns"] is not None:
+            times.append(_observed(line["lower_ns"], line["upper_ns"], domain))
+        version = f"{line['boot']}.{line['seq']}"
+        observation = K._observation(
+            "log_line", f"k8s:pods/log/{ctx['namespace']}/{line['pod']}/{line['container']}#{version}", line["uid"],
+            version, "Pod", ctx["namespace"], line["pod"], times,
+            {"pod": line["pod"], "template": line["template"], "fields": line["fields"],
+             "container": line["container"], "boot": line["boot"], "seq": line["seq"]})
+        (tail if probe is not None and line["upper_ns"] > p_end else observations).append(observation)
+    batch_v3 = acq.plan_batch_version(plan) == acq.BATCH_VERSION_V3
+    proven = batch_v3 and probe is not None and not derived.gaps
+    verified_ms = 0
+    if proven:
+        listing = collected[0].listing
+        start_ms, end_ms = _ceil_ms(listing["first_page_ns"]), probe["sent_ns"] // NS_PER_MS
+        instances = sorted(({"pod_uid": key.split("/")[0], "container": key.split("/")[1], "boot": key.split("/")[2],
+                             "last_seq": info["last_seq"], "ending": "stopped" if info["stopped"] else "drained"}
+                            for key, info in derived.instances.items()),
+                           key=lambda i: (i["pod_uid"], i["container"], i["boot"]))
+        basis = {"kind": acq.LOG_SEQUENCE_CONTINUITY, "resource_type": acq.LOG_RESOURCE_TYPE,
+                 "session_id": session_id, "clock_domain_id": domain, "rv_comparison": rv.RV_COMPARISON,
+                 "start_anchor": {"kind": "list_first_page_received", "at": K._ms_text(start_ms),
+                                  "resource_version": listing["collection_resource_version"]},
+                 "end_anchor": {"kind": "probe_sent", "at": K._ms_text(end_ms),
+                                "resource_version": probe["resource_version"],
+                                "proven_by_resource_version": proving},
+                 "instances": instances}
+        plans = [(acq.COMPLETE, None, (start_ms, end_ms), observations, basis, f"rv:{proving}", False)]
+        if tail:
+            last_ms = max(_ceil_ms(o_line["upper_ns"]) for o_line in derived.lines) + 1
+            plans.append((acq.PARTIAL, "continuity_unproven", (end_ms, max(last_ms, end_ms + 1)), tail, None, None,
+                          False))
+        verified_ms = end_ms - start_ms
+    else:
+        plans = [(acq.PARTIAL, "continuity_unproven", window, observations + tail, None, None, False)]
+    records = _records(plan, ctx, LOG_QUERY, "pods-log", plans)
+    entry = {"query_id": LOG_QUERY, "resource": "pod_logs", "segments": [], "verified_coverage_ms": verified_ms,
+             "observations": len(observations) + len(tail), "withheld": {}, "unconverted": {},
+             "outcomes": sorted({r["outcome"] for r in records})}
+    why = None
+    if not proven:
+        why = ("batch_version" if not batch_v3 else "pod_watch_unproven" if probe is None else "log_gaps")
+    report = {"coverage_proven": not derived.gaps, "basis_emitted": proven, "not_emitted_because": why,
+              "gaps": [list(g) for g in derived.gaps],
+              "instances": derived.instances, "streams": {str(k): v for k, v in sorted(derived.streams.items())},
+              "counts": derived.counts, "p_end_known": p_end is not None, "tail_lines": len(tail) if proven else 0,
+              "note": ("Log batches are complete only with a log_sequence_continuity basis (batch 0.3): one proven Pod "
+                       "watch segment and no log gap. That basis covers container logs only; it never makes a Pod "
+                       "or Deployment batch complete.")}
+    return entry, records, report
+
+
 def _records(plan, ctx, query, stem, plans):
     per_batch = LIMITS["max_observations_per_batch"]
     records, before, n = [], None, 0
@@ -705,7 +1176,8 @@ def _records(plan, ctx, query, stem, plans):
                 coverage = {"start": K._ms_text(lo), "end": K._ms_text(hi)}
             cursor_after = after or f"{stem}-{n}"
             records.append({
-                "contract_version": acq.BATCH_VERSION_V2, "plan_digest": plan.digest, "source_id": ctx["source_id"],
+                "contract_version": acq.plan_batch_version(plan), "plan_digest": plan.digest,
+                "source_id": ctx["source_id"],
                 "query_id": query, "batch_key": f"{stem}-{n}", "sequence": n, "outcome": chunk_outcome,
                 "reason": reason, "coverage": coverage, "cursor": {"before": before, "after": cursor_after},
                 "truncation": {"truncated": bool(truncated), "reason": "event_limit" if truncated and reason == "event_limit"
@@ -732,7 +1204,13 @@ def bundle_rule_profile(bundle_dir):
 def verify_bundle(recording_dir, bundle_dir):
     """Replay check: re-derive the bundle from the recording, under the rule profile the bundle pins,
     and require byte-identical files."""
-    conversion = K.convert(recording_dir, ev.KIND_REGISTRY_VERSION_V3, rule_profile=bundle_rule_profile(bundle_dir))
+    try:
+        manifest = canonical.loads(B._read(Path(recording_dir) / K.MANIFEST, K.MAX_MANIFEST_BYTES))
+    except (B.BundleError, ContractError):
+        raise K.RecordingError("replay_mismatch", "the recording has no readable manifest") from None
+    kinds = ev.KIND_REGISTRY_VERSION_V4 if isinstance(manifest, dict) and \
+        manifest.get("contract_version") in LOG_VERSIONS else ev.KIND_REGISTRY_VERSION_V3
+    conversion = K.convert(recording_dir, kinds, rule_profile=bundle_rule_profile(bundle_dir))
     import tempfile
     with tempfile.TemporaryDirectory(prefix="ca-replay-") as tmp:
         fresh = Path(tmp) / "bundle"
