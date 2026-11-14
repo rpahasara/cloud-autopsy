@@ -58,6 +58,9 @@ jobs:
       - name: Evidence bundle tests (CA-P2-004a, offline, no database)
         run: python -I -m unittest discover -s tests/app -t tests/app -v
 
+      - name: Evaluation harness tests (CA-P2-007a, offline; scorer, truth isolation, rendering)
+        run: python -I -m unittest discover -s tests/eval -t tests/eval -v
+
       - name: Collector tests (CA-P2-004e, offline, fake TLS API server on 127.0.0.1)
         env:
           CA_COLLECTOR_TLS_REQUIRE: "1"
@@ -714,3 +717,74 @@ jobs:
           "${KIND:-kind}" delete cluster --name "${CLUSTER:-none}" || true
           rm -rf "${CRED:-/nonexistent}" "$RUNNER_TEMP"/run-logs* "$RUNNER_TEMP/db-logs.json"
           if docker ps --format '{{.Names}}' | grep -q "${CLUSTER:-none}"; then echo "FAIL: cluster container left behind"; exit 1; fi
+
+  # CA-P2-007a: a smoke test of the evaluation driver on one disposable kind cluster (repetition 0 of P1).
+  # It checks the harness, not the product's accuracy: its record is never part of an evaluation run, which
+  # happens only on eval/ca-p2-007a-run-* branches (.github/workflows/incident-eval.yml). Not a required check.
+  incident-eval-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    env:
+      KIND_VERSION: v0.33.0
+      KIND_SHA256: aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d
+      KUBECTL_VERSION: v1.37.0
+      KUBECTL_SHA256: 6129359f4e1f3848a5572ccb0b26cf28b8ca08cef38c95a765b2f64a2c961a2f
+      CA_PG_DEMO_PORT: "0"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Run only when the evaluation harness changed (or on manual dispatch)
+        id: paths
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$EVENT" = "workflow_dispatch" ]; then echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if git diff --name-only "$BASE" HEAD | grep -Eq '^(tools/eval/|tests/eval/|deploy/kind/|\.github/workflows/)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        if: steps.paths.outputs.run == 'true'
+        with:
+          python-version: "3.13"
+
+      - name: Download pinned kind and kubectl and verify their SHA-256
+        if: steps.paths.outputs.run == 'true'
+        run: |
+          set -eu
+          bin="$RUNNER_TEMP/ca-bin"
+          mkdir -p "$bin"
+          curl -fsSLo "$bin/kind" "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
+          echo "${KIND_SHA256}  $bin/kind" | sha256sum -c -
+          curl -fsSLo "$bin/kubectl" "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          echo "${KUBECTL_SHA256}  $bin/kubectl" | sha256sum -c -
+          chmod 0755 "$bin/kind" "$bin/kubectl"
+          echo "KIND=$bin/kind" >> "$GITHUB_ENV"
+          echo "KUBECTL=$bin/kubectl" >> "$GITHUB_ENV"
+
+      - name: Install the hash-locked database driver tree
+        if: steps.paths.outputs.run == 'true'
+        run: |
+          python -m venv .venv-db
+          .venv-db/bin/python -m pip install --disable-pip-version-check --require-hashes --no-deps \
+            --only-binary=:all: -r requirements-db.txt
+
+      - name: "Harness smoke: P1 repetition 0 (not an evaluation run)"
+        if: steps.paths.outputs.run == 'true'
+        run: |
+          set -eu
+          bash tools/eval/run_rep.sh P1 0 "$RUNNER_TEMP/smoke"
+          cat "$RUNNER_TEMP/smoke/P1-00.json"
+          python -I -c "import json,sys; r=json.load(open(sys.argv[1])); assert r['harness'] == 'ok', r['steps']; print('harness ok:', r['outcome'])" "$RUNNER_TEMP/smoke/P1-00.json"
+
+      - name: Delete any leftover cluster
+        if: always() && steps.paths.outputs.run == 'true'
+        run: |
+          for c in $("${KIND:-kind}" get clusters 2>/dev/null); do "${KIND:-kind}" delete cluster --name "$c" || true; done

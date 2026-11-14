@@ -58,6 +58,7 @@ def main(argv=None):
                         help="also follow the namespace's pod logs (CA-P2-004g; recording 0.5, observation kinds 0.4)")
     parser.add_argument("--log-rotation", type=float, default=5.0, help="seconds between overlapping log streams")
     parser.add_argument("--log-drain-wait", type=float, default=10.0)
+    parser.add_argument("--log-max-bytes", type=int, default=65_536, help="bytes per container instance (bound)")
     parser.add_argument("--incident-window", default=None, metavar="START:END",
                         help="seconds after the session starts; fixed before collection (recording 0.6, M12)")
     parser.add_argument("--declare-limit", action="append", default=[], metavar="CONTAINER:ENV:CATALOG_KEY",
@@ -102,7 +103,8 @@ def _watch(args, config):
     pod_logs = None
     if args.pod_logs:
         from cloud_autopsy.collector import podlogs
-        pod_logs = podlogs.LogConfig(rotation_s=args.log_rotation, drain_wait_s=args.log_drain_wait)
+        pod_logs = podlogs.LogConfig(rotation_s=args.log_rotation, drain_wait_s=args.log_drain_wait,
+                                     max_bytes_per_instance=args.log_max_bytes)
     declared = [tuple(d.split(":")) for d in args.declare_limit]
     window = None
     if args.incident_window is not None:
