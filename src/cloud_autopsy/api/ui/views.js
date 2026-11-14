@@ -76,6 +76,11 @@ export function coverageCard(model, ctx) {
       h("span", { class: "dot dot-ink" }), "cited", h("span", { class: "dot dot-mist" }), "recorded", h("span", { class: "dot dot-gap" }), "gap")),
     h("p", { class: ["manifest", complete ? "is-ok" : "is-warn"] },
       complete ? "Manifest complete" : `Manifest ${say(model.meta.manifestStatus).toLowerCase()} \u00b7 ${model.meta.manifestLimitations.map(say).join(", ")}`),
+    // CA-P2-004g: an explicit plan choice, stated as such; coverage of what was collected is in the bars and gaps.
+    model.meta.kubernetesEvents === "not_collected"
+      ? h("p", { class: ["manifest", "is-warn", "events-scope"] }, "Kubernetes Events: Not collected")
+      : model.meta.kubernetesEvents === "collected"
+        ? h("p", { class: ["manifest", "events-scope"] }, "Kubernetes Events: Collected") : null,
     h("ul", { class: "bars" }, model.sources.map((src) => h("li", null,
       h("button", { type: "button", class: "bar-row", onclick: (e) => { e.stopPropagation(); ctx.go("evidence", { source: src.id }); } },
         h("span", { class: "bar-label" }, src.id),

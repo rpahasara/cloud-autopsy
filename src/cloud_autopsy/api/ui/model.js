@@ -40,6 +40,8 @@ export function buildModel(resultEnvelope, citationsEnvelope) {
     evidenceCount: r.inputs.evidence_count,
     unverifiedEvidence: r.inputs.unverified_evidence_ids || [],
     synthesis: r.synthesis,
+    // CA-P2-004g: what the sealed plan declared for Kubernetes Events (never a coverage claim).
+    kubernetesEvents: resultEnvelope.acquisitions ? resultEnvelope.acquisitions.kubernetes_events : null,
   };
 
   // Evidence members as the timeline describes them (one record may have several time marks).

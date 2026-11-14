@@ -41,6 +41,7 @@ import hashlib
 from dataclasses import dataclass
 
 from ..contracts import canonical
+from ..contracts import plan as pl
 from ..contracts.errors import ContractError
 from ..engine import clocks, inputs, result
 from .adapter import with_retry
@@ -213,6 +214,7 @@ class VerifiedResult:
     result: dict
     result_bytes: bytes
     evidence: dict = None  # evidence_id -> {"coverage", "record"}: the run's sealed members, re-derived
+    acquisitions: dict = None  # the sealed plan's declared acquisitions (CA-P2-004g); see planned_acquisitions()
 
 
 def _invalid(code, message):
@@ -279,4 +281,6 @@ def load_verified_result(engine_db, run_id):
         _invalid("sealed_input_invalid", "the sealed run failed re-verification")
     evidence = {m.evidence.evidence_id: {"coverage": m.coverage, "record": m.evidence.to_record()}
                 for m in inp.members}
-    return VerifiedResult(run_id, investigation_id, digest, verified, raw, evidence)
+    return VerifiedResult(run_id, investigation_id, digest, verified, raw, evidence,
+                          pl.declared_acquisitions(sealed.plan, sealed.registry))
+

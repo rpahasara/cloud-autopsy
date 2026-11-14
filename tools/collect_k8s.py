@@ -49,7 +49,10 @@ def main(argv=None):
     parser.add_argument("--final-wait", type=float, default=90.0)
     parser.add_argument("--watch-timeout", type=int, default=600, help="max timeoutSeconds per watch request")
     parser.add_argument("--max-reconnects", type=int, default=3)
-    parser.add_argument("--ordering-rules", choices=("0.1", "0.2"), default="0.1",
+    parser.add_argument("--no-events", action="store_true",
+                        help="incident mode only (with --incident-window): do not collect Kubernetes Events; declared "
+                             "before collection and recorded (recording 0.7). Scoped to the CA-P2 synthetic milestone")
+    parser.add_argument("--ordering-rules", choices=("0.1", "0.2", "0.3"), default="0.1",
                         help="timeline rules the plan pins: 0.1 (event ordering, default) or 0.2 (observed-first, CA-P2-005b)")
     parser.add_argument("--pod-logs", action="store_true",
                         help="also follow the namespace's pod logs (CA-P2-004g; recording 0.5, observation kinds 0.4)")
@@ -109,8 +112,9 @@ def _watch(args, config):
             window = ("invalid",)
     try:
         _, conversion, report = co.run_watch(config, wconfig, args.out, stop=stop, on_signal=lambda: bool(signalled),
-                                             rule_profile=2 if args.ordering_rules == "0.2" else 1,
-                                             pod_logs=pod_logs, declared_limits=declared, incident_window=window)
+                                             rule_profile={"0.1": 1, "0.2": 2, "0.3": 3}[args.ordering_rules],
+                                             pod_logs=pod_logs, declared_limits=declared, incident_window=window,
+                                             no_events=args.no_events)
     except (cl.CollectorError, K.RecordingError) as exc:  # codes only; never a response body
         print(json.dumps({"status": "refused", "code": exc.code}) if args.json else f"REFUSED: {exc.code}")
         return 1

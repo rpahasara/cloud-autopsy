@@ -183,3 +183,18 @@ class RunPlan:
                    window["end"], start_ms, end_ms, tuple(sorted(rows)),
                    tuple(sorted(record["contract_versions"].items())), tuple(sorted(rules.items())),
                    record["synthesis_mode"], tuple(sorted(limits.items())))
+
+
+def declared_acquisitions(plan, registry):
+    """What the run declared it would collect, from the sealed (digest-verified) plan and registry.
+
+    ``kubernetes_events`` says whether a Kubernetes API source planned the ``k8s.events`` query: ``collected`` or
+    ``not_collected`` (CA-P2-004g, recording 0.7). A read-only helper; it changes no contract, or ``not_applicable`` without a Kubernetes API source. It states
+    what was *declared*; whether Events coverage was proven is in the result's gaps, never implied here."""
+    kube = {s.source_id for s in registry.sources if s.source_kind == "kubernetes_api"}
+    planned = [{"source_id": a["source_id"], "query_id": a["query_id"], "mandatory": a["mandatory"]}
+               for a in plan.to_record()["expected_acquisitions"]]
+    events = "not_applicable"
+    if kube:
+        events = "collected" if any(a["query_id"] == "k8s.events" and a["source_id"] in kube for a in planned)             else "not_collected"
+    return {"planned": sorted(planned, key=lambda a: (a["source_id"], a["query_id"])), "kubernetes_events": events}

@@ -171,7 +171,7 @@ def run(config, out_dir, transport=None, wall_ms=None, monotonic=None):
 # ------------------------------------------------------------------------- CA-P2-004f: watch
 
 def watch_recording_files(config, entries, clock, step_threshold_ms=250, session_id=None, declared_limits=(),
-                          incident_window=None):
+                          incident_window=None, no_events=False):
     """{relative path: bytes} of the 0.4 recording (0.5 when ``entries`` has ``pod_logs``, CA-P2-004g):
     the manifest and canonical stream parts."""
     files, streams = {}, []
@@ -197,7 +197,7 @@ def watch_recording_files(config, entries, clock, step_threshold_ms=250, session
             listed.append({"file": rel, "sha256": hashlib.sha256(data).hexdigest()})
         streams.append({"resource": resource, "parts": listed})
     logs = "pod_logs" in entries
-    version = K.RECORDING_VERSION_V6 if incident_window is not None else (
+    version = K.RECORDING_VERSION_V7 if no_events else K.RECORDING_VERSION_V6 if incident_window is not None else (
         K.RECORDING_VERSION_V5 if logs else K.RECORDING_VERSION_V4)
     manifest = {"contract_version": version,
                 "recording_id": config.recording_id,
@@ -218,6 +218,8 @@ def watch_recording_files(config, entries, clock, step_threshold_ms=250, session
                                 "runtime_clock": {"clock_domain_id": W.RUNTIME_DOMAIN}}
     if incident_window is not None:   # CA-P2-004g, recording 0.6: fixed before collection, never adjusted
         manifest["incident_window"] = {"start_offset_ms": incident_window[0], "end_offset_ms": incident_window[1]}
+    if no_events:                      # recording 0.7: declared before collection; the Events stream is absent
+        manifest["not_collected"] = [dict(W.EVENTS_EXCLUSION)]
     files[K.MANIFEST] = _bytes(manifest)
     return files
 
@@ -238,7 +240,7 @@ def watch_report(config, wconfig, conversion, counts):
 
 
 def run_watch(config, wconfig, out_dir, transport=None, clock=None, stop=None, on_signal=None, session_id=None,
-              rule_profile=1, pod_logs=None, declared_limits=(), incident_window=None):
+              rule_profile=1, pod_logs=None, declared_limits=(), incident_window=None, no_events=False):
     """One list + watch session into a new ``out_dir``: ``recording/``, ``bundle/`` and ``report.json``.
 
     ``session_id`` is generated here, once per collection (``new_session_id``); tests may pass one."""
@@ -258,9 +260,12 @@ def run_watch(config, wconfig, out_dir, transport=None, clock=None, stop=None, o
         if pod_logs is None or not isinstance(incident_window, (tuple, list)) or len(incident_window) != 2                 or not all(type(v) is int for v in incident_window)                 or not 0 <= incident_window[0] < incident_window[1] <= wconfig.session_seconds:
             raise cl.CollectorError("incident_window_invalid")
         incident_window = (incident_window[0] * 1000, incident_window[1] * 1000)
+    if no_events and incident_window is None:
+        raise cl.CollectorError("no_events_needs_incident_window")   # only the 0.7 incident mode excludes Events
     transport = transport or cl.HttpsTransport(config.server, config.ca_file, config.token_file, config.timeout_s)
     entries, clock, counts = wt.run_session(transport, config.namespace, wconfig, clock=clock, stop=stop,
-                                            on_signal=on_signal, pod_logs=pod_logs, limits=declared_limits)
+                                            on_signal=on_signal, pod_logs=pod_logs, limits=declared_limits,
+                                            resources=tuple(r for r in wt.RESOURCES if not (no_events and r == "events")))
     out = Path(out_dir)
     out.mkdir(parents=False, exist_ok=False)
     recording = out / "recording"
@@ -268,7 +273,7 @@ def run_watch(config, wconfig, out_dir, transport=None, clock=None, stop=None, o
     if not isinstance(session_id, str) or not W.SESSION_ID.fullmatch(session_id):
         raise cl.CollectorError("session_id_invalid")
     files = watch_recording_files(config, entries, clock, wconfig.step_threshold_ms, session_id, declared_limits,
-                                  incident_window)
+                                  incident_window, no_events)
     for rel, data in sorted(files.items()):
         (recording / rel).parent.mkdir(exist_ok=True)
         _write_new(recording / rel, data)

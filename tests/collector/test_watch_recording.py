@@ -281,7 +281,7 @@ class RuleProfiles(unittest.TestCase):
     def test_profile_2_needs_a_watch_recording_and_a_known_profile(self):
         root = write(F.tempdir(self, "ca-watch-rules2-") / "rec", healthy())
         with self.assertRaises(K.RecordingError) as ctx:
-            K.convert(root, ev.KIND_REGISTRY_VERSION_V3, rule_profile=3)
+            K.convert(root, ev.KIND_REGISTRY_VERSION_V3, rule_profile=4)   # 3 exists since the causal-scope guard
         self.assertEqual(ctx.exception.code, "recording_rules_unsupported")
         examples = Path(__file__).resolve().parents[2] / "examples" / "k8s-recordings" / "snapshot-complete"
         with self.assertRaises(K.RecordingError) as ctx:

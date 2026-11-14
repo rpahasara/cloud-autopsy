@@ -227,8 +227,9 @@ def logs(args):
     if found:
         fail(f"planted or secret values written: {found}")
     manifest = json.loads((out / "recording" / "recording.json").read_bytes())
-    if manifest["contract_version"] not in ("ca-k8s-recording/0.5-provisional", "ca-k8s-recording/0.6-provisional"):
-        fail("not a pod-log recording (0.5 or 0.6)")
+    if manifest["contract_version"] not in ("ca-k8s-recording/0.5-provisional", "ca-k8s-recording/0.6-provisional",
+                                            "ca-k8s-recording/0.7-provisional"):
+        fail("not a pod-log recording (0.5 to 0.7)")
     conversion = W.verify_bundle(out / "recording", out / "bundle")  # replay: byte-identical
     report = conversion.report["pod_logs"]
     instances = report["instances"]
@@ -303,6 +304,10 @@ def logs(args):
         print(f"intervals: requested {intervals['requested_incident_window_ms']} verified "
               f"{intervals['verified_interval_ms']} inside={intervals['requested_inside_verified']} "
               f"plan {intervals['plan_window_ms']} unclean {intervals['acquisitions_with_unclean_batches']}")
+        print(f"window decision: narrowed={intervals.get('narrowed')} refused={intervals.get('narrowing_refused')} "
+              f"relevant outside={intervals.get('relevant_outside_count')} {intervals.get('relevant_outside')}")
+    if conversion.report.get("not_collected"):
+        print(f"not collected: {conversion.report['not_collected']}")
     loaded = B.load(out / "bundle")
     inv = C.investigate_offline(loaded)
     outcome = inv.result["outcome"]
@@ -319,7 +324,10 @@ def logs(args):
     # final probe (a partial tail batch); they are reported, never hidden, and they are not log-proof gaps.
     print(f"log acquisition gaps outside the proof (window edges, tail): {sum(by_query[k] for k in log_gaps)}")
     if outcome["status"] == "resolved":
-        print(f"RESOLVED: {outcome}")
+        cited = {e["evidence_id"]: e for e in inv.result["timeline"]["entries"]}
+        kinds = sorted({cited[i]["observation_kind"] for i in outcome["evidence_ids"] if i in cited})
+        print(f"RESOLVED: mechanism {outcome['mechanism']}; {len(outcome['evidence_ids'])} cited evidence ({kinds}); "
+              f"rule profile {inv.result['rule_versions']['timeline-rules']}")
     print(f"logs: ok; replay byte-identical; log coverage proven as batch 0.3; outcome {outcome['status']} "
           f"({', '.join(outcome.get('reasons') or [])}); no planted value, log text, token or event text written")
 
@@ -491,9 +499,10 @@ def db(args):
     rows = json.loads(Path(args.json).read_bytes())
     if len(rows) != 1 or rows[0].get("status") != "ok" or rows[0].get("verified") is not True:
         fail(f"database creation did not verify: {[{k: r.get(k) for k in ('status', 'stage', 'reason')} for r in rows]}")
-    if rows[0].get("outcome") != "abstained":
-        fail(f"the database-verified investigation is {rows[0].get('outcome')}, expected abstained")
-    print("db: created, stored once, verified on read, byte-identical to offline, abstained")
+    expect = getattr(args, "expect", "abstained")
+    if expect != "any" and rows[0].get("outcome") != expect:
+        fail(f"the database-verified investigation is {rows[0].get('outcome')}, expected {expect}")
+    print(f"db: created, stored once, verified on read, byte-identical to offline, {rows[0].get('outcome')}")
 
 
 def main():
@@ -526,6 +535,7 @@ def main():
     p.add_argument("--expect", required=True, choices=("consistent", "truncated", "denied", "unavailable"))
     p = sub.add_parser("db")
     p.add_argument("--json", required=True)
+    p.add_argument("--expect", choices=("abstained", "resolved", "any"), default="abstained")
     args = parser.parse_args()
     {"rbac": rbac, "run": run, "db": db, "watch": watch, "sessions": sessions, "rbac-incident": rbac_incident,
      "logs": logs}[args.command](args)

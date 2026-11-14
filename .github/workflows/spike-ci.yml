@@ -682,8 +682,8 @@ jobs:
           set -eu
           python -I tools/collect_k8s.py --server "$SERVER" --ca-file "$CRED/ca.crt" --token-file "$CRED/token" \
             --namespace ca-incident --cluster-id ca-kind-synthetic --recording-id ca-logs-run1 --out "$RUNNER_TEMP/run-logs1" \
-            --watch-seconds 150 --probe-interval 5 --final-wait 60 --ordering-rules 0.2 \
-            --pod-logs --declare-limit checkout-api:DB_POOL_MAX:pool.maxConnections --incident-window 20:140 &
+            --watch-seconds 150 --probe-interval 5 --final-wait 60 --ordering-rules 0.3 \
+            --pod-logs --declare-limit checkout-api:DB_POOL_MAX:pool.maxConnections --incident-window 20:140 --no-events &
           pid=$!
           sleep 25
           "$KUBECTL" -n ca-incident set env deployment/checkout-api DB_POOL_MAX=4
@@ -706,7 +706,7 @@ jobs:
         run: |
           set -eu
           .venv-db/bin/python -I tools/create_investigation.py "$RUNNER_TEMP/run-logs1/bundle" --json > "$RUNNER_TEMP/db-logs.json"
-          python -I tests/kind/kind_checks.py db --json "$RUNNER_TEMP/db-logs.json"
+          python -I tests/kind/kind_checks.py db --json "$RUNNER_TEMP/db-logs.json" --expect any
 
       - name: Delete the cluster and the credentials
         if: always() && steps.paths.outputs.run == 'true'

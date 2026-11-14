@@ -375,7 +375,8 @@ class _Resource:
         self.final_sent.set()
 
 
-def run_session(transport, namespace, config, clock=None, stop=None, on_signal=None, pod_logs=None, limits=()):
+def run_session(transport, namespace, config, clock=None, stop=None, on_signal=None, pod_logs=None, limits=(),
+                resources=RESOURCES):
     """Run one session. Returns (entries by resource, clock, counts). ``stop`` is an Event that ends
     the session early (``on_signal()`` True marks the end as a signal).
 
@@ -386,7 +387,9 @@ def run_session(transport, namespace, config, clock=None, stop=None, on_signal=N
     shared = _Shared(config)
     shared.deadline = time.monotonic() + config.session_seconds
     shared.final_deadline = None
-    resources = {name: _Resource(name, shared, transport, namespace, clock) for name in RESOURCES}
+    if not set(resources) <= set(RESOURCES) or not {"deployments", "pods", "replicasets"} <= set(resources):
+        raise cl.CollectorError("resources_invalid")   # only Events may be left out (recording 0.7)
+    resources = {name: _Resource(name, shared, transport, namespace, clock) for name in sorted(resources)}
     resources["replicasets"].limits = tuple(limits)
     logs = None
     if pod_logs is not None:

@@ -133,6 +133,24 @@ An end-to-end session also narrows for real: clean batches claiming W, nothing d
 2. **A per-acquisition kind declaration.** The plan states which kinds each query produces, and the engine counts a gap as limiting only for mechanisms that need those kinds. It is more general, but it is a plan-contract and engine change.
 3. **Not recommended: an end-of-session reconciliation list.** It could detect missed changes and missed deletions, but not an object both created and deleted inside the interval, so it is weaker than a proof.
 
+**Option 1 is implemented as recording 0.7 (product-owner decision, 2026-11-14).** It is scoped to the CA-P2 synthetic rollout milestone. It does **not** disable Kubernetes Events in general, and it does **not** claim that Events are irrelevant to infrastructure incidents.
+- **Declared before collection.** `--no-events` works only together with `--incident-window`. The Events reader and prober never start, and no Events request is sent.
+- **Recorded in every artifact:**
+  - the manifest's `not_collected` lists `k8s.events` with its reason;
+  - the Events stream is absent;
+  - the source registry omits the query, and its ID ends `-src-noevents`;
+  - the run plan's expected acquisitions omit it;
+  - the conversion report states "Kubernetes Events: Not collected".
+- **What the API and dashboard show.** The API envelope reports what the sealed plan declared (`acquisitions.kubernetes_events`: `not_collected`), and the dashboard shows exactly "Kubernetes Events: Not collected". The envelope and the dashboard never say "No Events" or "Events verified".
+- **Nothing claimed or adjusted:**
+  - no Events coverage is claimed and no Events gap is made;
+  - no partial Events batch is discarded;
+  - no existing recording changes: 0.4–0.6 keep the Events acquisition and convert exactly as before;
+  - a 0.7 manifest that declares anything else, or still carries an Events stream, is refused.
+- **Verified interval.** It is computed over the acquisitions actually declared for the run.
+- **Mechanism independence.** No mechanism in catalog 0.1 reads `k8s_event`; its needed kinds are `configmap_change`, `deployment_rollout`, `pod` and `log_line`.
+- **Scope of a conclusion.** A conclusion drawn under 0.7 is supported by the explicitly selected sources: Deployments, ReplicaSets, Pods and pod logs. It is **not** a guarantee that every possible infrastructure cause has been ruled out.
+
 Generating artificial Events to keep the watch busy is rejected: it would make the test pass without making the collector's evidence any stronger.
 
 ## <a id="m12d-contract"></a>M12d: the contract change (original proposal, now implemented)

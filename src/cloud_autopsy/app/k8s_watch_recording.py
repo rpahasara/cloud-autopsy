@@ -114,7 +114,24 @@ RECORDING_VERSION_V5 = K.RECORDING_VERSION_V5
 # computed from bases only and reported beside it; the plan window is not narrowed (see M12d in
 # docs/phase2/ca-p2-004/ca-p2-004g-completeness.md).
 RECORDING_VERSION_V6 = K.RECORDING_VERSION_V6
-LOG_VERSIONS = (RECORDING_VERSION_V5, RECORDING_VERSION_V6)
+# Recording 0.7 (product-owner decision 2026-11-14, scoped to the CA-P2 synthetic rollout milestone): 0.6 with the
+# ``k8s.events`` acquisition explicitly not collected, declared before collection. The manifest names it in
+# ``not_collected`` with its reason; the stream is absent; the source registry and the run plan do not list the
+# query (the registry ID says so); the report repeats it. Nothing is claimed about Events -- no coverage and no
+# gap -- and the verified interval is computed over the acquisitions actually declared for the run. No mechanism
+# in catalog 0.1 reads ``k8s_event``. Recordings 0.4-0.6 keep the Events acquisition and convert unchanged.
+RECORDING_VERSION_V7 = K.RECORDING_VERSION_V7
+LOG_VERSIONS = (RECORDING_VERSION_V5, RECORDING_VERSION_V6, RECORDING_VERSION_V7)
+WINDOW_VERSIONS = (RECORDING_VERSION_V6, RECORDING_VERSION_V7)
+EVENTS_EXCLUSION = {"query_id": "k8s.events",
+                    "reason": "no_bookmarks_cannot_prove_quiet_periods; product-owner decision, CA-P2 synthetic rollout milestone only"}
+
+
+def run_queries(manifest):
+    """The acquisitions declared for this recording: all four Kubernetes queries, except under 0.7 (no Events)."""
+    if manifest.get("contract_version") == RECORDING_VERSION_V7:
+        return {q: r for q, r in QUERIES.items() if q != "k8s.events"}
+    return dict(QUERIES)
 LOG_QUERY = "k8s.pods.log"
 RUNTIME_DOMAIN = "k8s-container-runtime"
 ENVELOPE = "CA1"
@@ -154,7 +171,8 @@ def _int(value, where, low=0, high=MAX_NS):
 def _manifest(manifest):
     version = manifest.get("contract_version") if isinstance(manifest, dict) else None
     v5 = version in LOG_VERSIONS
-    keys = _MANIFEST_KEYS | ({"pod_logs"} if v5 else set()) | ({"incident_window"} if version == RECORDING_VERSION_V6 else set())
+    keys = _MANIFEST_KEYS | ({"pod_logs"} if v5 else set()) | ({"incident_window"} if version in WINDOW_VERSIONS else set()) \
+        | ({"not_collected"} if version == RECORDING_VERSION_V7 else set())
     if not isinstance(manifest, dict) or set(manifest) != keys:
         raise K.RecordingError("recording_manifest_invalid", "the manifest must have exactly the documented fields")
     if manifest["data_classification"] != "synthetic":
@@ -190,13 +208,15 @@ def _manifest(manifest):
         raise K.RecordingError("recording_manifest_invalid", "anchor_wall must be RFC 3339 UTC with nine fraction digits")
     _int(collector["max_drift_ms"], "clocks.collector.max_drift_ms", 0, 10 ** 12)
     streams = manifest["streams"]
-    expected = sorted(list(QUERIES.values()) + (["pod_logs"] if v5 else []))
+    if version == RECORDING_VERSION_V7 and manifest["not_collected"] != [EVENTS_EXCLUSION]:
+        raise K.RecordingError("recording_manifest_invalid", "a 0.7 recording declares exactly the Events exclusion")
+    expected = sorted(list(run_queries(manifest).values()) + (["pod_logs"] if v5 else []))
     if not isinstance(streams, list) or sorted(s.get("resource") if isinstance(s, dict) else None
                                                for s in streams) != expected:
         raise K.RecordingError("recording_manifest_invalid", "streams must list each resource once")
     if v5:
         _pod_log_manifest(manifest["pod_logs"])
-    if version == RECORDING_VERSION_V6:
+    if version in WINDOW_VERSIONS:
         _incident_window(manifest["incident_window"])
     files = []
     for s in streams:
@@ -566,12 +586,14 @@ def convert(root, manifest, manifest_sha, rule_profile=1, _incident_window_ms=No
 
     Recording 0.6 (M12d): when ``_window_decision`` allows it, the conversion is derived a second time with the
     plan window set to the incident window declared before collection (``_incident_window_ms``, internal)."""
-    if rule_profile not in (1, 2):
-        raise K.RecordingError("recording_rules_unsupported", "rule profile must be 1 or 2")
+    if rule_profile not in (1, 2, 3):
+        raise K.RecordingError("recording_rules_unsupported", "rule profile must be 1, 2 or 3")
     files, anchor_ns = _manifest(manifest)
     _check_layout(root, files)
     v5 = manifest["contract_version"] in LOG_VERSIONS
-    v6 = manifest["contract_version"] == RECORDING_VERSION_V6
+    v6 = manifest["contract_version"] in WINDOW_VERSIONS
+    v7 = manifest["contract_version"] == RECORDING_VERSION_V7
+    queries_run = run_queries(manifest)
     kinds = ev.KIND_REGISTRY_VERSION_V4 if v5 else ev.KIND_REGISTRY_VERSION_V3
     collector, server = manifest["clocks"]["collector"], manifest["clocks"]["api_server"]
     domain, server_domain = collector["clock_domain_id"], server["clock_domain_id"]
@@ -610,13 +632,14 @@ def convert(root, manifest, manifest_sha, rule_profile=1, _incident_window_ms=No
             ti.clock_domain(domain, ti.UNKNOWN, continuity=ti.STEP_DECLARED if collector["step_detected"]
                             else ti.CONTINUOUS).to_record(),
             ti.clock_domain(server_domain, ti.UNKNOWN).to_record()]
-        domains, queries = [domain, server_domain], sorted(QUERIES)
+        domains, queries = [domain, server_domain], sorted(queries_run)
         if v5:  # the container runtime's own timestamps: a separate domain, declared unknown, never ordered
             clock_records.append(ti.clock_domain(RUNTIME_DOMAIN, ti.UNKNOWN).to_record())
             domains.append(RUNTIME_DOMAIN)
             queries = sorted(queries + [LOG_QUERY])
         clock_records.sort(key=lambda c: c["clock_domain_id"])
-        registry_record = {"contract_version": SOURCE_REGISTRY_VERSION, "registry_id": f"{recording_id}-sources",
+        registry_record = {"contract_version": SOURCE_REGISTRY_VERSION,
+                           "registry_id": f"{recording_id}-src-noevents" if v7 else f"{recording_id}-sources",
                            "sources": [{"source_id": ctx["source_id"], "source_kind": "kubernetes_api",
                                         "cluster_id": manifest["cluster_id"], "namespace": ctx["namespace"],
                                         "clock_domain_ids": sorted(domains), "query_ids": queries}]}
@@ -645,8 +668,8 @@ def convert(root, manifest, manifest_sha, rule_profile=1, _incident_window_ms=No
                 state.learn_replicaset(event["object"])
 
     acquisitions, batches = [], []
-    for query in sorted(QUERIES):
-        resource = QUERIES[query]
+    for query in sorted(queries_run):
+        resource = queries_run[query]
         entry, records = _acquisition(plan, ctx, domain, manifest["session_id"], query, resource,
                                       streams[resource], state)
         for record in records:
@@ -689,6 +712,8 @@ def convert(root, manifest, manifest_sha, rule_profile=1, _incident_window_ms=No
                        "(changes_withheld). Every other period is a gap.")}
     if log_report is not None:
         report["pod_logs"] = log_report
+    if v7:
+        report["not_collected"] = [dict(EVENTS_EXCLUSION, statement="Kubernetes Events: Not collected")]
     if v6:
         report["intervals"] = _intervals(manifest, anchor_ns, batches, plan)
         decision = _window_decision(report["intervals"], batches, domain)
