@@ -40,7 +40,7 @@ from decimal import Decimal, InvalidOperation
 from ..contracts import canonical
 from ..contracts import timeinterval as ti
 from ..contracts.evidence import kinds_for, source_kinds_of
-from . import CATALOG_VERSION
+from . import CATALOG_VERSION, SCOPED_TIMELINE_RULES
 from .timeline import event_order
 
 SATISFIED, UNSATISFIED, CONTRADICTED, UNKNOWN, BLOCKED = (
@@ -102,6 +102,19 @@ class _Context:
                 kinds_by_source_kind.setdefault(source_kind, set()).add(spec.observation_kind)
         self.source_kinds = {s.source_id: kinds_by_source_kind.get(s.source_kind, set())
                              for s in inp.registry.sources}
+
+    def in_scope(self, evidence):
+        """Timeline rules 0.3: may this change or symptom establish a positive prerequisite? Only when it has an
+        ``observed`` bracket lying entirely inside the plan window. Under 0.1 and 0.2 every observation may."""
+        if self.inp.timeline_rules not in SCOPED_TIMELINE_RULES:
+            return True
+        plan = self.inp.plan
+        return any(t.timestamp_kind == "observed" and t.local_lower_ms is not None
+                   and plan.window_start_ms <= t.local_lower_ms and t.local_upper_ms < plan.window_end_ms
+                   for t in evidence.times)
+
+    def scoped(self, evidence):
+        return [e for e in evidence if self.in_scope(e)]
 
     def order(self, a, b):
         return event_order(a, b, self.domains, self.inp.timeline_rules)
@@ -238,7 +251,7 @@ def evaluate_config_change(ctx, change):
                 if log.attributes["fields"].get("config_key") == key
                 and log.attributes["fields"].get("value_sha256") == attrs["after_value_sha256"]]
 
-    consumed_ordered, consumed_unknown = _ordered_chain(ctx, [change], loads_on(mounting))
+    consumed_ordered, consumed_unknown = _ordered_chain(ctx, [change], ctx.scoped(loads_on(mounting)))
     loaded_keys = sorted({_pod_key(b, b.attributes["pod"]) for _, b, _ in consumed_ordered + consumed_unknown})
     consumed = _chain_prereq("loaded_by_mounting_pod_after_change", consumed_ordered, consumed_unknown,
                              "no_load_of_new_value_observed",
@@ -251,7 +264,7 @@ def evaluate_config_change(ctx, change):
     else:
         pairs_ok, pairs_unknown = [], []
         for _, load, load_order in consumed_ordered + consumed_unknown:
-            for sym in ctx.logs(_pod_key(load, load.attributes["pod"]), (template,)):
+            for sym in ctx.scoped(ctx.logs(_pod_key(load, load.attributes["pod"]), (template,))):
                 o = ctx.order(load, sym)
                 if o.order == ti.BEFORE and load_order.order == ti.BEFORE:
                     pairs_ok.append((load, sym, o))
@@ -269,7 +282,8 @@ def evaluate_config_change(ctx, change):
             contradictions.append({"key": "symptom_precedes_change",
                                    "evidence_ids": sorted([sym.evidence_id, change.evidence_id]),
                                    "orderings": [_ordering(sym, change, o)]})
-    prereqs = [_prereq("change_observed", SATISFIED, [change]), mapped, consumed, symptom]
+    observed = _prereq("change_observed", SATISFIED, [change]) if ctx.in_scope(change) else         _prereq("change_observed", UNSATISFIED, [change], reason="outside_plan_window")
+    prereqs = [observed, mapped, consumed, symptom]
     return _hypothesis(mechanism, change, prereqs, contradictions, ctx.limiting_gaps(mechanism))
 
 
@@ -283,7 +297,7 @@ def evaluate_rollout(ctx, rollout):
     # Only pods in the rollout's own cluster and namespace can belong to its new ReplicaSet.
     new_pods, new_ambiguous = ctx.pods_where(
         rollout, lambda p: p.attributes["owner_replicaset"] == attrs["new_replicaset"])
-    new_symptoms = [s for k in new_pods for s in ctx.logs(k, templates)]
+    new_symptoms = ctx.scoped([s for k in new_pods for s in ctx.logs(k, templates)])
     ordered, unknown = _ordered_chain(ctx, [rollout], new_symptoms)
     ambiguous = [s for k in new_ambiguous for s in ctx.logs(k, templates)]
     symptom = _chain_prereq("symptom_on_new_revision_after_rollout", ordered, unknown,
@@ -297,7 +311,9 @@ def evaluate_rollout(ctx, rollout):
                 contradictions.append({"key": "symptom_precedes_rollout",
                                        "evidence_ids": sorted([sym.evidence_id, rollout.evidence_id]),
                                        "orderings": [_ordering(sym, rollout, o)]})
-    prereqs = [_prereq("rollout_observed", SATISFIED, [rollout]), mapped, symptom]
+    observed = _prereq("rollout_observed", SATISFIED, [rollout]) if ctx.in_scope(rollout) else \
+        _prereq("rollout_observed", UNSATISFIED, [rollout], reason="outside_plan_window")
+    prereqs = [observed, mapped, symptom]
     return _hypothesis(mechanism, rollout, prereqs, contradictions, ctx.limiting_gaps(mechanism))
 
 

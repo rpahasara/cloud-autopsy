@@ -13,7 +13,7 @@ mechanism rules use the same ``compare`` directly; they never use display order.
 """
 
 from ..contracts import timeinterval as ti
-from . import TIMELINE_RULES_VERSION, TIMELINE_RULES_VERSION_V2
+from . import OBSERVED_FIRST_TIMELINE_RULES, TIMELINE_RULES_VERSION, TIMELINE_RULES_VERSION_V2
 
 OBSERVED = "observed"
 
@@ -94,7 +94,7 @@ def ordering_stamp(evidence, rules=TIMELINE_RULES_VERSION):
     not the time of the change); otherwise its ``event`` stamp. Which stamp is used never depends on
     whether it can order; ``timeinterval.compare`` then decides, failing closed as always.
     resourceVersions are never an input."""
-    if rules == TIMELINE_RULES_VERSION_V2:
+    if rules in OBSERVED_FIRST_TIMELINE_RULES:
         for stamp in evidence.times:
             if stamp.timestamp_kind == OBSERVED:
                 return stamp
