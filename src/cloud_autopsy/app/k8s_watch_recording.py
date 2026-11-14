@@ -560,9 +560,12 @@ def _change_observations(resource, event, observed, state):
 
 # ------------------------------------------------------------------------------------- convert
 
-def convert(root, manifest, manifest_sha, rule_profile=1):
+def convert(root, manifest, manifest_sha, rule_profile=1, _incident_window_ms=None):
     """``rule_profile``: 1 (the default; timeline rules 0.1, ``event`` ordering) or 2 (CA-P2-005b,
-    timeline rules 0.2, ``observed``-first ordering). Chosen explicitly; never inferred."""
+    timeline rules 0.2, ``observed``-first ordering). Chosen explicitly; never inferred.
+
+    Recording 0.6 (M12d): when ``_window_decision`` allows it, the conversion is derived a second time with the
+    plan window set to the incident window declared before collection (``_incident_window_ms``, internal)."""
     if rule_profile not in (1, 2):
         raise K.RecordingError("recording_rules_unsupported", "rule profile must be 1 or 2")
     files, anchor_ns = _manifest(manifest)
@@ -598,6 +601,8 @@ def convert(root, manifest, manifest_sha, rule_profile=1):
     window = (min(times) // NS_PER_MS, _ceil_ms(max(times)) + 1)
     if window[1] - window[0] > LIMITS["max_window_ms"]:
         raise K.RecordingError("recording_manifest_invalid", "a recording spans at most one hour")
+    if _incident_window_ms is not None:
+        window = tuple(_incident_window_ms)
 
     recording_id = manifest["recording_id"]
     try:
@@ -686,6 +691,21 @@ def convert(root, manifest, manifest_sha, rule_profile=1):
         report["pod_logs"] = log_report
     if v6:
         report["intervals"] = _intervals(manifest, anchor_ns, batches, plan)
+        decision = _window_decision(report["intervals"], batches, domain)
+        report["intervals"].update(decision)
+        if decision["narrowed"] and _incident_window_ms is None:
+            again = convert(root, manifest, manifest_sha, rule_profile,
+                            _incident_window_ms=tuple(report["intervals"]["requested_incident_window_ms"]))
+            # The second derivation keeps the first one's measurement: V and the decision come from the
+            # full-span derivation, where every proof is visible whole.
+            plan_window = again.plan_record["window"]
+            again.report["intervals"] = dict(report["intervals"])
+            again.report["intervals"]["plan_window_ms"] = [pl.exact_ms(plan_window["start"], "start"),
+                                                           pl.exact_ms(plan_window["end"], "end")]
+            canonical.canonical_bytes(again.report)
+            return again
+        if _incident_window_ms is not None and not decision["narrowed"]:
+            raise K.RecordingError("recording_conversion_invalid", "the narrowed derivation disagrees with the decision")
     canonical.canonical_bytes(report)
     return K.Conversion(recording_id, registry_record, plan_record, tuple(clock_records), tuple(batches), report)
 
@@ -778,6 +798,56 @@ def _acquisition(plan, ctx, domain, session_id, query, resource, segments, state
     return entry, records
 
 
+RELEVANT_KINDS = ("deployment_rollout", "configmap_change", "k8s_object_deleted", "alert_firing")
+
+
+def _bracket_ms(observation, domain):
+    """The observation's ``observed`` bracket on the session clock as inclusive ms, or None."""
+    for t in observation["times"]:
+        if t["timestamp_kind"] == ev.OBSERVED_TIME and t["clock_domain_id"] == domain:
+            stamp = ti.source_timestamp(t["raw"], timestamp_kind=t["timestamp_kind"], clock_domain_id=domain,
+                                        declared_precision_ns=t["declared_precision_ns"])
+            return stamp.local_lower_ms, stamp.local_upper_ms
+    return None
+
+
+def _window_decision(intervals, batches, domain):
+    """M12d: may the plan window be the incident window declared before collection? Only when all hold:
+    1. a common verified interval exists, computed from the batches' proofs (basis anchors) alone, and it
+       contains the whole incident window;
+    2. every batch of every acquisition is clean (complete or empty): no partial tail, no unproven segment;
+    3. causal-scope safeguard: every causally relevant observation that carries an ``observed`` bracket -- a
+       change (rollout, ConfigMap change, deletion), an alert, or a symptom log line -- has that bracket
+       entirely inside the incident window. A cause, a symptom or a contradiction outside the window therefore
+       keeps the full-span window (and its gaps): it is never narrowed away, and evidence outside the window
+       can never resolve it.
+    Nothing is ever dropped: when the window is narrowed, every observation stays in its batch and in front of
+    the engine. Returns the decision and every reason it was refused."""
+    from ..engine.mechanisms import SYMPTOM_BY_CONFIG_KEY
+    requested, verified = intervals["requested_incident_window_ms"], intervals["verified_interval_ms"]
+    reasons, outside = [], []
+    if verified is None:
+        reasons.append("no_common_verified_interval")
+    elif not (verified[0] <= requested[0] and requested[1] <= verified[1]):
+        reasons.append("incident_window_not_inside_verified_interval")
+    if intervals["acquisitions_with_unclean_batches"]:
+        reasons.append("unclean_batches")
+    symptoms = set(SYMPTOM_BY_CONFIG_KEY.values())
+    for b in batches:
+        for o in b["observations"]:
+            relevant = o["observation_kind"] in RELEVANT_KINDS or (
+                o["observation_kind"] == "log_line" and o["attributes"].get("template") in symptoms)
+            bracket = _bracket_ms(o, domain) if relevant else None
+            if bracket is not None and not (requested[0] <= bracket[0] and bracket[1] < requested[1]):
+                outside.append({"source_ref": o["source_ref"], "observation_kind": o["observation_kind"],
+                                "bracket_ms": list(bracket), "query_id": b["query_id"]})
+    if outside:
+        reasons.append("relevant_evidence_outside_incident_window")
+    outside.sort(key=lambda d: (d["bracket_ms"], d["source_ref"]))
+    return {"narrowed": not reasons, "narrowing_refused": reasons,
+            "relevant_outside_count": len(outside), "relevant_outside": outside[:50]}
+
+
 def _intervals(manifest, anchor_ns, batches, plan):
     """Recording 0.6 (M12d, measurement only): the predefined incident window beside the jointly verified
     interval, computed solely from complete and empty batches (their bases). The plan window is not changed:
@@ -788,7 +858,9 @@ def _intervals(manifest, anchor_ns, batches, plan):
     per_query = {}
     for b in batches:
         if b["outcome"] in (acq.COMPLETE, acq.EMPTY):
-            lo, hi = pl.exact_ms(b["coverage"]["start"], "start"), pl.exact_ms(b["coverage"]["end"], "end")
+            basis = b["coverage_basis"]   # the proof: its anchors, never the claimed (possibly narrower) coverage
+            lo = pl.exact_ms(basis["start_anchor"]["at"], "start")
+            hi = pl.exact_ms(basis["end_anchor"]["at"], "end")
             per_query.setdefault(b["query_id"], []).append((lo, hi))
     unclean = sorted({b["query_id"] for b in batches if b["outcome"] not in (acq.COMPLETE, acq.EMPTY)})
     verified = None

@@ -2,7 +2,8 @@
 
 **Status (2026-11-14):**
 - **M12a, M12b and M12c are implemented**, with the product owner's safeguards, as recording **0.6** (`app/completeness.py`, `_acquisition_v6`). Recordings 0.4 and 0.5 convert exactly as before. [§Implementation](#implemented) has the details.
-- **M12d is implemented as measurement only.** The predefined incident window is recorded, and the verified interval is computed from bases and reported. The plan window is **not** narrowed. Doing so needs the contract change in [§M12d contract change](#m12d-contract).
+- **M12d is implemented with a causal-scope safeguard** ([§M12d](#m12d-implemented)). The contract change it needed, sub-interval coverage under batch 0.3, was approved in principle and is implemented. The engine-side guard is proposed separately and is **not** implemented.
+- **The Events acquisition** cannot prove coverage after it goes quiet. This is Kubernetes protocol behaviour, not a collector defect ([§Events](#events)).
 - The sections below the implementation notes are the original analysis and proposal.
 
 **Reproduced by:** `tests/collector/test_rollout_completeness.py`. These are characterization tests that pin today's fail-closed behaviour. On a real cluster, the first `collector-logs-kind` run showed causes 1 and 2:
@@ -61,7 +62,80 @@ The plan window is the recording's span, as before. Nothing is excluded.
 - `tests/engine/test_window_safety.py` (2): a rollout known only from the list (no bracket), or witnessed after the symptom, never supports an in-window symptom.
 - **Unchanged:** the six pinned digests, the existing false-cause traps and every earlier suite.
 
-## <a id="m12d-contract"></a>M12d: the smallest contract change required
+## <a id="m12d-implemented"></a>M12d as implemented (2026-11-14)
+
+**Contract (batch 0.3, in CA-P2-002e).** For either basis kind, a complete or empty batch may claim any non-empty coverage *inside* the interval its anchors prove, never beyond it. The anchors, resourceVersions and session still state the whole proof. Batch 0.2 is unchanged.
+
+**The verified interval V** is computed from the basis anchors of complete and empty batches alone, never from claimed coverage. It must be contiguous for every acquisition.
+
+**The converter narrows the plan window to the incident window W** (declared before collection) only when all three hold (`_window_decision`):
+1. **Proof.** V exists and contains all of W.
+2. **Cleanness.** Every batch of every acquisition is complete or empty: no partial tail, no unproven segment.
+3. **Causal scope.** Every causally relevant observation that carries an `observed` bracket has that bracket entirely inside W:
+   - a rollout, a ConfigMap change, a deletion or an alert;
+   - a symptom log line.
+
+**When narrowed:**
+- the batches claim exactly W and keep their whole proofs;
+- every observation stays in front of the engine;
+- replay re-derives the narrowed bundle byte for byte.
+
+**Otherwise,** the full-span window and its gaps remain, so the investigation abstains.
+
+**The report keeps:**
+- the requested window and V;
+- whether the window was narrowed;
+- every reason narrowing was refused;
+- the relevant observations outside W, by source reference, kind and bracket, with no payload.
+
+**Why the safeguard is in the converter.** The engine reads the plan window only for the result header and the coverage holes, and evaluates every sealed observation. `tests/engine/test_window_safety.py` shows that a cause and symptom entirely before the plan window still resolve when the engine runs on its own. The converter therefore never narrows while relevant evidence lies outside W:
+- a cause and symptoms outside W never resolve W;
+- neither does a cause outside W with a symptom inside;
+- a contradiction just outside W keeps the full window.
+
+**Proposed engine guard (defense in depth; needs separate approval; not implemented).** When the plan pins rule profile 2, a prerequisite may be satisfied only by observations whose `observed` bracket lies entirely inside the plan window. Contradictions would still use every observation. Without that guard, the window rule depends on the converter, as bases already do: a bundle that was not derived from a recording is not protected by replay.
+
+**Tests** (`tests/collector/test_window_scope.py`, 9; `tests/engine/test_window_safety.py`, 4), covering the product owner's cases:
+1. inside → narrowed;
+2. a rollout and its symptoms outside → refused;
+3. a rollout outside, the symptom inside → refused;
+4. a contradicting symptom just outside → refused and listed;
+5. missing coverage inside W → refused;
+6. no common verified interval → refused;
+7. an unproven tail → refused;
+8. the six digests unchanged (engine suite).
+
+An end-to-end session also narrows for real: clean batches claiming W, nothing dropped, byte-identical replay, zero gaps.
+
+## <a id="events"></a>Why the Events acquisition stops proving coverage
+
+**Observed on kind** (run 43567724688). The Events acquisition had a single segment that ended at session end, and its proof stopped about 25 s in. After that, every probe stayed unproven. Pods, Deployments and ReplicaSets were proven to the end.
+
+**Cause: Kubernetes protocol behaviour, not a collector defect.**
+- A probe is proven only when the watch later delivers an event or BOOKMARK at or above the probe's resourceVersion.
+- kube-apiserver serves Events **without a watch cache** by default (its default watch-cache size for `events` is 0). BOOKMARKs are produced by the watch cache, so an Events watch receives none. Kubernetes does not guarantee periodic BOOKMARKs in any case.
+- In `ca-incident`, Events stop soon after the rollout, while the global revision keeps advancing (leases, node status, other namespaces). From then on nothing can prove a later probe, however healthy the open watch is.
+- In `ca-demo`, the 004f job's crash-looping pod emits Events continuously, which is why the problem never showed there.
+- The collector claims nothing it cannot prove, which is correct.
+
+**Reproduction.**
+- `tests/collector/test_events_proof.py` (fake API) shows a quiet Events watch without BOOKMARKs while the rest of the cluster advances the revision:
+  - one segment, ended by the session;
+  - idle-timeout resumes only;
+  - 0 BOOKMARKs;
+  - the last delivery is an event;
+  - every later probe unproven;
+  - Pods proven to the end.
+- The kind check prints the same facts (`app/stream_facts.py`) for every resource, so the real run shows them directly.
+
+**Smallest safe alternatives (each needs approval; none implemented):**
+1. **Recommended: an explicit plan without Events for incident runs.** No current mechanism reads `k8s_event`. A recorded collector choice (for example `--no-events`, stated in the manifest, the plan's expected acquisitions and the report, with this reason) would stop claiming or gapping Events. This is never a silent removal, and the dashboard would say that Events were not collected.
+2. **A per-acquisition kind declaration.** The plan states which kinds each query produces, and the engine counts a gap as limiting only for mechanisms that need those kinds. It is more general, but it is a plan-contract and engine change.
+3. **Not recommended: an end-of-session reconciliation list.** It could detect missed changes and missed deletions, but not an object both created and deleted inside the interval, so it is weaker than a proof.
+
+Generating artificial Events to keep the watch busy is rejected: it would make the test pass without making the collector's evidence any stronger.
+
+## <a id="m12d-contract"></a>M12d: the contract change (original proposal, now implemented)
 
 **Why the plan window cannot be narrowed today.** Under acquisition batch 0.3, a complete or empty batch's coverage must **equal** its basis anchors (`acquisition._check_basis`), and coverage must lie inside the plan window. So the plan window must contain every acquisition's whole proven interval. It cannot be a requested incident window that sits strictly inside the verified interval. Narrowing it would require clipping coverage away from the anchors, which the contract refuses, and rightly so under the current wording.
 

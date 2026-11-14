@@ -28,5 +28,23 @@ class OutsideTheInterval(P.Base4):
         self.assertNotEqual(self.hypothesis(inv)["status"], "supported")
 
 
+class TheEngineDoesNotScopeToThePlanWindow(P.Base4):
+    """Why the M12d safeguard lives in the converter (``_window_decision``). The engine reads the plan window only
+    for the result header and the frozen input's coverage holes; it evaluates every sealed observation. So a bundle
+    whose window covers *other* times than its cause and symptoms still resolves. The converter therefore never
+    narrows a window while a relevant change or symptom has a bracket outside it
+    (tests/collector/test_window_scope.py). An engine-side guard is proposed separately (needs approval)."""
+
+    def test_positive_control_inside_the_window_resolves(self):
+        self.assertEqual(self.outcome(P.spec4())["status"], "resolved")
+
+    def test_a_cause_and_symptom_before_the_window_still_resolve_in_the_engine_alone(self):
+        roll = T.rollout(observed=("2026-11-12T09:50:00.000000000Z", 1_000_000_000))
+        log = P.k8s_log(observed=("2026-11-12T09:55:00.000000000Z", 1_000_000_000))
+        pods = T.pod(observed=("2026-11-12T09:51:00.000000000Z", 1_000_000_000))
+        outcome = self.outcome(P.spec4(roll=roll, pods=pods, logs=[log]))   # the plan window is 10:00-10:10
+        self.assertEqual(outcome["status"], "resolved")
+
+
 if __name__ == "__main__":
     unittest.main()
