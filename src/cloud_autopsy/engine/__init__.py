@@ -25,6 +25,13 @@ CATALOG_VERSION = "ca-mechanism-catalog/0.1-provisional"
 # CA-P2-005b: timeline rules 0.2 choose a record's ``observed`` stamp for causal ordering when it has
 # one (no fallback to ``event``), and its ``event`` stamp otherwise. 0.1 always uses ``event``.
 TIMELINE_RULES_VERSION_V2 = "ca-timeline-rules/0.2-provisional"
+# CA-P2-004g (causal-scope guard): timeline rules 0.3 order exactly as 0.2 and add one rule. A change or a symptom
+# can establish a *positive* causal prerequisite only when its ``observed`` bracket lies entirely inside the plan
+# window. Contradictions still use every observation, inside the window or not, and identity evidence (pods,
+# ReplicaSets) needs no bracket. 0.1 and 0.2 are unchanged, so every stored result replays byte-identically.
+TIMELINE_RULES_VERSION_V3 = "ca-timeline-rules/0.3-provisional"
+SCOPED_TIMELINE_RULES = (TIMELINE_RULES_VERSION_V3,)
+OBSERVED_FIRST_TIMELINE_RULES = (TIMELINE_RULES_VERSION_V2, TIMELINE_RULES_VERSION_V3)
 
 RULE_VERSIONS = {
     "clock-declaration": CLOCK_DECLARATION_VERSION,
@@ -39,18 +46,19 @@ RULE_VERSIONS = {
 RULE_PROFILES = (
     RULE_VERSIONS,
     {**RULE_VERSIONS, "timeline-rules": TIMELINE_RULES_VERSION_V2},
+    {**RULE_VERSIONS, "timeline-rules": TIMELINE_RULES_VERSION_V3},   # profile 3: 0.2 plus the window scope
 )
 
 
 def required_rule_versions(profile=1):
-    """The rule versions a plan pins for ``profile`` (1, the default, or 2)."""
-    if profile not in (1, 2):
+    """The rule versions a plan pins for ``profile`` (1, the default, 2 or 3)."""
+    if profile not in (1, 2, 3):
         raise ValueError("unknown rule profile")
     return dict(RULE_PROFILES[profile - 1])
 
 
 def rule_profile(rule_versions):
-    """1 or 2 when ``rule_versions`` is exactly one profile, else None."""
+    """1, 2 or 3 when ``rule_versions`` is exactly one profile, else None."""
     for n, profile in enumerate(RULE_PROFILES, 1):
         if dict(rule_versions) == profile:
             return n
