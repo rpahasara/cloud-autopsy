@@ -1,0 +1,28 @@
+# CA-P2-007a, scenario N5 only: the incident Role (rbac-incident.yaml) without `get pods/log`. The collector's
+# log requests are then refused with 403, so log coverage cannot be proven and the investigation must abstain.
+apiVersion: v1
+kind: Namespace
+metadata: {name: ca-collector}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: ca-collector, namespace: ca-collector}
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: ca-collector-incident, namespace: ca-incident}
+rules:
+  - apiGroups: [""]
+    resources: [pods, events]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [deployments, replicasets]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: ca-collector-incident, namespace: ca-incident}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: ca-collector-incident}
+subjects:
+  - {kind: ServiceAccount, name: ca-collector, namespace: ca-collector}
