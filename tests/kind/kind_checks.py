@@ -289,6 +289,15 @@ def logs(args):
         if a.get("classified") or a.get("unconverted") or a.get("withheld"):
             print(f"  {a['query_id']}: classified {a.get('classified')} unconverted {a['unconverted']} "
                   f"withheld {a['withheld']} outcomes {a['outcomes']}")
+    from cloud_autopsy.app import stream_facts as SF
+    for resource, segments in sorted(SF.facts(out / "recording").items()):
+        for seg in segments:
+            last = seg["last_proven_probe"]
+            print(f"stream {resource} seg {seg['segment']}: list {seg['list']} rv {seg['list_rv']}; opens "
+                  f"{seg['watch_opens']} disconnects {seg['disconnects']}; events {seg['events']} bookmarks "
+                  f"{seg['bookmarks']}; last delivered {seg['last_delivered']} at +{seg['last_delivered_at_ms']} ms; "
+                  f"probes {seg['probes_total']} unproven {seg['probes_unproven']}; last proven "
+                  f"{last and (last['rv'], last['sent_at_ms'])}; final {seg['final_probe']}; end {seg['end']}")
     intervals = conversion.report.get("intervals")
     if intervals is not None:
         print(f"intervals: requested {intervals['requested_incident_window_ms']} verified "
