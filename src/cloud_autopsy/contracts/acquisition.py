@@ -36,7 +36,10 @@ container and boot, each from ``seq=1`` to ``last_seq`` with a verified ending (
 anchors, so the claim depends on Pod watch proof, but it never states Pod or Deployment coverage: a
 batch with this basis may hold only ``log_line`` observations of the listed instances, and under 0.3 a
 ``watch_continuity`` batch may hold no ``log_line``. Coherence is checked here; truth is checked by
-re-deriving the basis from the recording on replay. Batches 0.1 and 0.2 are unchanged.
+re-deriving the basis from the recording on replay. Under 0.3 (M12d) the coverage of a complete or empty
+batch, for either basis kind, may be any non-empty interval *inside* the interval its anchors prove, never
+beyond it; the anchors still state the whole proof. Batches 0.1 and 0.2 are unchanged (coverage is exactly
+the anchors).
 """
 
 import re
@@ -204,7 +207,7 @@ def decode_batch(record, plan, registry):
             if v3 and isinstance(basis, dict) and basis.get("kind") == LOG_SEQUENCE_CONTINUITY:
                 _check_log_basis(basis, coverage, cursor, observations)
             else:
-                _check_basis(basis, coverage, cursor)
+                _check_basis(basis, coverage, cursor, within=v3)
                 if v3 and any(isinstance(o, dict) and o.get("observation_kind") == "log_line" for o in observations):
                     raise _invalid("watch continuity never covers container logs")
         elif basis is not None:
@@ -225,9 +228,13 @@ def plan_batch_version(plan):
     return dict(plan.contract_versions)["acquisition-batch"]
 
 
-def _check_basis(basis, coverage, cursor):
+def _check_basis(basis, coverage, cursor, within=False):
     """Batch 0.2: a complete or empty batch states exactly how its coverage was established, and the
-    statement must be coherent with the batch. Truth is checked by re-derivation from the recording."""
+    statement must be coherent with the batch. Truth is checked by re-derivation from the recording.
+
+    ``within`` (batch 0.3, M12d): the batch's coverage may be any non-empty interval inside the proven
+    interval between the anchors, never beyond it; the anchors still state the whole proof. Under 0.2 the
+    coverage is exactly the anchors."""
     if not isinstance(basis, dict) or set(basis) != _BASIS_FIELDS:
         raise _invalid("a complete or empty batch needs exactly a watch_continuity coverage_basis")
     if basis["kind"] != WATCH_CONTINUITY or basis["rv_comparison"] != rv.RV_COMPARISON:
@@ -244,7 +251,13 @@ def _check_basis(basis, coverage, cursor):
     if not isinstance(end, dict) or set(end) != {"kind", "at", "resource_version", "proven_by_resource_version"} \
             or end["kind"] != "probe_sent":
         raise _invalid("coverage_basis.end_anchor must be a probe_sent anchor")
-    if start["at"] != coverage["start"] or end["at"] != coverage["end"]:
+    if within:
+        anchors = (exact_ms(start["at"], "coverage_basis.start_anchor.at"),
+                   exact_ms(end["at"], "coverage_basis.end_anchor.at"))
+        claimed = (exact_ms(coverage["start"], "coverage.start"), exact_ms(coverage["end"], "coverage.end"))
+        if not anchors[0] <= claimed[0] < claimed[1] <= anchors[1]:
+            raise _invalid("coverage must lie inside the interval proven between the basis anchors")
+    elif start["at"] != coverage["start"] or end["at"] != coverage["end"]:
         raise _invalid("coverage must be exactly the interval between the basis anchors")
     try:
         if rv.compare(start["resource_version"], end["resource_version"]) > 0:
@@ -265,7 +278,7 @@ def _check_log_basis(basis, coverage, cursor, observations):
     if basis["resource_type"] != LOG_RESOURCE_TYPE:
         raise _invalid("a log_sequence_continuity basis covers v1/pods/log only")
     _check_basis({**{k: v for k, v in basis.items() if k != "instances"}, "kind": WATCH_CONTINUITY},
-                 coverage, cursor)   # the same anchor, resourceVersion and cursor coherence as the Pod watch
+                 coverage, cursor, within=True)   # the same anchor, resourceVersion and cursor coherence as the Pod watch
     if basis["clock_domain_id"] != f"ca-collector-{basis['session_id']}":
         raise _invalid("the basis clock is its collection session's own clock")
     instances = basis["instances"]
