@@ -11,8 +11,8 @@ line ``i`` appears in its own node log file (read through a read-only ``hostPath
 ``synced=i``. If line ``i`` does not appear within ``HANDSHAKE_TIMEOUT_S``, the next line carries no
 ``synced`` (the product then has no handshake bound from that point; it never assumes one).
 
-Demand: ``DEMAND`` is ``steady:<n>`` or ``ramp:<base>:<peak>:<after_s>`` (``base`` until ``after_s`` seconds
-after start, then ``peak``). While demand exceeds the pool, the workload logs ``POOL_EXHAUSTED``.
+Demand: ``DEMAND`` is ``steady:<n>`` or ``ramp:<base>:<peak>:<after_s>[:<until_s>]`` (``peak`` from ``after_s``
+until ``until_s`` seconds after start, otherwise ``base``). While demand exceeds the pool, the workload logs ``POOL_EXHAUSTED``.
 ``PLANTED=1`` adds enveloped lines with planted sensitive text under a template the catalog does not know:
 they count for continuity but must never be stored.
 
@@ -84,7 +84,8 @@ def demand(elapsed):
     if kind == "steady":
         return int(values[0])
     base, peak, after = int(values[0]), int(values[1]), float(values[2])
-    return peak if elapsed >= after else base
+    until = float(values[3]) if len(values) > 3 else float("inf")
+    return peak if after <= elapsed < until else base
 
 
 def _stop(signum, frame):  # noqa: ARG001

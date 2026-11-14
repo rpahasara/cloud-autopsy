@@ -106,13 +106,32 @@ def pod(item, counts):
         containers.append(entry)
     out_spec = {"containers": containers, "volumes": volumes}
     _put(out_spec, "nodeName", _text(spec.get("nodeName"), 253))
-    statuses = []
-    for s in _list(status.get("containerStatuses")):
-        entry = {}
-        _put(entry, "restartCount", _int(_dict(s).get("restartCount")))
-        statuses.append(entry)
-    out_status = {"containerStatuses": statuses} if "containerStatuses" in status else {}
+    out_status = {"containerStatuses": _statuses(status.get("containerStatuses"))} if "containerStatuses" in status else {}
+    # CA-P2-004g (M12b): enough to tell whether anything ran -- the phase, whether each (init) container has
+    # started, and the init containers' names. Never their states' messages, reasons or exit codes.
+    init = [_text(_dict(c).get("name"), 63) for c in _list(spec.get("initContainers"))]
+    if init:
+        out_spec["initContainers"] = [{"name": n} for n in init if n is not None]
+    if "initContainerStatuses" in status:
+        out_status["initContainerStatuses"] = _statuses(status.get("initContainerStatuses"))
+    _put(out_status, "phase", _text(status.get("phase"), 32))
     return {"metadata": _metadata(item), "spec": out_spec, "status": out_status}
+
+
+def _started(container_status):
+    """True when the container is running or has terminated now or before (its state only, never details)."""
+    state, last = _dict(container_status.get("state")), _dict(container_status.get("lastState"))
+    return "running" in state or "terminated" in state or "terminated" in last
+
+
+def _statuses(value):
+    out = []
+    for s in _list(value):
+        s = _dict(s)
+        entry = {"started": _started(s)}
+        _put(entry, "restartCount", _int(s.get("restartCount")))
+        out.append(entry)
+    return out
 
 
 def _template(template, counts, limits=()):
@@ -146,6 +165,18 @@ def replicaset(item, counts, limits=()):
             "spec": {"template": _template(spec.get("template"), counts, limits)}}
 
 
+def _spec_digest(spec):
+    """SHA-256 of the Deployment spec without its pod template (CA-P2-004g, M12a): replicas, strategy, selector,
+    paused and the other non-template fields, compared only for equality; no value is kept."""
+    import hashlib
+    from ..contracts import canonical
+    rest = {k: v for k, v in _dict(spec).items() if k != "template"}
+    try:
+        return hashlib.sha256(canonical.canonical_bytes(rest)).hexdigest()
+    except Exception:  # noqa: BLE001 -- a spec the canonical profile refuses has no digest (never compared)
+        return None
+
+
 def deployment(item, counts):
     conditions = []
     for condition in _list(_dict(item.get("status")).get("conditions")):
@@ -155,7 +186,10 @@ def deployment(item, counts):
             _put(out, "reason", _text(condition.get("reason"), 128))
             _put(out, "lastUpdateTime", _text(condition.get("lastUpdateTime"), 64))
             conditions.append(out)
-    return {"metadata": _metadata(item, revision=True), "status": {"conditions": conditions}}
+    out = {"metadata": _metadata(item, revision=True), "status": {"conditions": conditions}}
+    _put(out["metadata"], "generation", _int(_dict(item.get("metadata")).get("generation")))
+    _put(out, "specDigest", _spec_digest(item.get("spec")))
+    return out
 
 
 def event(item, counts):

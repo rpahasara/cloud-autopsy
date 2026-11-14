@@ -227,8 +227,8 @@ def logs(args):
     if found:
         fail(f"planted or secret values written: {found}")
     manifest = json.loads((out / "recording" / "recording.json").read_bytes())
-    if manifest["contract_version"] != "ca-k8s-recording/0.5-provisional":
-        fail("not a 0.5 (pod-log) recording")
+    if manifest["contract_version"] not in ("ca-k8s-recording/0.5-provisional", "ca-k8s-recording/0.6-provisional"):
+        fail("not a pod-log recording (0.5 or 0.6)")
     conversion = W.verify_bundle(out / "recording", out / "bundle")  # replay: byte-identical
     report = conversion.report["pod_logs"]
     instances = report["instances"]
@@ -285,6 +285,15 @@ def logs(args):
           f"{len(ordered)} strictly after the rollout bracket {r}")
     if args.expect_ordered and not ordered:
         fail("no symptom bracket lies strictly after the rollout bracket")
+    for a in conversion.report["acquisitions"]:
+        if a.get("classified") or a.get("unconverted") or a.get("withheld"):
+            print(f"  {a['query_id']}: classified {a.get('classified')} unconverted {a['unconverted']} "
+                  f"withheld {a['withheld']} outcomes {a['outcomes']}")
+    intervals = conversion.report.get("intervals")
+    if intervals is not None:
+        print(f"intervals: requested {intervals['requested_incident_window_ms']} verified "
+              f"{intervals['verified_interval_ms']} inside={intervals['requested_inside_verified']} "
+              f"plan {intervals['plan_window_ms']} unclean {intervals['acquisitions_with_unclean_batches']}")
     loaded = B.load(out / "bundle")
     inv = C.investigate_offline(loaded)
     outcome = inv.result["outcome"]

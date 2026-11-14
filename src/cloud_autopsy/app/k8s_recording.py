@@ -100,6 +100,7 @@ CLIENT_BRACKET = "client_bracket"
 RECORDING_VERSION_V3 = "ca-k8s-recording/0.3-provisional"   # collector provenance (CA-P2-004e)
 RECORDING_VERSION_V4 = "ca-k8s-recording/0.4-provisional"   # collector list + watch (CA-P2-004f)
 RECORDING_VERSION_V5 = "ca-k8s-recording/0.5-provisional"   # 0.4 plus pod logs (CA-P2-004g)
+RECORDING_VERSION_V6 = "ca-k8s-recording/0.6-provisional"   # 0.5 plus M12a-c completeness, incident window
 RESOURCES = {  # resource -> (accepted apiVersions, list kind, item kind)
     "pods": (("v1",), "PodList", "Pod"),
     "replicasets": (("apps/v1",), "ReplicaSetList", "ReplicaSet"),
@@ -840,11 +841,12 @@ def convert(directory, kind_registry_version=ev.KIND_REGISTRY_VERSION, rule_prof
     root = Path(os.path.abspath(directory))
     manifest, manifest_sha = _read_manifest(root)
     version = manifest.get("contract_version") if isinstance(manifest, dict) else None
-    watch = version in (RECORDING_VERSION_V4, RECORDING_VERSION_V5)
+    watch = version in (RECORDING_VERSION_V4, RECORDING_VERSION_V5, RECORDING_VERSION_V6)
     if (kind_registry_version == ev.KIND_REGISTRY_VERSION_V3) != (version == RECORDING_VERSION_V4):
         raise RecordingError("recording_kinds_unsupported", "observation kinds 0.3 is used with, and only with, a "
                                                             "ca-k8s-recording/0.4-provisional (watch) recording")
-    if (kind_registry_version == ev.KIND_REGISTRY_VERSION_V4) != (version == RECORDING_VERSION_V5):
+    if (kind_registry_version == ev.KIND_REGISTRY_VERSION_V4) != (version in (RECORDING_VERSION_V5,
+                                                                               RECORDING_VERSION_V6)):
         raise RecordingError("recording_kinds_unsupported", "observation kinds 0.4 is used with, and only with, a "
                                                             "ca-k8s-recording/0.5-provisional (pod logs) recording")
     if watch:  # CA-P2-004f: list + watch recordings have their own converter

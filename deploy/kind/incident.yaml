@@ -37,7 +37,7 @@ spec:
           command: [python, -I, -u, /opt/ca/incident_workload.py]
           env:
             - {name: DB_POOL_MAX, value: "16"}
-            - {name: DEMAND, value: "ramp:2:8:30"}
+            - {name: DEMAND, value: "ramp:2:8:30:75"}
             - {name: PLANTED, value: "1"}
             - {name: API_KEY, value: PLANTED-ENV-VALUE-7c1}
             - name: DB_PASSWORD

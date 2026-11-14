@@ -55,6 +55,8 @@ def main(argv=None):
                         help="also follow the namespace's pod logs (CA-P2-004g; recording 0.5, observation kinds 0.4)")
     parser.add_argument("--log-rotation", type=float, default=5.0, help="seconds between overlapping log streams")
     parser.add_argument("--log-drain-wait", type=float, default=10.0)
+    parser.add_argument("--incident-window", default=None, metavar="START:END",
+                        help="seconds after the session starts; fixed before collection (recording 0.6, M12)")
     parser.add_argument("--declare-limit", action="append", default=[], metavar="CONTAINER:ENV:CATALOG_KEY",
                         help="a declared numeric limit (only with --pod-logs), e.g. checkout-api:DB_POOL_MAX:pool.maxConnections")
     args = parser.parse_args(argv)
@@ -99,10 +101,16 @@ def _watch(args, config):
         from cloud_autopsy.collector import podlogs
         pod_logs = podlogs.LogConfig(rotation_s=args.log_rotation, drain_wait_s=args.log_drain_wait)
     declared = [tuple(d.split(":")) for d in args.declare_limit]
+    window = None
+    if args.incident_window is not None:
+        try:
+            window = tuple(int(v) for v in args.incident_window.split(":"))
+        except ValueError:
+            window = ("invalid",)
     try:
         _, conversion, report = co.run_watch(config, wconfig, args.out, stop=stop, on_signal=lambda: bool(signalled),
                                              rule_profile=2 if args.ordering_rules == "0.2" else 1,
-                                             pod_logs=pod_logs, declared_limits=declared)
+                                             pod_logs=pod_logs, declared_limits=declared, incident_window=window)
     except (cl.CollectorError, K.RecordingError) as exc:  # codes only; never a response body
         print(json.dumps({"status": "refused", "code": exc.code}) if args.json else f"REFUSED: {exc.code}")
         return 1
