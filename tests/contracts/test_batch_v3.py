@@ -161,6 +161,39 @@ class LogBasis(unittest.TestCase):
         self.refused(batch(outcome="partial", reason="continuity_unproven"))     # a basis on a partial batch
         self.refused(batch(basis=None))                                          # complete without a basis
 
+    def test_coverage_may_be_a_sub_interval_of_the_proven_anchors_but_never_beyond(self):
+        """M12d: under 0.3 the claimed coverage lies inside the proof; the anchors still state the whole proof."""
+        def with_coverage(start, end, basis=None, observations=None, query="k8s.pods.log"):
+            record = batch(basis=basis or log_basis(), observations=observations, query=query)
+            record["coverage"] = {"start": start, "end": end}
+            return record
+        inside = with_coverage("2026-11-13T10:00:05.000Z", "2026-11-13T10:00:25.000Z")
+        decoded = acq.decode_batch(inside, P4, REGISTRY)
+        self.assertEqual(decoded.coverage_ms[1] - decoded.coverage_ms[0], 20_000)
+        self.assertEqual(decoded.coverage_basis["end_anchor"]["at"], "2026-11-13T10:00:31.000Z")  # proof intact
+        for start, end in (("2026-11-13T10:00:00.999Z", "2026-11-13T10:00:25.000Z"),   # before the start anchor
+                           ("2026-11-13T10:00:05.000Z", "2026-11-13T10:00:31.001Z"),   # beyond the end anchor
+                           ("2026-11-13T10:00:00.000Z", "2026-11-13T10:00:40.000Z"),   # both
+                           ("2026-11-13T10:00:05.000Z", "2026-11-13T10:00:05.000Z")):  # empty
+            with self.subTest(start=start, end=end):
+                self.refused(with_coverage(start, end))
+        watch = {**{k: v for k, v in log_basis().items() if k != "instances"}, "kind": acq.WATCH_CONTINUITY,
+                 "resource_type": "v1/pods"}
+        self.assertEqual(acq.decode_batch(with_coverage("2026-11-13T10:00:02.000Z", "2026-11-13T10:00:30.000Z",
+                                                        basis=watch, observations=[pod()], query="k8s.pods"),
+                                          P4, REGISTRY).outcome, "complete")
+        self.refused(with_coverage("2026-11-13T10:00:02.000Z", "2026-11-13T10:00:32.000Z", basis=watch,
+                                   observations=[pod()], query="k8s.pods"))
+
+    def test_batch_0_2_still_needs_coverage_exactly_equal_to_its_anchors(self):
+        from test_watch_contracts import P3 as WP3, REGISTRY as WREG, basis as wbasis, batch as wbatch
+        record = wbatch()
+        acq.decode_batch(record, WP3, WREG)
+        record["coverage"] = {"start": "2026-11-12T10:00:02.000Z", "end": "2026-11-12T10:00:30.000Z"}
+        with self.assertRaises(ContractError):
+            acq.decode_batch(record, WP3, WREG)
+        self.assertEqual(wbasis()["kind"], "watch_continuity")
+
     def test_versions_do_not_mix(self):
         self.refused(batch(version=acq.BATCH_VERSION_V2))                        # a 0.2 batch under profile 4
         self.refused(batch(), P3)                                                # a 0.3 batch under profile 3
