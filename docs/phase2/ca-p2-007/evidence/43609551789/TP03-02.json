@@ -1,0 +1,150 @@
+{
+ "citations": {
+  "cited": 91,
+  "invalid": 0
+ },
+ "config": {
+  "action_at_seconds": 25,
+  "declared_limit": "checkout-api:DB_POOL_MAX:pool.maxConnections",
+  "final_wait_seconds": 60,
+  "incident_window_seconds": [
+   20,
+   140
+  ],
+  "log_rotation_seconds": 5,
+  "no_events": true,
+  "ordering_rules": "0.3",
+  "pod_logs": true,
+  "probe_interval_seconds": 2,
+  "session_seconds": 150
+ },
+ "coverage": {
+  "acquisitions": {
+   "k8s.deployments": {
+    "classified": {
+     "accounted_by_rollout": 1,
+     "listed_state": 1,
+     "status_only": 9
+    },
+    "outcomes": [
+     "complete"
+    ],
+    "unconverted": {},
+    "withheld": {}
+   },
+   "k8s.pods": {
+    "classified": {
+     "superseded": 4
+    },
+    "outcomes": [
+     "complete"
+    ],
+    "unconverted": {},
+    "withheld": {}
+   },
+   "k8s.pods.log": {
+    "classified": null,
+    "outcomes": [
+     "complete"
+    ],
+    "unconverted": {},
+    "withheld": {}
+   },
+   "k8s.replicasets": {
+    "classified": {},
+    "outcomes": [
+     "complete"
+    ],
+    "unconverted": {},
+    "withheld": {}
+   }
+  },
+  "gaps": [],
+  "log_basis_emitted": true,
+  "log_coverage_proven": true,
+  "log_gaps": [],
+  "narrowed": true,
+  "narrowing_refused": [],
+  "not_collected": [
+   {
+    "query_id": "k8s.events",
+    "reason": "no_bookmarks_cannot_prove_quiet_periods; product-owner decision, CA-P2 synthetic rollout milestone only",
+    "statement": "Kubernetes Events: Not collected"
+   }
+  ],
+  "recording_version": "ca-k8s-recording/0.7-provisional",
+  "relevant_outside_count": 0,
+  "requested_window_ms": [
+   1794673947316,
+   1794674067316
+  ],
+  "verified_interval_ms": [
+   1794673927329,
+   1794674077320
+  ]
+ },
+ "database": {
+  "matches_offline": true,
+  "outcome": "resolved",
+  "status": "ok",
+  "verified": true
+ },
+ "harness": "ok",
+ "harness_failure": null,
+ "leaks": [],
+ "offline_deterministic": true,
+ "offline_result_sha256": "fdcc95be2901fe5fc8368cccfacfc4411c868b63e1f2fde63b7f5c1f8b52870c",
+ "outcome": {
+  "cited": 91,
+  "mechanism": "rollout_limit_reduction",
+  "reasons": [],
+  "status": "resolved"
+ },
+ "record_version": "ca-eval-run/0.1-provisional",
+ "repetition": 2,
+ "replay_bundle_rederived": true,
+ "resolved_change": {
+  "entity": {
+   "kind": "Deployment",
+   "name": "checkout-api",
+   "namespace": "ca-incident"
+  },
+  "mechanism": "rollout_limit_reduction"
+ },
+ "scenario": "TP03",
+ "started": "2026-11-14T16:31:33Z",
+ "steps": {
+  "action": "ok",
+  "cluster": "ok",
+  "collector": "ok",
+  "database": "ok",
+  "identity": "ok",
+  "rollout": "ok",
+  "workload": "ok"
+ },
+ "timing": {
+  "min_symptom_lower_minus_rollout_upper_ms": 25079,
+  "rollout_bracket_width_ms": 892,
+  "rollout_lower_minus_window_start_ms": 4085,
+  "rollouts": [
+   {
+    "bracket_ms": [
+     1794673951401,
+     1794673952293
+    ],
+    "field_changes": [
+     [
+      "pool.maxConnections",
+      "16",
+      "4"
+     ]
+    ],
+    "name": "checkout-api",
+    "namespace": "ca-incident"
+   }
+  ],
+  "symptoms": 90,
+  "symptoms_after_rollout": 90,
+  "symptoms_bracketed": 90
+ }
+}
