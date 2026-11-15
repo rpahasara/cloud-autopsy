@@ -1,0 +1,13 @@
+{
+ "attempts_logged": null,
+ "baseline_commit": "45bcebd2271a34e81488f8583a3121c5c6b50124",
+ "baseline_tag": "ca/eval-007a-run1-baseline-45bcebd",
+ "extractor_sha256": "a49956fc848c0c138c5ca661fcaa82e0852dd458ad69a7468f033d8705e55e57",
+ "note": "Extracted unchanged from the job log; the raw log is kept in a restricted backup outside the repository.",
+ "raw_log_sha256": "058f66db5c71dae4d079a2f523d913198a9fabb4bab333d2fa6c67fb4c65f0b6",
+ "records": 41,
+ "run_id": 43585433667,
+ "scenario_digest": "sha256:970f12fc9109da0c2ddef1ef17bd557cc27e01646a399e3b12e67001875d48e9",
+ "scenario_file": "tools/eval/scenarios.json",
+ "workflow": "incident-eval"
+}

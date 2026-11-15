@@ -1,0 +1,6 @@
+- commit: `3499bbb4277a0839a92a83fb7c3ee88958d4826b` (ref `eval/ca-p2-007b-v02-run-1`)
+- scenario file: `tools/eval/scenarios-0.2.json` `sha256:fecb7c20e1d9e74b6f257ce6f6131ab5cf41ae86b7eaec7ca40fbac5547625a8`
+- kind v0.33.0, kubectl v1.37.0, node image: `image: kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5`
+- workload image: `image: docker.io/library/python:3.13.9-slim-trixie@sha256:326df678c20c78d465db501563f3492d17c42a4afe33a1f2bf5406a1d56b0e86`
+- python 3.13.18; runner Linux 7.0.0-1017-azure
+- engine, catalog and rule versions: `{'clock-declaration': 'ca-clock-declaration/0.1-provisional', 'investigation-engine': 'ca-engine/0.1-provisional', 'investigation-result': 'ca-investigation-result/0.2-provisional', 'mechanism-catalog': 'ca-mechanism-catalog/0.1-provisional', 'timeline-rules': 'ca-timeline-rules/0.3-provisional'}`

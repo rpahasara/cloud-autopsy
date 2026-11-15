@@ -1,0 +1,146 @@
+{
+ "citations": {
+  "cited": 1,
+  "invalid": 0
+ },
+ "config": {
+  "action_at_seconds": 25,
+  "declared_limit": "checkout-api:DB_POOL_MAX:pool.maxConnections",
+  "final_wait_seconds": 60,
+  "incident_window_seconds": [
+   10,
+   140
+  ],
+  "log_rotation_seconds": 5,
+  "no_events": true,
+  "ordering_rules": "0.3",
+  "pod_logs": true,
+  "probe_interval_seconds": 5,
+  "session_seconds": 150
+ },
+ "coverage": {
+  "acquisitions": {
+   "k8s.deployments": {
+    "classified": {
+     "accounted_by_rollout": 1,
+     "listed_state": 1,
+     "status_only": 9
+    },
+    "outcomes": [
+     "complete"
+    ],
+    "unconverted": {},
+    "withheld": {}
+   },
+   "k8s.pods": {
+    "classified": {
+     "superseded": 4
+    },
+    "outcomes": [
+     "complete"
+    ],
+    "unconverted": {},
+    "withheld": {}
+   },
+   "k8s.pods.log": {
+    "classified": null,
+    "outcomes": [
+     "complete"
+    ],
+    "unconverted": {},
+    "withheld": {}
+   },
+   "k8s.replicasets": {
+    "classified": {},
+    "outcomes": [
+     "complete"
+    ],
+    "unconverted": {},
+    "withheld": {}
+   }
+  },
+  "gaps": [],
+  "log_basis_emitted": true,
+  "log_coverage_proven": true,
+  "log_gaps": [],
+  "narrowed": true,
+  "narrowing_refused": [],
+  "not_collected": [
+   {
+    "query_id": "k8s.events",
+    "reason": "no_bookmarks_cannot_prove_quiet_periods; product-owner decision, CA-P2 synthetic rollout milestone only",
+    "statement": "Kubernetes Events: Not collected"
+   }
+  ],
+  "recording_version": "ca-k8s-recording/0.7-provisional",
+  "relevant_outside_count": 0,
+  "requested_window_ms": [
+   1794675339606,
+   1794675469606
+  ],
+  "verified_interval_ms": [
+   1794675329618,
+   1794675479609
+  ]
+ },
+ "database": {
+  "matches_offline": true,
+  "outcome": "abstained",
+  "status": "ok",
+  "verified": true
+ },
+ "harness": "ok",
+ "harness_failure": null,
+ "leaks": [],
+ "offline_deterministic": true,
+ "offline_result_sha256": "9372c03c0784ce182a24163eae31b2fe5951c90657dcdc5b859c03e41fe7ee14",
+ "outcome": {
+  "cited": 0,
+  "mechanism": null,
+  "reasons": [
+   "no_supported_hypothesis",
+   "no_symptom_observed"
+  ],
+  "status": "abstained"
+ },
+ "record_version": "ca-eval-run/0.1-provisional",
+ "repetition": 3,
+ "replay_bundle_rederived": true,
+ "resolved_change": null,
+ "scenario": "N4",
+ "started": "2026-11-14T16:54:58Z",
+ "steps": {
+  "action": "ok",
+  "cluster": "ok",
+  "collector": "ok",
+  "database": "ok",
+  "identity": "ok",
+  "rollout": "ok",
+  "workload": "ok"
+ },
+ "timing": {
+  "min_symptom_lower_minus_rollout_upper_ms": null,
+  "rollout_bracket_width_ms": 4963,
+  "rollout_lower_minus_window_start_ms": 10018,
+  "rollouts": [
+   {
+    "bracket_ms": [
+     1794675349624,
+     1794675354587
+    ],
+    "field_changes": [
+     [
+      "pool.maxConnections",
+      "16",
+      "4"
+     ]
+    ],
+    "name": "checkout-api",
+    "namespace": "ca-incident"
+   }
+  ],
+  "symptoms": 0,
+  "symptoms_after_rollout": 0,
+  "symptoms_bracketed": 0
+ }
+}

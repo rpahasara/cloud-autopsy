@@ -1,0 +1,6 @@
+- commit: `45bcebd2271a34e81488f8583a3121c5c6b50124` (ref `eval/ca-p2-007a-run-1`)
+- scenario file: `sha256:970f12fc9109da0c2ddef1ef17bd557cc27e01646a399e3b12e67001875d48e9`
+- kind v0.33.0, kubectl v1.37.0, node image: `image: kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5`
+- workload image: `image: docker.io/library/python:3.13.9-slim-trixie@sha256:326df678c20c78d465db501563f3492d17c42a4afe33a1f2bf5406a1d56b0e86`
+- python 3.13.18; runner Linux 7.0.0-1017-azure
+- engine, catalog and rule versions: `{'clock-declaration': 'ca-clock-declaration/0.1-provisional', 'investigation-engine': 'ca-engine/0.1-provisional', 'investigation-result': 'ca-investigation-result/0.2-provisional', 'mechanism-catalog': 'ca-mechanism-catalog/0.1-provisional', 'timeline-rules': 'ca-timeline-rules/0.3-provisional'}`

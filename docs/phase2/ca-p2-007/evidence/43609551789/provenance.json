@@ -1,0 +1,13 @@
+{
+ "attempts_logged": 45,
+ "baseline_commit": "3499bbb4277a0839a92a83fb7c3ee88958d4826b",
+ "baseline_tag": "ca/eval-007b-matrix-run1-baseline-3499bbb",
+ "extractor_sha256": "a49956fc848c0c138c5ca661fcaa82e0852dd458ad69a7468f033d8705e55e57",
+ "note": "Extracted unchanged from the job log; the raw log is kept in a restricted backup outside the repository.",
+ "raw_log_sha256": "5db6980f8c843d37a30446d4db07e00e5114777e978d28936e1879cbb571fb43",
+ "records": 45,
+ "run_id": 43609551789,
+ "scenario_digest": "sha256:27e43de22e6fbd2d482b79bafa96b112071237c625c42ddc45f52b811ed082f1",
+ "scenario_file": "tools/eval/timing-matrix-0.1.json",
+ "workflow": "incident-eval"
+}
