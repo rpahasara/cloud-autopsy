@@ -77,3 +77,22 @@
 7. **Follow-ups, each docs-only:**
    - the fourth-integration record in `docs/phase2/integration.md`;
    - the evaluation evidence archive.
+
+## Current-status addendum (2026-11-15, after integration)
+
+The preflight above is kept as written. It was read-only and was run before any change. The approved sequence was then carried out.
+
+**Before `main` moved:**
+1. **The evidence was archived first:** PR #49, tag `ca/eval-evidence-archive-ca-p2-007-199d5e1`.
+2. **Every head was rechecked:** all were unchanged, and `f5ec00a`'s required checks had passed.
+3. **References were preserved.** Seven annotated tags were created: `ca/pr-42-2448cdd`, `ca/pr-43-ce16124`, `ca/pr-44-9bb7ce0`, `ca/pr-45-735bc04`, `ca/pr-46-2b6fc40`, `ca/pr-47-f5ec00a` and `ca/main-before-integration-402531d`. A verified backup bundle of 129 refs, `cloud-autopsy-before-fourth-integration-20261115-211321.bundle` (SHA-256 `9b71d091cf2bdc6da2d14afdbe2f1515bfb1ac59d1235e6609845ca7afc8906c`), is kept outside the repository.
+4. **#43–#47 were retargeted to `main`.**
+
+**The move.** `main` was moved from `402531d` to `f5ec00a` with a plain, non-force fast-forward. GitHub records #42–#47 as merged.
+
+**After the move:**
+- The push run, 43731564216, passed `offline-checks` and `db-integration`.
+- The manual dispatch on `main`, 43732220091, passed all six jobs, including the three collector jobs and the harness smoke.
+- Ruleset 27133931 is unchanged.
+
+**Later.** PR #49 was integrated the same way, `f5ec00a` → `199d5e1`. See the [fourth-integration record](integration.md#fourth).

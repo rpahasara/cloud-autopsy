@@ -152,3 +152,66 @@ After the second integration, the product owner approved a repository ruleset fo
 **Final SHA of `main`:** `9351762436df5417a5b46aa03cbdd913be04c204`.
 
 **PR #14** is still not part of any integration. It stays a separate, unmerged draft on `spike/ca-scenario-001`.
+
+## <a id="fourth"></a>Fourth integration: PRs #42–#47, then the evidence archive PR #49 (2026-11-15)
+
+**Decision (2026-11-15):** the product owner approved two steps, in this order:
+1. archive the CA-P2-007 evaluation evidence;
+2. integrate the incident milestone, PRs #42–#47.
+
+As before, this is a solo product-owner decision about repository history. It is not a gate disposition, a specialist approval, independent accuracy evidence or a production-readiness claim.
+
+**Included:**
+
+| PR | Branch | Head | Content |
+|---|---|---|---|
+| #42 | `phase2/incident-milestone-plan` | `2448cdd` | The incident milestone plan (revisions 1–3.2) |
+| #43 | `phase2/ca-p2-002e-kinds-v4` | `ce16124` | Observation kinds 0.4, acquisition batch 0.3 (`log_sequence_continuity`, sub-interval coverage), contract profile 4, migration `0009` |
+| #44 | `phase2/ca-p2-005c-engine-v4` | `9bb7ce0` | Engine on profile 4; rule profile 3 (the causal-scope guard) |
+| #45 | `phase2/ca-p2-004g-pod-logs` | `735bc04` | Pod-log collection and recordings 0.5–0.7 (M12a–d; Events explicitly not collected) |
+| #46 | `phase2/ca-p2-007a-eval` | `2b6fc40` | The development-set evaluation harness |
+| #47 | `phase2/ca-p2-007b-timing` | `f5ec00a` | Scorer integrity hardening, scenario 0.2, the timing matrix |
+| #49 | `docs/ca-p2-007-evidence-archive` | `199d5e1` | The evidence archive of the three evaluations (docs only) |
+
+**Method:**
+- **The chain was already linear,** `402531d` → `2448cdd` → … → `f5ec00a`. So no integration branch was needed: `f5ec00a` had passed CI on that exact commit (run 43626982663, all six jobs).
+- **The read-only [preflight](integration-preflight-42-47.md)** found no technical blockers.
+- **#42–#47:** #43–#47 were retargeted to `main`, then `main` was moved `402531d..f5ec00a` with a plain, non-force fast-forward under ruleset 27133931.
+- **#49:** after verification, `main` was moved `f5ec00a..199d5e1` the same way.
+- **History:** there was no squash, rebase or merge commit on `main`, and every original SHA is preserved.
+
+**Preserved references:**
+- the tags `ca/pr-42-2448cdd` … `ca/pr-47-f5ec00a`, `ca/main-before-integration-402531d` and `ca/eval-evidence-archive-ca-p2-007-199d5e1`;
+- the evaluation baseline tags `ca/eval-007a-run1-baseline-45bcebd`, `ca/eval-007b-v02-run1-baseline-3499bbb` and `ca/eval-007b-matrix-run1-baseline-3499bbb`;
+- a verified bundle of 129 refs, kept outside the repository.
+
+No tag was overwritten and no branch was deleted.
+
+**Checks:**
+- **Before `f5ec00a`:**
+  - the chain is linear;
+  - CI passed on every head;
+  - migrations `0001`–`0008`, the six pinned digests, `prototype/` (equal to `c21b50d`), `examples/` and the contract vectors are byte-identical to `main`;
+  - `0009` is additive;
+  - every offline suite, the three truth pins and the documentation validators pass on the exact commit.
+- **After `f5ec00a`:**
+  - the push run 43731564216 passed `offline-checks` and `db-integration`;
+  - the manual dispatch 43732220091 passed all six jobs;
+  - GitHub records #42–#47 as merged.
+- **Before `199d5e1`:**
+  - the archive's checksums, counts and provenance were reverified;
+  - each run was re-scored with its original scorer and reproduced its report exactly;
+  - all 142 changed files are inside `docs/phase2/ca-p2-007/evidence/`.
+- **After `199d5e1`:**
+  - the push run 43736812476 passed `offline-checks` and `db-integration`;
+  - GitHub records #49 as merged;
+  - the archive tag is reachable from `main`.
+- **Ruleset 27133931** stayed active throughout, with no bypass actors, the same three rules and the same two required checks.
+
+**Final SHA of `main`:** `199d5e1203a3e0fac9141fda2640415aeda78679`.
+
+**Not part of this integration:**
+- **PR #48** (the closeout, the independent-evaluation plan and the preflight) stays a separate draft.
+- **PR #14** stays a separate, unmerged draft on `spike/ca-scenario-001`.
+
+The CA-P2-007 evaluations are developer-authored development-set evidence, not independent accuracy certification.
