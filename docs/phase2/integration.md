@@ -215,3 +215,55 @@ No tag was overwritten and no branch was deleted.
 - **PR #14** stays a separate, unmerged draft on `spike/ca-scenario-001`.
 
 The CA-P2-007 evaluations are developer-authored development-set evidence, not independent accuracy certification.
+
+## <a id="fifth"></a>Fifth integration: PR #48 (2026-11-15)
+
+**Decision (2026-11-15):** the product owner approved integrating PR #48 into protected `main` with the history-preserving fast-forward used before. As before, this is a solo product-owner decision about repository history. It is not a gate disposition, independent accuracy evidence or a production-readiness claim.
+
+**Included:**
+
+| PR | Branch | Head | Content |
+|---|---|---|---|
+| #48 | `phase2/ca-p2-007c-closeout` | `09b0979` | The CA-P2-007 closeout, the [CA-P2-007c independent-evaluation plan](ca-p2-007/ca-p2-007c-independent-plan.md), the [preflight for #42–#47](integration-preflight-42-47.md), and the [fourth-integration record](#fourth) (documentation only) |
+
+**Method:**
+- PR #48's branch already contained `main`. Merge commit `87e4cd7` had brought `origin/main` (`199d5e1`) into the branch before the documentation addenda (`09b0979`) were added, so the merge commit is part of PR #48's own ancestry. It is not a merge commit created on `main`.
+- PR #48 was marked ready for review, then `main` was moved `199d5e1..09b0979` with a normal, non-force fast-forward (`git push origin 09b097966f58e4d9dad1eb8ab7c643cb50718bc3:refs/heads/main`) under ruleset 27133931.
+- There was no squash, rebase or force push, and every original SHA is preserved.
+
+**Checks before the move:**
+- `main` was `199d5e1`, the PR #48 branch head was `09b0979`, and `199d5e1` is an ancestor of `09b0979`.
+- The diff against `main` was four documentation files, additions only. No evidence file was changed or duplicated.
+- All six jobs passed on `09b0979` (PR run 43738649330).
+
+**Preserved references:**
+
+| Tag (annotated) | Tag object | Target |
+|---|---|---|
+| `ca/pr-48-09b0979` | `e58424d8f8a5d080dfa523a576ec935beb168028` | `09b097966f58e4d9dad1eb8ab7c643cb50718bc3` |
+| `ca/main-before-integration-199d5e1` | `4ac58abc4a924af5015dc8301f593aa8d60d7371` | `199d5e1203a3e0fac9141fda2640415aeda78679` |
+
+- Before the move, neither tag name existed locally or on `origin`.
+- After the move, both remote tags point to the same objects.
+- **Backup bundle:**
+  - file: `cloud-autopsy-before-fifth-integration-20261115-224958.bundle`, kept outside the repository;
+  - 131 refs, and `git bundle verify` passes;
+  - SHA-256 `ce60f2f0a41bcaf234d65f167768cb68b05ad37cde614fb5675850d23c2a0f75`;
+  - it holds `origin/main` at `199d5e1`, PR #48's branch, and PR #14's head `890a03d`.
+
+No tag was overwritten and no branch was deleted.
+
+**Checks after the move:**
+- `main` is `09b097966f58e4d9dad1eb8ab7c643cb50718bc3`.
+- GitHub records PR #48 as merged at 2026-11-15T17:20:45Z, with `09b0979`.
+- The push run 43740581161 on `09b0979` passed `offline-checks` and `db-integration`. The kind and harness-smoke jobs are skipped on push, as on earlier integrations; they passed on the PR run.
+- Ruleset 27133931 is unchanged: active, no bypass actors, the same three rules (`deletion`, `non_fast_forward`, `required_status_checks`), the same two required checks, and last updated 2026-11-12.
+- **Evaluation baselines and evidence:**
+  - the tags `ca/eval-007a-run1-baseline-45bcebd`, `ca/eval-007b-v02-run1-baseline-3499bbb`, `ca/eval-007b-matrix-run1-baseline-3499bbb` and `ca/eval-evidence-archive-ca-p2-007-199d5e1` are unchanged and reachable from `main`;
+  - all 142 files in `docs/phase2/ca-p2-007/evidence/` are byte-identical to `199d5e1`, and all three `SHA256SUMS` files verify.
+
+**Final SHA of `main`:** `09b097966f58e4d9dad1eb8ab7c643cb50718bc3`.
+
+**PR #14: clarified references.** Earlier records describe PR #14 as a draft "on `spike/ca-scenario-001`". That is its **base** branch. Its **head** branch is `eval/heldout-authoring-kit` at `890a03d86ed540401679f3266d895b62c5f56f10`. PR #14 is still open, a draft and unmerged. It was not part of this or any earlier integration, and it was not changed.
+
+**Independent evaluation.** CA-P2-007c has not started. The CA-P2-007 evaluations remain developer-authored development-set evidence, not independent accuracy certification.
